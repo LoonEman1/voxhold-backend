@@ -1,0 +1,13 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+.env
+.env.local
+.env.*.local
+
+
+data/*
+!data/.gitkeep
