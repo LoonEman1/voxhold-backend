@@ -24,7 +24,7 @@ func (r *UserRepository) Create(
 	const query = `
 	INSERT INTO users (username, password_hash)
 	VALUES (?, ?)
-	RETURNING id, username, created_at, password_hash
+	RETURNING id, username, created_at
 	`
 
 	var user User
@@ -33,7 +33,7 @@ func (r *UserRepository) Create(
 		query,
 		username,
 		passwordHash,
-	).Scan(&user.ID, &user.Username, &user.CreatedAt, &passwordHash)
+	).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}

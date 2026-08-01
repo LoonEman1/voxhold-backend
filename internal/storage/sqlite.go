@@ -3,15 +3,29 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
 
 func Open() (*sql.DB, error) {
 
-	const databasePath = "file:data/voxhold.db?_pragma=foreign_keys(1)"
+	databasePath := os.Getenv("DATABASE_PATH")
+	if databasePath == "" {
+		databasePath = "data/voxhold.db"
+	}
 
-	db, err := sql.Open("sqlite", databasePath)
+	params := url.Values{}
+	params.Add("_pragma", "foreign_keys(1)")
+
+	databaseURL := "file:" +
+		filepath.ToSlash(databasePath) +
+		"?" +
+		params.Encode()
+
+	db, err := sql.Open("sqlite", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}

@@ -1,0 +1,57 @@
+services:
+  migrate:
+    build:
+      context: .
+      args:
+        GO_VERSION: ${GO_VERSION}
+
+    env_file:
+      - .env
+
+    entrypoint:
+      - /bin/sh
+      - -c
+
+    command:
+      - |
+        set -eu
+
+        mkdir -p "$$(dirname "$$DATABASE_PATH")"
+
+        if [ "$$RESET_DATABASE" = "true" ]; then
+          echo "resetting SQLite database"
+
+          rm -f \
+            "$$DATABASE_PATH" \
+            "$$DATABASE_PATH-wal" \
+            "$$DATABASE_PATH-shm"
+        fi
+
+        echo "applying migrations"
+
+        exec migrate \
+          -path "$$MIGRATIONS_PATH" \
+          -database "sqlite://$$DATABASE_PATH" \
+          up
+
+    volumes:
+      - voxhold_data:/app/data
+
+  app:
+    build:
+      context: .
+      args:
+        GO_VERSION: ${GO_VERSION}
+
+    env_file:
+      - .env
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+    volumes:
+      - voxhold_data:/app/data
+
+volumes:
+  voxhold_data:
