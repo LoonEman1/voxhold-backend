@@ -19,36 +19,28 @@ func main() {
 	log.Println("database is ready")
 
 	userRepository := account.NewUserRepository(db)
-	ctx := context.Background()
+	accountService := account.NewService(userRepository)
 
-	// Уникальное имя, чтобы повторный запуск не нарушал UNIQUE.
-	username := fmt.Sprintf("test_user_%d", time.Now().UnixNano())
+	input := account.RegisterInput{
+		Username:        fmt.Sprintf("test_user_%d", time.Now().UnixNano()),
+		Password:        "password123",
+		PasswordConfirm: "password123",
+	}
 
-	createdUser, err := userRepository.Create(
-		ctx,
-		username,
-		"temporary-password-hash",
+	user, err := accountService.Register(
+		context.Background(),
+		input,
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf(
-		"user created: id=%d username=%s created_at=%d",
-		createdUser.ID,
-		createdUser.Username,
-		createdUser.CreatedAt,
+		"user registered: id=%d username=%s created_at=%d",
+		user.ID,
+		user.Username,
+		user.CreatedAt,
 	)
 
-	foundUser, err := userRepository.FindByUsername(ctx, username)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf(
-		"user found: id=%d username=%s created_at=%d",
-		foundUser.ID,
-		foundUser.Username,
-		foundUser.CreatedAt,
-	)
+	log.Printf("password hash: %s", user.PasswordHash)
 }
