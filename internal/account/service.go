@@ -8,12 +8,17 @@ import (
 )
 
 type Service struct {
-	users *UserRepository
+	users    UserRepository
+	sessions SessionRepository
 }
 
-func NewService(users *UserRepository) *Service {
+func NewService(
+	users UserRepository,
+	sessions SessionRepository,
+) *Service {
 	return &Service{
-		users: users,
+		users:    users,
+		sessions: sessions,
 	}
 }
 

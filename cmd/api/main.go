@@ -7,6 +7,8 @@ import (
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/storage"
+
+	accountSqlite "voxhold-backend/internal/account/sqlite"
 )
 
 func main() {
@@ -18,8 +20,10 @@ func main() {
 
 	log.Println("database is ready")
 
-	userRepository := account.NewUserRepository(db)
-	accountService := account.NewService(userRepository)
+	userRepository := accountSqlite.NewUserRepository(db)
+	sessionRepository := accountSqlite.NewSessionRepository(db)
+
+	accountService := account.NewService(userRepository, sessionRepository)
 
 	input := account.RegisterInput{
 		Username:        fmt.Sprintf("test_user_%d", time.Now().UnixNano()),

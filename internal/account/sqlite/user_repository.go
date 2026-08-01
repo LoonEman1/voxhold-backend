@@ -1,9 +1,10 @@
-package account
+package sqlite
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"voxhold-backend/internal/account"
 )
 
 type UserRepository struct {
@@ -20,14 +21,14 @@ func (r *UserRepository) Create(
 	ctx context.Context,
 	username string,
 	passwordHash string,
-) (User, error) {
+) (account.User, error) {
 	const query = `
 	INSERT INTO users (username, password_hash)
 	VALUES (?, ?)
 	RETURNING id, username, created_at
 	`
 
-	var user User
+	var user account.User
 	err := r.db.QueryRowContext(
 		ctx,
 		query,
@@ -35,7 +36,7 @@ func (r *UserRepository) Create(
 		passwordHash,
 	).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
-		return User{}, fmt.Errorf("create user: %w", err)
+		return account.User{}, fmt.Errorf("create user: %w", err)
 	}
 	return user, nil
 }
@@ -43,14 +44,14 @@ func (r *UserRepository) Create(
 func (r *UserRepository) FindByUsername(
 	ctx context.Context,
 	username string,
-) (User, error) {
+) (account.User, error) {
 	const query = `
 	SELECT id, username, created_at
 	FROM USERS
 	WHERE username = ?
 	`
 
-	var user User
+	var user account.User
 
 	err := r.db.QueryRowContext(
 		ctx,
@@ -61,7 +62,7 @@ func (r *UserRepository) FindByUsername(
 		&user.CreatedAt,
 	)
 	if err != nil {
-		return User{}, fmt.Errorf("find user by username: %w", err)
+		return account.User{}, fmt.Errorf("find user by username: %w", err)
 	}
 
 	return user, nil
