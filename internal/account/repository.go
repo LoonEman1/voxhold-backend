@@ -7,7 +7,7 @@ type UserRepository interface {
 		ctx context.Context,
 		username string,
 		passwordHash string,
-	) (User, error)
+	) (UserInfo, error)
 
 	FindByUsername(
 		ctx context.Context,

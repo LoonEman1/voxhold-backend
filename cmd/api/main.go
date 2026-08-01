@@ -41,10 +41,8 @@ func main() {
 
 	log.Printf(
 		"user registered: id=%d username=%s created_at=%d",
-		user.ID,
-		user.Username,
-		user.CreatedAt,
+		user.User.ID,
+		user.User.Username,
+		user.User.CreatedAt,
 	)
-
-	log.Printf("password hash: %s", user.PasswordHash)
 }

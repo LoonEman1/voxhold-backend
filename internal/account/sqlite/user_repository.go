@@ -21,14 +21,14 @@ func (r *UserRepository) Create(
 	ctx context.Context,
 	username string,
 	passwordHash string,
-) (account.User, error) {
+) (account.UserInfo, error) {
 	const query = `
 	INSERT INTO users (username, password_hash)
 	VALUES (?, ?)
 	RETURNING id, username, created_at
 	`
 
-	var user account.User
+	var user account.UserInfo
 	err := r.db.QueryRowContext(
 		ctx,
 		query,
@@ -36,7 +36,7 @@ func (r *UserRepository) Create(
 		passwordHash,
 	).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
-		return account.User{}, fmt.Errorf("create user: %w", err)
+		return account.UserInfo{}, fmt.Errorf("create user: %w", err)
 	}
 	return user, nil
 }
@@ -59,6 +59,8 @@ func (r *UserRepository) FindByUsername(
 		username,
 	).Scan(&user.ID,
 		&user.Username,
+		&user.CreatedAt,
+		&user.PasswordHash,
 		&user.CreatedAt,
 	)
 	if err != nil {
