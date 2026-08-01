@@ -46,7 +46,7 @@ func (r *UserRepository) FindByUsername(
 	username string,
 ) (account.User, error) {
 	const query = `
-	SELECT id, username, created_at
+	SELECT id, username, created_at, password_hash
 	FROM USERS
 	WHERE username = ?
 	`
@@ -57,11 +57,11 @@ func (r *UserRepository) FindByUsername(
 		ctx,
 		query,
 		username,
-	).Scan(&user.ID,
+	).Scan(
+		&user.ID,
 		&user.Username,
 		&user.CreatedAt,
 		&user.PasswordHash,
-		&user.CreatedAt,
 	)
 	if err != nil {
 		return account.User{}, fmt.Errorf("find user by username: %w", err)

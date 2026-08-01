@@ -108,19 +108,15 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, err
 		return LoginResult{}, ErrInvalidCredentials
 	}
 
-	token, tokenHash, err := generateSessionToken()
-	if err != nil {
-		return LoginResult{}, err
+	userInfo := UserInfo{
+		ID:        user.ID,
+		Username:  user.Username,
+		CreatedAt: user.CreatedAt,
 	}
 
-	expiresAt := time.Now().Add(sessionLifetime).Unix()
-
-	err = s.sessions.Create(ctx, user.ID, tokenHash, expiresAt)
+	token, expiresAt, err := s.generateSession(ctx, userInfo)
 	if err != nil {
-		return LoginResult{}, fmt.Errorf(
-			"create session: %w",
-			err,
-		)
+		return LoginResult{}, err
 	}
 
 	return LoginResult{

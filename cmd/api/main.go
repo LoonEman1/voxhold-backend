@@ -1,13 +1,14 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/storage"
 
+	accounthttp "voxhold-backend/internal/account/http"
 	accountSqlite "voxhold-backend/internal/account/sqlite"
 )
 
@@ -25,24 +26,24 @@ func main() {
 
 	accountService := account.NewService(userRepository, sessionRepository)
 
-	input := account.RegisterInput{
-		Username:        fmt.Sprintf("test_user_%d", time.Now().UnixNano()),
-		Password:        "password123",
-		PasswordConfirm: "password123",
+	accountHandler := accounthttp.NewHandler(accountService)
+	mux := http.NewServeMux()
+	accountHandler.RegisterRoutes(mux)
+
+	port := os.Getenv("HTTP_PORT")
+	if port == "" {
+		port = "8080"
 	}
 
-	user, err := accountService.Register(
-		context.Background(),
-		input,
-	)
-	if err != nil {
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	log.Printf("server started on: %s", server.Addr)
+
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
-
-	log.Printf(
-		"user registered: id=%d username=%s created_at=%d",
-		user.User.ID,
-		user.User.Username,
-		user.User.CreatedAt,
-	)
 }
