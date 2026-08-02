@@ -5,12 +5,17 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 const sessionLifetime = 30 * 24 * time.Hour
+
+var (
+	ErrUnauthorized = errors.New("Unathorized")
+)
 
 type Service struct {
 	users    UserRepository
@@ -83,6 +88,22 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (LoginResul
 			ExpiresAt: expiresAt,
 		},
 	}, nil
+}
+
+func (s *Service) Logout(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ErrUnauthorized
+
+	}
+
+	tokenHash := hashSessionToken(token)
+
+	if err := s.sessions.DeleteByTokenHash(ctx, tokenHash); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	
+	return nil
 }
 
 func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, error) {

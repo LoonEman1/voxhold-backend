@@ -6,8 +6,28 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"voxhold-backend/internal/account"
 )
+
+func bearerToken(r *http.Request) (string, bool) {
+	header := r.Header.Get("Authorization")
+	parts := strings.Fields(header)
+
+	if len(parts) != 2 {
+		return "", false
+	}
+
+	if !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+
+	if parts[1] == "" {
+		return "", false
+	}
+
+	return parts[1], true
+}
 
 type Service interface {
 	Register(
@@ -18,10 +38,10 @@ type Service interface {
 		ctx context.Context,
 		input account.LoginInput,
 	) (account.LoginResult, error)
-}
-
-type Handler struct {
-	service Service
+	Logout(
+		ctx context.Context,
+		token string,
+	) error
 }
 
 type registerRequest struct {
@@ -33,6 +53,10 @@ type registerRequest struct {
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type Handler struct {
+	service Service
 }
 
 func NewHandler(service Service) *Handler {
@@ -48,6 +72,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(
 		"POST /api/v1/auth/login",
 		h.login,
+	)
+
+	mux.HandleFunc(
+		"POST /api/v1/auth/logout",
+		h.logout,
 	)
 }
 
@@ -105,6 +134,32 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		http.StatusCreated,
 		newAuthResponse(result),
 	)
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	token, ok := bearerToken(r)
+	if !ok {
+		writeError(
+			w,
+			http.StatusUnauthorized,
+			"authorization token is required",
+		)
+		return
+	}
+
+	if err := h.service.Logout(r.Context(), token); err != nil {
+		log.Printf("logout: %v", err)
+
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
