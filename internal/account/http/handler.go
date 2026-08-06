@@ -42,6 +42,10 @@ type Service interface {
 		ctx context.Context,
 		token string,
 	) error
+
+	Authenticate(
+		ctx context.Context, token string,
+	) (int64, error)
 }
 
 type registerRequest struct {
