@@ -102,7 +102,7 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	if err := s.sessions.DeleteByTokenHash(ctx, tokenHash); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -110,7 +110,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, err
 	input = input.Normalize()
 
 	if err := input.Validate(); err != nil {
-		return LoginResult{}, nil
+		return LoginResult{}, err
 	}
 
 	user, err := s.users.FindByUsername(ctx, input.Username)
@@ -151,4 +151,25 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, err
 			ExpiresAt: expiresAt,
 		},
 	}, nil
+}
+
+func (s *Service) Authenticate(ctx context.Context, token string) (int64, error) {
+	token = strings.TrimSpace(token)
+
+	if token == "" {
+		return 0, ErrUnauthorized
+	}
+
+	tokenHash := hashSessionToken(token)
+
+	userID, err := s.sessions.FindActiveUserIDByTokenHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrUnauthorized
+		}
+
+		return 0, fmt.Errorf("authenticate session: %w", err)
+	}
+
+	return userID, nil
 }

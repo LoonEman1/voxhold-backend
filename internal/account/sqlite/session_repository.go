@@ -62,3 +62,23 @@ func (r *SessionRepository) DeleteByTokenHash(
 
 	return nil
 }
+
+func (r *SessionRepository) FindActiveUserIDByTokenHash(
+	ctx context.Context,
+	tokenHash []byte,
+) (int64, error) {
+	const query = `
+	SELECT user_id FROM sessions
+	WHERE token_hash = ?
+		AND expires_at > unixepoch()
+	`
+
+	var userID int64
+
+	err := r.db.QueryRowContext(ctx, query, tokenHash).Scan(&userID)
+	if err != nil {
+		return 0, fmt.Errorf("find active session: %w", err)
+	}
+
+	return userID, nil
+}

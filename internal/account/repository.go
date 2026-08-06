@@ -27,4 +27,9 @@ type SessionRepository interface {
 		ctx context.Context,
 		tokenHash []byte,
 	) error
+
+	FindActiveUserIDByTokenHash(
+		ctx context.Context,
+		tokenHash []byte,
+	) (int64, error)
 }
