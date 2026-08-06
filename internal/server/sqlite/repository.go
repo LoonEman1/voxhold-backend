@@ -67,7 +67,7 @@ func (r *Repository) Create(
 		if errors.Is(err, sql.ErrNoRows) {
 			return server.Server{}, server.ErrAlreadyExists
 		}
-		
+
 		return server.Server{}, fmt.Errorf(
 			"insert server: %w",
 			err,
@@ -105,4 +105,56 @@ func (r *Repository) Create(
 	}
 
 	return createdServer, nil
+}
+
+func (r *Repository) Update(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+	name string,
+) (server.Server, error) {
+	const query = `
+	UPDATE servers
+	SET name = ?
+	WHERE id = ?
+		AND EXISTS(
+		SELECT 1
+		FROM server_members
+		WHERE server_members.server_id = servers.id
+		  AND server_members.user_id = ?
+		  AND server_members.role = ?
+	)
+	RETURNING
+		id,
+		name,
+		created_by,
+		created_at
+	`
+
+	var updatedServer server.Server
+	err := r.db.QueryRowContext(
+		ctx,
+		query,
+		name,
+		serverID,
+		userID,
+		server.RoleOwner,
+	).Scan(
+		&updatedServer.ID,
+		&updatedServer.Name,
+		&updatedServer.CreatedBy,
+		&updatedServer.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.Server{}, server.ErrNotFound
+		}
+
+		return server.Server{}, fmt.Errorf(
+			"update server: %w",
+			err,
+		)
+	}
+
+	return updatedServer, nil
 }

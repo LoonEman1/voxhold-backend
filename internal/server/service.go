@@ -38,3 +38,35 @@ func (s *Service) Create(
 
 	return createdServer, nil
 }
+
+func (s *Service) Update(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+	input UpdateInput,
+) (Server, error) {
+	if serverID <= 0 {
+		return Server{}, ErrNotFound
+	}
+
+	input = input.Normalize()
+
+	if err := input.Validate(); err != nil {
+		return Server{}, err
+	}
+
+	updatedServer, err := s.repository.Update(
+		ctx,
+		serverID,
+		userID,
+		input.Name,
+	)
+	if err != nil {
+		return Server{}, fmt.Errorf(
+			"update server: %w",
+			err,
+		)
+	}
+
+	return updatedServer, nil
+}

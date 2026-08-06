@@ -8,4 +8,10 @@ type Repository interface {
 		name string,
 		createdBy int64,
 	) (Server, error)
+	Update(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+		name string,
+	) (Server, error)
 }
