@@ -1,8 +1,6 @@
 package accounthttp
 
 import (
-	"encoding/json"
-	"net/http"
 	"voxhold-backend/internal/account"
 )
 
@@ -34,27 +32,4 @@ func newAuthResponse(result account.LoginResult) authResponse {
 			ExpiresAt: result.Session.ExpiresAt,
 		},
 	}
-}
-
-func writeJson(
-	w http.ResponseWriter,
-	status int,
-	value any,
-) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		return
-	}
-}
-
-func writeError(
-	w http.ResponseWriter,
-	status int,
-	message string,
-) {
-	writeJson(w, status, map[string]string{
-		"error": message,
-	})
 }

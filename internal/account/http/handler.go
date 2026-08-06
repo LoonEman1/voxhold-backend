@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/httpapi"
 )
 
 func bearerToken(r *http.Request) (string, bool) {
@@ -91,7 +92,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&request); err != nil {
-		writeError(
+		httpapi.WriteError(
 			w,
 			http.StatusBadRequest,
 			"invalid JSON body",
@@ -114,7 +115,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, account.ErrPasswordTooLong),
 			errors.Is(err, account.ErrPasswordsDoNotMatch):
 
-			writeError(
+			httpapi.WriteError(
 				w,
 				http.StatusBadRequest,
 				err.Error(),
@@ -123,7 +124,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		default:
 			log.Printf("register user: %v", err)
 
-			writeError(
+			httpapi.WriteError(
 				w,
 				http.StatusInternalServerError,
 				"internal server error",
@@ -133,7 +134,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJson(
+	httpapi.WriteJSON(
 		w,
 		http.StatusCreated,
 		newAuthResponse(result),
@@ -143,7 +144,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	token, ok := bearerToken(r)
 	if !ok {
-		writeError(
+		httpapi.WriteError(
 			w,
 			http.StatusUnauthorized,
 			"authorization token is required",
@@ -154,7 +155,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.Logout(r.Context(), token); err != nil {
 		log.Printf("logout: %v", err)
 
-		writeError(
+		httpapi.WriteError(
 			w,
 			http.StatusInternalServerError,
 			"internal server error",
@@ -173,7 +174,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&request); err != nil {
-		writeError(
+		httpapi.WriteError(
 			w,
 			http.StatusBadRequest,
 			"invalid JSON body",
@@ -193,14 +194,14 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, account.ErrLoginUsernameRequired),
 			errors.Is(err, account.ErrLoginPasswordRequired):
 
-			writeError(
+			httpapi.WriteError(
 				w,
 				http.StatusBadRequest,
 				err.Error(),
 			)
 
 		case errors.Is(err, account.ErrInvalidCredentials):
-			writeError(
+			httpapi.WriteError(
 				w,
 				http.StatusUnauthorized,
 				"invalid username or password",
@@ -209,7 +210,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		default:
 			log.Printf("login user: %v", err)
 
-			writeError(
+			httpapi.WriteError(
 				w,
 				http.StatusInternalServerError,
 				"internal server error",
@@ -219,10 +220,9 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJson(
+	httpapi.WriteJSON(
 		w,
 		http.StatusOK,
 		newAuthResponse(result),
 	)
-
 }

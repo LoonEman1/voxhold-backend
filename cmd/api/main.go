@@ -6,10 +6,13 @@ import (
 	"os"
 	"time"
 	"voxhold-backend/internal/account"
-	"voxhold-backend/internal/storage"
 
 	accounthttp "voxhold-backend/internal/account/http"
 	accountSqlite "voxhold-backend/internal/account/sqlite"
+	serverDomain "voxhold-backend/internal/server"
+	serverhttp "voxhold-backend/internal/server/http"
+	serverSqlite "voxhold-backend/internal/server/sqlite"
+	"voxhold-backend/internal/storage"
 )
 
 func main() {
@@ -27,8 +30,17 @@ func main() {
 	accountService := account.NewService(userRepository, sessionRepository)
 
 	accountHandler := accounthttp.NewHandler(accountService)
+
+	serverRepository := serverSqlite.NewRepository(db)
+	serverService := serverDomain.NewService(serverRepository)
+	serverHandler := serverhttp.NewHandler(serverService)
+
 	mux := http.NewServeMux()
 	accountHandler.RegisterRoutes(mux)
+	serverHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
 
 	port := os.Getenv("HTTP_PORT")
 	if port == "" {

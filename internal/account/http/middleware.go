@@ -4,8 +4,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
-
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/httpapi"
 )
 
 func (h *Handler) RequireAuth(
@@ -15,11 +15,10 @@ func (h *Handler) RequireAuth(
 		func(w http.ResponseWriter, r *http.Request) {
 			token, ok := bearerToken(r)
 			if !ok {
-				writeError(
+				httpapi.WriteError(
 					w,
 					http.StatusUnauthorized,
-					"authorization token is required",
-				)
+					"authorization token is required")
 				return
 			}
 
@@ -29,17 +28,16 @@ func (h *Handler) RequireAuth(
 			)
 			if err != nil {
 				if errors.Is(err, account.ErrUnauthorized) {
-					writeError(
+					httpapi.WriteError(
 						w,
 						http.StatusUnauthorized,
-						"invalid or expired session",
-					)
+						"invalid or expired session")
 					return
 				}
 
 				log.Printf("authenticate session: %v", err)
 
-				writeError(
+				httpapi.WriteError(
 					w,
 					http.StatusInternalServerError,
 					"internal server error",
