@@ -25,6 +25,12 @@ type Service interface {
 		userID int64,
 		input server.UpdateInput,
 	) (server.Server, error)
+
+	Delete(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+	) error
 }
 
 type Handler struct {
@@ -49,6 +55,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"PATCH /api/v1/servers/{serverID}",
 		requireAuth(http.HandlerFunc(h.update)),
+	)
+
+	mux.Handle(
+		"DELETE /api/v1/servers/{serverID}",
+		requireAuth(http.HandlerFunc(h.deleteServer)),
 	)
 }
 
@@ -222,4 +233,59 @@ func (h *Handler) update(
 		http.StatusOK,
 		newServerResponse(updatedServer),
 	)
+}
+
+func (h *Handler) deleteServer(
+	w http.ResponseWriter, r *http.Request,
+) {
+	userID, ok := account.UserIDFromContext(r.Context())
+
+	if !ok {
+		log.Print("delete server: user ID is missing from context")
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	serverID, err := strconv.ParseInt(
+		r.PathValue("serverID"),
+		10,
+		64,
+	)
+	if err != nil || serverID <= 0 {
+		httpapi.WriteError(
+			w,
+			http.StatusBadRequest,
+			"invalid server ID",
+		)
+		return
+	}
+
+	err = h.service.Delete(r.Context(), serverID, userID)
+
+	if err != nil {
+		if errors.Is(err, server.ErrNotFound) {
+			httpapi.WriteError(
+				w,
+				http.StatusNotFound,
+				"server not found",
+			)
+			return
+		}
+
+		log.Printf("delete server: %v", err)
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

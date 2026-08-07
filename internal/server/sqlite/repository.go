@@ -158,3 +158,48 @@ func (r *Repository) Update(
 
 	return updatedServer, nil
 }
+
+func (r *Repository) Delete(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+) error {
+	const query = `
+	DELETE FROM servers
+	WHERE id = ?
+		AND EXISTS (
+		SELECT 1
+		FROM server_members
+		WHERE server_members.server_id = ?
+			AND server_members.user_id = ?
+			AND server_members.role = ?
+		)
+	`
+
+	result, err := r.db.ExecContext(
+		ctx,
+		query,
+		serverID,
+		serverID,
+		userID,
+		server.RoleOwner,
+	)
+
+	if err != nil {
+		return fmt.Errorf("delete server: %w", err)
+	}
+
+	affectedRows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf(
+			"get deleted server count: %w",
+			err,
+		)
+	}
+
+	if affectedRows == 0 {
+		return server.ErrNotFound
+	}
+
+	return nil
+}

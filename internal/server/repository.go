@@ -14,4 +14,9 @@ type Repository interface {
 		userID int64,
 		name string,
 	) (Server, error)
+	Delete(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+	) error
 }

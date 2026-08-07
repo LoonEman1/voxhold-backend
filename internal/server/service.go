@@ -70,3 +70,26 @@ func (s *Service) Update(
 
 	return updatedServer, nil
 }
+
+func (s *Service) Delete(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+) error {
+	if serverID <= 0 {
+		return ErrNotFound
+	}
+
+	if err := s.repository.Delete(
+		ctx,
+		serverID,
+		userID,
+	); err != nil {
+		return fmt.Errorf(
+			"delete server: %w",
+			err,
+		)
+	}
+
+	return nil
+}
