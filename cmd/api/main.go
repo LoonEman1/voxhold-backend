@@ -17,6 +17,10 @@ import (
 	channelDomain "voxhold-backend/internal/channel"
 	channelhttp "voxhold-backend/internal/channel/http"
 	channelSqlite "voxhold-backend/internal/channel/sqlite"
+
+	inviteDomain "voxhold-backend/internal/invite"
+	invitehttp "voxhold-backend/internal/invite/http"
+	inviteSqlite "voxhold-backend/internal/invite/sqlite"
 )
 
 func main() {
@@ -32,7 +36,6 @@ func main() {
 	sessionRepository := accountSqlite.NewSessionRepository(db)
 
 	accountService := account.NewService(userRepository, sessionRepository)
-
 	accountHandler := accounthttp.NewHandler(accountService)
 
 	serverRepository := serverSqlite.NewRepository(db)
@@ -43,6 +46,10 @@ func main() {
 	channelService := channelDomain.NewService(channelRepository)
 	channelHandler := channelhttp.NewHandler(channelService)
 
+	inviteRepository := inviteSqlite.NewRepository(db)
+	inviteService := inviteDomain.NewService(inviteRepository)
+	inviteHandler := invitehttp.NewHandler(inviteService)
+
 	mux := http.NewServeMux()
 	accountHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(
@@ -50,6 +57,11 @@ func main() {
 		accountHandler.RequireAuth,
 	)
 	channelHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
+
+	inviteHandler.RegisterRoutes(
 		mux,
 		accountHandler.RequireAuth,
 	)
