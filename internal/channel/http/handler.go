@@ -6,9 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strconv"
 
-	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/channel"
 	"voxhold-backend/internal/httpapi"
 )
@@ -51,29 +49,18 @@ func (h *Handler) create(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	userID, ok := account.UserIDFromContext(r.Context())
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
-		log.Print("create channel: user ID is missing from context")
-
-		httpapi.WriteError(
-			w,
-			http.StatusInternalServerError,
-			"internal server error",
-		)
 		return
 	}
 
-	serverID, err := strconv.ParseInt(
-		r.PathValue("serverID"),
-		10,
-		64,
+	serverID, ok := httpapi.PositiveInt64PathValue(
+		w,
+		r,
+		"serverID",
+		"server",
 	)
-	if err != nil || serverID <= 0 {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid server ID",
-		)
+	if !ok {
 		return
 	}
 

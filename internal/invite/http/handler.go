@@ -6,9 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strconv"
 
-	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/invite"
 )
@@ -110,29 +108,18 @@ func (h *Handler) createDirect(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	inviterUserID, ok := account.UserIDFromContext(r.Context())
+	inviterUserID, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
-		log.Print("create direct invite: user ID is missing from context")
-
-		httpapi.WriteError(
-			w,
-			http.StatusInternalServerError,
-			"internal server error",
-		)
 		return
 	}
 
-	serverID, err := strconv.ParseInt(
-		r.PathValue("serverID"),
-		10,
-		64,
+	serverID, ok := httpapi.PositiveInt64PathValue(
+		w,
+		r,
+		"serverID",
+		"server",
 	)
-	if err != nil || serverID <= 0 {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid server ID",
-		)
+	if !ok {
 		return
 	}
 
@@ -221,15 +208,8 @@ func (h *Handler) listIncoming(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	userID, ok := account.UserIDFromContext(r.Context())
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
-		log.Print("list incoming invites: user ID is missing from context")
-
-		httpapi.WriteError(
-			w,
-			http.StatusInternalServerError,
-			"internal server error",
-		)
 		return
 	}
 
@@ -259,33 +239,22 @@ func (h *Handler) accept(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	userID, ok := account.UserIDFromContext(r.Context())
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
-		log.Print("accept invitation: user ID is missing from context")
-
-		httpapi.WriteError(
-			w,
-			http.StatusInternalServerError,
-			"internal server error",
-		)
 		return
 	}
 
-	inviteID, err := strconv.ParseInt(
-		r.PathValue("inviteID"),
-		10,
-		64,
+	inviteID, ok := httpapi.PositiveInt64PathValue(
+		w,
+		r,
+		"inviteID",
+		"invitation",
 	)
-	if err != nil || inviteID <= 0 {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid invitation ID",
-		)
+	if !ok {
 		return
 	}
 
-	err = h.service.Accept(
+	err := h.service.Accept(
 		r.Context(),
 		inviteID,
 		userID,
