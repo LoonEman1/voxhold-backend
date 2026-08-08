@@ -217,3 +217,81 @@ func (r *Repository) CreateDirect(
 
 	return createdInvite, nil
 }
+
+func (r *Repository) ListIncoming(
+	ctx context.Context,
+	inviteeUserID int64,
+) ([]invite.IncomingInvite, error) {
+	const query = `
+	SELECT
+		server_invites.id,
+		server_invites.server_id,
+		servers.name,
+		server_invites.inviter_user_id,
+		inviter.username,
+		server_invites.status,
+		server_invites.expires_at,
+		server_invites.created_at
+	FROM server_invites
+	JOIN servers
+		ON servers.id = server_invites.server_id
+	JOIN users AS inviter
+		ON inviter.id = server_invites.inviter_user_id
+	WHERE server_invites.invitee_user_id = ?
+	  AND server_invites.status = ?
+	  AND server_invites.expires_at > unixepoch()
+	ORDER BY
+		server_invites.created_at DESC,
+		server_invites.id DESC
+	`
+
+	rows, err := r.db.QueryContext(
+		ctx,
+		query,
+		inviteeUserID,
+		invite.StatusPending,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"select incoming invitations: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	invitations := make([]invite.IncomingInvite, 0)
+
+	for rows.Next() {
+		var incomingInvite invite.IncomingInvite
+
+		if err := rows.Scan(
+			&incomingInvite.ID,
+			&incomingInvite.ServerID,
+			&incomingInvite.ServerName,
+			&incomingInvite.InviterUserID,
+			&incomingInvite.InviterUsername,
+			&incomingInvite.Status,
+			&incomingInvite.ExpiresAt,
+			&incomingInvite.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"scan incoming invitation: %w",
+				err,
+			)
+		}
+
+		invitations = append(
+			invitations,
+			incomingInvite,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"iterate incoming invitations: %w",
+			err,
+		)
+	}
+
+	return invitations, nil
+}

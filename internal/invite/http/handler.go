@@ -20,6 +20,11 @@ type Service interface {
 		inviterUserID int64,
 		input invite.CreateDirectInput,
 	) (invite.Invite, error)
+
+	ListIncoming(
+		ctx context.Context,
+		inviteeUserID int64,
+	) ([]invite.IncomingInvite, error)
 }
 
 type Handler struct {
@@ -40,10 +45,54 @@ func (h *Handler) RegisterRoutes(
 		"POST /api/v1/servers/{serverID}/invites",
 		requireAuth(http.HandlerFunc(h.createDirect)),
 	)
+
+	mux.Handle(
+		"GET /api/v1/me/server-invites",
+		requireAuth(http.HandlerFunc(h.listIncoming)),
+	)
 }
 
 type createDirectRequest struct {
 	Username string `json:"username"`
+}
+
+type incomingInviteResponse struct {
+	ID              int64         `json:"id"`
+	ServerID        int64         `json:"server_id"`
+	ServerName      string        `json:"server_name"`
+	InviterUserID   int64         `json:"inviter_user_id"`
+	InviterUsername string        `json:"inviter_username"`
+	Status          invite.Status `json:"status"`
+	ExpiresAt       int64         `json:"expires_at"`
+	CreatedAt       int64         `json:"created_at"`
+}
+
+func newIncomingInvitesResponse(
+	values []invite.IncomingInvite,
+) []incomingInviteResponse {
+	response := make(
+		[]incomingInviteResponse,
+		0,
+		len(values),
+	)
+
+	for _, value := range values {
+		response = append(
+			response,
+			incomingInviteResponse{
+				ID:              value.ID,
+				ServerID:        value.ServerID,
+				ServerName:      value.ServerName,
+				InviterUserID:   value.InviterUserID,
+				InviterUsername: value.InviterUsername,
+				Status:          value.Status,
+				ExpiresAt:       value.ExpiresAt,
+				CreatedAt:       value.CreatedAt,
+			},
+		)
+	}
+
+	return response
 }
 
 func (h *Handler) createDirect(
@@ -154,5 +203,43 @@ func (h *Handler) createDirect(
 		w,
 		http.StatusCreated,
 		newInviteResponse(createdInvite),
+	)
+}
+
+func (h *Handler) listIncoming(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := account.UserIDFromContext(r.Context())
+	if !ok {
+		log.Print("list incoming invites: user ID is missing from context")
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	invitations, err := h.service.ListIncoming(
+		r.Context(),
+		userID,
+	)
+	if err != nil {
+		log.Printf("list incoming invites: %v", err)
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	httpapi.WriteJSON(
+		w,
+		http.StatusOK,
+		newIncomingInvitesResponse(invitations),
 	)
 }

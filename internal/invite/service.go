@@ -47,3 +47,25 @@ func (s *Service) CreateDirect(
 
 	return createdInvite, nil
 }
+
+func (s *Service) ListIncoming(
+	ctx context.Context,
+	inviteeUserID int64,
+) ([]IncomingInvite, error) {
+	if inviteeUserID <= 0 {
+		return nil, ErrForbidden
+	}
+
+	invitations, err := s.repository.ListIncoming(
+		ctx,
+		inviteeUserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list incoming invitations: %w",
+			err,
+		)
+	}
+
+	return invitations, nil
+}

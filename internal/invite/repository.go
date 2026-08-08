@@ -10,4 +10,9 @@ type Repository interface {
 		inviteeUsername string,
 		expiresAt int64,
 	) (Invite, error)
+
+	ListIncoming(
+		ctx context.Context,
+		inviteeUserID int64,
+	) ([]IncomingInvite, error)
 }
