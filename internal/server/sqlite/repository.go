@@ -34,15 +34,12 @@ func (r *Repository) Create(
 	}()
 
 	const createServerQuery = `
-	INSERT INTO servers(
-	name, created_by
+	INSERT INTO servers (
+		name,
+		created_by
 	)
-	SELECT ?, ?
-	WHERE NOT EXISTS(
-		SELECT 1
-		FROM servers
-	)
-	RETURNING 
+	VALUES (?, ?)
+	RETURNING
 		id,
 		name,
 		created_by,
@@ -64,10 +61,6 @@ func (r *Repository) Create(
 	)
 
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return server.Server{}, server.ErrAlreadyExists
-		}
-
 		return server.Server{}, fmt.Errorf(
 			"insert server: %w",
 			err,

@@ -121,13 +121,6 @@ func (h *Handler) create(
 				err.Error(),
 			)
 
-		case errors.Is(err, server.ErrAlreadyExists):
-			httpapi.WriteError(
-				w,
-				http.StatusConflict,
-				"server already exists",
-			)
-
 		default:
 			log.Printf("create server: %v", err)
 

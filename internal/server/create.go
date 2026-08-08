@@ -7,9 +7,8 @@ import (
 )
 
 var (
-	ErrNameRequired  = errors.New("server name is required")
-	ErrNameTooLong   = errors.New("server name must not exceed 64 characters")
-	ErrAlreadyExists = errors.New("server already exists")
+	ErrNameRequired = errors.New("server name is required")
+	ErrNameTooLong  = errors.New("server name must not exceed 64 characters")
 )
 
 type CreateInput struct {
