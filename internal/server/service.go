@@ -93,3 +93,26 @@ func (s *Service) Delete(
 
 	return nil
 }
+
+func (s *Service) Leave(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || userID <= 0 {
+		return ErrMembershipNotFound
+	}
+
+	if err := s.repository.Leave(
+		ctx,
+		serverID,
+		userID,
+	); err != nil {
+		return fmt.Errorf(
+			"leave server: %w",
+			err,
+		)
+	}
+
+	return nil
+}

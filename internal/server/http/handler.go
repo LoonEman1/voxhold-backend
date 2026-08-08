@@ -30,6 +30,12 @@ type Service interface {
 		serverID int64,
 		userID int64,
 	) error
+
+	Leave(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+	) error
 }
 
 type Handler struct {
@@ -59,6 +65,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"DELETE /api/v1/servers/{serverID}",
 		requireAuth(http.HandlerFunc(h.deleteServer)),
+	)
+
+	mux.Handle(
+		"DELETE /api/v1/servers/{serverID}/members/me",
+		requireAuth(http.HandlerFunc(h.leave)),
 	)
 }
 
@@ -251,6 +262,61 @@ func (h *Handler) deleteServer(
 			http.StatusInternalServerError,
 			"internal server error",
 		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) leave(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	serverID, ok := httpapi.PositiveInt64PathValue(
+		w,
+		r,
+		"serverID",
+		"server",
+	)
+	if !ok {
+		return
+	}
+
+	if err := h.service.Leave(
+		r.Context(),
+		serverID,
+		userID,
+	); err != nil {
+		switch {
+		case errors.Is(err, server.ErrMembershipNotFound):
+			httpapi.WriteError(
+				w,
+				http.StatusNotFound,
+				"server membership not found",
+			)
+
+		case errors.Is(err, server.ErrOwnerCannotLeave):
+			httpapi.WriteError(
+				w,
+				http.StatusConflict,
+				"server owner cannot leave the server",
+			)
+
+		default:
+			log.Printf("leave server: %v", err)
+
+			httpapi.WriteError(
+				w,
+				http.StatusInternalServerError,
+				"internal server error",
+			)
+		}
+
 		return
 	}
 

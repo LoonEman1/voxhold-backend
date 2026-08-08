@@ -19,4 +19,10 @@ type Repository interface {
 		serverID int64,
 		userID int64,
 	) error
+
+	Leave(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+	) error
 }

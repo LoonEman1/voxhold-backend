@@ -203,3 +203,93 @@ func (r *Repository) Delete(
 
 	return nil
 }
+
+func (r *Repository) Leave(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf(
+			"begin leave server transaction: %w",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	const roleQuery = `
+	SELECT role
+	FROM server_members
+	WHERE server_id = ?
+	  AND user_id = ?
+	`
+
+	var role server.Role
+
+	err = tx.QueryRowContext(
+		ctx,
+		roleQuery,
+		serverID,
+		userID,
+	).Scan(&role)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.ErrMembershipNotFound
+		}
+
+		return fmt.Errorf(
+			"find server membership: %w",
+			err,
+		)
+	}
+
+	if role == server.RoleOwner {
+		return server.ErrOwnerCannotLeave
+	}
+
+	const deleteMembershipQuery = `
+	DELETE FROM server_members
+	WHERE server_id = ?
+	  AND user_id = ?
+	  AND role <> ?
+	`
+
+	result, err := tx.ExecContext(
+		ctx,
+		deleteMembershipQuery,
+		serverID,
+		userID,
+		server.RoleOwner,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"delete server membership: %w",
+			err,
+		)
+	}
+
+	affectedRows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf(
+			"get deleted membership count: %w",
+			err,
+		)
+	}
+
+	if affectedRows == 0 {
+		return server.ErrMembershipNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf(
+			"commit leave server transaction: %w",
+			err,
+		)
+	}
+
+	return nil
+}
