@@ -43,7 +43,7 @@ var (
 	)
 
 	ErrCountryCodeInvalid = errors.New(
-		"country code must contain two Latin letters",
+		"country code must be a valid ISO 3166-1 alpha-2 code",
 	)
 )
 
