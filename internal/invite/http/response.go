@@ -1,6 +1,8 @@
 package invitehttp
 
-import "voxhold-backend/internal/invite"
+import (
+	"voxhold-backend/internal/invite"
+)
 
 type inviteResponse struct {
 	ID            int64         `json:"id"`

@@ -25,6 +25,12 @@ type Service interface {
 		ctx context.Context,
 		inviteeUserID int64,
 	) ([]invite.IncomingInvite, error)
+
+	Accept(
+		ctx context.Context,
+		inviteID int64,
+		inviteeUserID int64,
+	) error
 }
 
 type Handler struct {
@@ -49,6 +55,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"GET /api/v1/me/server-invites",
 		requireAuth(http.HandlerFunc(h.listIncoming)),
+	)
+
+	mux.Handle(
+		"POST /api/v1/me/server-invites/{inviteID}/accept",
+		requireAuth(http.HandlerFunc(h.accept)),
 	)
 }
 
@@ -242,4 +253,78 @@ func (h *Handler) listIncoming(
 		http.StatusOK,
 		newIncomingInvitesResponse(invitations),
 	)
+}
+
+func (h *Handler) accept(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := account.UserIDFromContext(r.Context())
+	if !ok {
+		log.Print("accept invitation: user ID is missing from context")
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	inviteID, err := strconv.ParseInt(
+		r.PathValue("inviteID"),
+		10,
+		64,
+	)
+	if err != nil || inviteID <= 0 {
+		httpapi.WriteError(
+			w,
+			http.StatusBadRequest,
+			"invalid invitation ID",
+		)
+		return
+	}
+
+	err = h.service.Accept(
+		r.Context(),
+		inviteID,
+		userID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, invite.ErrInviteNotFound):
+			httpapi.WriteError(
+				w,
+				http.StatusNotFound,
+				"invitation not found",
+			)
+
+		case errors.Is(err, invite.ErrInviteNotPending):
+			httpapi.WriteError(
+				w,
+				http.StatusConflict,
+				"invitation is no longer pending",
+			)
+
+		case errors.Is(err, invite.ErrInviteExpired):
+			httpapi.WriteError(
+				w,
+				http.StatusConflict,
+				"invitation has expired",
+			)
+
+		default:
+			log.Printf("accept invitation: %v", err)
+
+			httpapi.WriteError(
+				w,
+				http.StatusInternalServerError,
+				"internal server error",
+			)
+		}
+
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

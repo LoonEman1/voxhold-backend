@@ -69,3 +69,26 @@ func (s *Service) ListIncoming(
 
 	return invitations, nil
 }
+
+func (s *Service) Accept(
+	ctx context.Context,
+	inviteID int64,
+	inviteeUserID int64,
+) error {
+	if inviteID <= 0 || inviteeUserID <= 0 {
+		return ErrInviteNotFound
+	}
+
+	if err := s.repository.Accept(
+		ctx,
+		inviteID,
+		inviteeUserID,
+	); err != nil {
+		return fmt.Errorf(
+			"accept invitation: %w",
+			err,
+		)
+	}
+
+	return nil
+}

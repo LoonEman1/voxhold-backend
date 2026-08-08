@@ -15,4 +15,10 @@ type Repository interface {
 		ctx context.Context,
 		inviteeUserID int64,
 	) ([]IncomingInvite, error)
+
+	Accept(
+		ctx context.Context,
+		inviteID int64,
+		inviteeUserID int64,
+	) error
 }
