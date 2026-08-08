@@ -134,3 +134,27 @@ func (s *Service) ListByUserID(
 
 	return joinedServers, nil
 }
+
+func (s *Service) ListMembers(
+	ctx context.Context,
+	serverID int64,
+	requesterUserID int64,
+) ([]ServerMember, error) {
+	if serverID <= 0 || requesterUserID <= 0 {
+		return nil, ErrMembersForbidden
+	}
+
+	members, err := s.repository.ListMembers(
+		ctx,
+		serverID,
+		requesterUserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list server members: %w",
+			err,
+		)
+	}
+
+	return members, nil
+}

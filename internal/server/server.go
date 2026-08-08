@@ -30,3 +30,14 @@ type JoinedServer struct {
 	Role      Role
 	JoinedAt  int64
 }
+
+type ServerMember struct {
+	UserID      int64
+	Username    string
+	CreatedAt   int64
+	Role        Role
+	JoinedAt    int64
+	About       string
+	CountryCode *string
+	LastSeenAt  *int64
+}

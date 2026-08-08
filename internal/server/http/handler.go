@@ -41,6 +41,12 @@ type Service interface {
 		ctx context.Context,
 		userID int64,
 	) ([]server.JoinedServer, error)
+
+	ListMembers(
+		ctx context.Context,
+		serverID int64,
+		requesterUserID int64,
+	) ([]server.ServerMember, error)
 }
 
 type Handler struct {
@@ -80,6 +86,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"GET /api/v1/me/servers",
 		requireAuth(http.HandlerFunc(h.listForCurrentUser)),
+	)
+
+	mux.Handle(
+		"GET /api/v1/servers/{serverID}/members",
+		requireAuth(http.HandlerFunc(h.listMembers)),
 	)
 }
 
@@ -358,5 +369,62 @@ func (h *Handler) listForCurrentUser(
 		w,
 		http.StatusOK,
 		newJoinedServersResponse(joinedServers),
+	)
+}
+
+func (h *Handler) listMembers(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	serverID, ok := httpapi.PositiveInt64PathValue(
+		w,
+		r,
+		"serverID",
+		"server",
+	)
+	if !ok {
+		return
+	}
+
+	members, err := h.service.ListMembers(
+		r.Context(),
+		serverID,
+		requesterUserID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, server.ErrMembersForbidden):
+			httpapi.WriteError(
+				w,
+				http.StatusForbidden,
+				"not allowed to view server members",
+			)
+
+		default:
+			log.Printf(
+				"list members for server %d: %v",
+				serverID,
+				err,
+			)
+
+			httpapi.WriteError(
+				w,
+				http.StatusInternalServerError,
+				"internal server error",
+			)
+		}
+
+		return
+	}
+
+	httpapi.WriteJSON(
+		w,
+		http.StatusOK,
+		newServerMembersResponse(members),
 	)
 }

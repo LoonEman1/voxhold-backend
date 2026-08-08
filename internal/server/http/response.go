@@ -60,3 +60,48 @@ func newJoinedServersResponse(
 
 	return response
 }
+
+type serverMemberResponse struct {
+	UserID      int64   `json:"user_id"`
+	Username    string  `json:"username"`
+	CreatedAt   int64   `json:"created_at"`
+	Role        string  `json:"role"`
+	JoinedAt    int64   `json:"joined_at"`
+	About       string  `json:"about"`
+	CountryCode *string `json:"country_code"`
+	LastSeenAt  *int64  `json:"last_seen_at"`
+}
+
+func newServerMemberResponse(
+	value server.ServerMember,
+) serverMemberResponse {
+	return serverMemberResponse{
+		UserID:      value.UserID,
+		Username:    value.Username,
+		CreatedAt:   value.CreatedAt,
+		Role:        string(value.Role),
+		JoinedAt:    value.JoinedAt,
+		About:       value.About,
+		CountryCode: value.CountryCode,
+		LastSeenAt:  value.LastSeenAt,
+	}
+}
+
+func newServerMembersResponse(
+	values []server.ServerMember,
+) []serverMemberResponse {
+	response := make(
+		[]serverMemberResponse,
+		0,
+		len(values),
+	)
+
+	for _, value := range values {
+		response = append(
+			response,
+			newServerMemberResponse(value),
+		)
+	}
+
+	return response
+}

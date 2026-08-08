@@ -30,4 +30,10 @@ type Repository interface {
 		ctx context.Context,
 		userID int64,
 	) ([]JoinedServer, error)
+
+	ListMembers(
+		ctx context.Context,
+		serverID int64,
+		requesterUserID int64,
+	) ([]ServerMember, error)
 }

@@ -355,3 +355,139 @@ func (r *Repository) ListByUserID(
 
 	return joinedServers, nil
 }
+
+func (r *Repository) ListMembers(
+	ctx context.Context,
+	serverID int64,
+	requesterUserID int64,
+) ([]server.ServerMember, error) {
+	tx, err := r.db.BeginTx(
+		ctx,
+		&sql.TxOptions{
+			ReadOnly: true,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"begin list members transaction: %w",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	const membershipQuery = `
+	SELECT EXISTS (
+		SELECT 1
+		FROM server_members
+		WHERE server_id = ?
+		  AND user_id = ?
+	)
+	`
+
+	var requesterIsMember bool
+
+	if err := tx.QueryRowContext(
+		ctx,
+		membershipQuery,
+		serverID,
+		requesterUserID,
+	).Scan(&requesterIsMember); err != nil {
+		return nil, fmt.Errorf(
+			"check requester membership: %w",
+			err,
+		)
+	}
+
+	if !requesterIsMember {
+		return nil, server.ErrMembersForbidden
+	}
+
+	const membersQuery = `
+	SELECT
+		server_members.user_id,
+		users.username,
+		users.created_at,
+		server_members.role,
+		server_members.joined_at,
+		COALESCE(user_profiles.about, ''),
+		user_profiles.country_code,
+		user_profiles.last_seen_at
+	FROM server_members
+	JOIN users
+		ON users.id = server_members.user_id
+	LEFT JOIN user_profiles
+		ON user_profiles.user_id = server_members.user_id
+	WHERE server_members.server_id = ?
+	ORDER BY
+		CASE server_members.role
+			WHEN 'owner' THEN 0
+			WHEN 'admin' THEN 1
+			ELSE 2
+		END,
+		users.username ASC,
+		users.id ASC
+	`
+
+	rows, err := tx.QueryContext(
+		ctx,
+		membersQuery,
+		serverID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"query server members: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	members := make([]server.ServerMember, 0)
+
+	for rows.Next() {
+		var member server.ServerMember
+
+		if err := rows.Scan(
+			&member.UserID,
+			&member.Username,
+			&member.CreatedAt,
+			&member.Role,
+			&member.JoinedAt,
+			&member.About,
+			&member.CountryCode,
+			&member.LastSeenAt,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"scan server member: %w",
+				err,
+			)
+		}
+
+		members = append(members, member)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"iterate server members: %w",
+			err,
+		)
+	}
+
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf(
+			"close server member rows: %w",
+			err,
+		)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf(
+			"commit list members transaction: %w",
+			err,
+		)
+	}
+
+	return members, nil
+}

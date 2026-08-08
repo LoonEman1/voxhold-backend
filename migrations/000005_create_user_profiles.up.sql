@@ -2,7 +2,7 @@ CREATE TABLE user_profiles (
     user_id INTEGER PRIMARY KEY,
 
     about TEXT NOT NULL DEFAULT ''
-        check(length(about) <= 512),
+        CHECK (length(about) <= 512),
 
 
     country_code TEXT
