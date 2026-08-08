@@ -222,3 +222,180 @@ func (r *Repository) ListByServerID(
 
 	return channels, nil
 }
+
+func (r *Repository) Update(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+	name string,
+) (channel.Channel, error) {
+	const query = `
+	UPDATE channels
+	SET name = ?
+	WHERE id = ?
+	  AND server_id = ?
+	  AND EXISTS (
+		SELECT 1
+		FROM server_members
+		WHERE server_members.server_id = ?
+		  AND server_members.user_id = ?
+		  AND server_members.role IN (?, ?)
+	)
+	RETURNING
+		id,
+		server_id,
+		name,
+		kind,
+		position,
+		created_by,
+		created_at
+	`
+
+	var updatedChannel channel.Channel
+
+	err := r.db.QueryRowContext(
+		ctx,
+		query,
+		name,
+		channelID,
+		serverID,
+		serverID,
+		userID,
+		server.RoleOwner,
+		server.RoleAdmin,
+	).Scan(
+		&updatedChannel.ID,
+		&updatedChannel.ServerID,
+		&updatedChannel.Name,
+		&updatedChannel.Kind,
+		&updatedChannel.Position,
+		&updatedChannel.CreatedBy,
+		&updatedChannel.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			const existsQuery = `
+			SELECT EXISTS (
+				SELECT 1
+				FROM channels
+				WHERE id = ?
+				  AND server_id = ?
+			)
+			`
+
+			var exists bool
+
+			if err := r.db.QueryRowContext(
+				ctx,
+				existsQuery,
+				channelID,
+				serverID,
+			).Scan(&exists); err != nil {
+				return channel.Channel{}, fmt.Errorf(
+					"check channel existence: %w",
+					err,
+				)
+			}
+
+			if !exists {
+				return channel.Channel{}, channel.ErrNotFound
+			}
+
+			return channel.Channel{}, channel.ErrForbidden
+		}
+
+		var sqliteError *sqlite.Error
+		if errors.As(err, &sqliteError) &&
+			sqliteError.Code() == sqliteLib.SQLITE_CONSTRAINT_UNIQUE {
+
+			return channel.Channel{},
+				channel.ErrNameAlreadyExists
+		}
+
+		return channel.Channel{}, fmt.Errorf(
+			"update channel: %w",
+			err,
+		)
+	}
+
+	return updatedChannel, nil
+}
+
+func (r *Repository) Delete(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) error {
+	const query = `
+	DELETE FROM channels
+	WHERE id = ?
+	  AND server_id = ?
+	  AND EXISTS (
+		SELECT 1
+		FROM server_members
+		WHERE server_members.server_id = ?
+		  AND server_members.user_id = ?
+		  AND server_members.role IN (?, ?)
+	)
+	`
+
+	result, err := r.db.ExecContext(
+		ctx,
+		query,
+		channelID,
+		serverID,
+		serverID,
+		userID,
+		server.RoleOwner,
+		server.RoleAdmin,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"delete channel: %w",
+			err,
+		)
+	}
+
+	affectedRows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf(
+			"get deleted channel count: %w",
+			err,
+		)
+	}
+
+	if affectedRows > 0 {
+		return nil
+	}
+
+	const existsQuery = `
+	SELECT EXISTS (
+		SELECT 1
+		FROM channels
+		WHERE id = ?
+		  AND server_id = ?
+	)
+	`
+
+	var exists bool
+
+	if err := r.db.QueryRowContext(
+		ctx,
+		existsQuery,
+		channelID,
+		serverID,
+	).Scan(&exists); err != nil {
+		return fmt.Errorf(
+			"check channel existence: %w",
+			err,
+		)
+	}
+
+	if !exists {
+		return channel.ErrNotFound
+	}
+
+	return channel.ErrForbidden
+}

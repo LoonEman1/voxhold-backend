@@ -71,3 +71,70 @@ func (s *Service) ListByServerID(
 
 	return channels, nil
 }
+
+func (s *Service) Update(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+	input UpdateInput,
+) (Channel, error) {
+	if serverID <= 0 || channelID <= 0 {
+		return Channel{}, ErrNotFound
+	}
+
+	if userID <= 0 {
+		return Channel{}, ErrForbidden
+	}
+
+	input = input.Normalize()
+
+	if err := input.Validate(); err != nil {
+		return Channel{}, err
+	}
+
+	updatedChannel, err := s.repository.Update(
+		ctx,
+		serverID,
+		channelID,
+		userID,
+		input.Name,
+	)
+	if err != nil {
+		return Channel{}, fmt.Errorf(
+			"update channel: %w",
+			err,
+		)
+	}
+
+	return updatedChannel, nil
+}
+
+func (s *Service) Delete(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || channelID <= 0 {
+		return ErrNotFound
+	}
+
+	if userID <= 0 {
+		return ErrForbidden
+	}
+
+	if err := s.repository.Delete(
+		ctx,
+		serverID,
+		channelID,
+		userID,
+	); err != nil {
+		return fmt.Errorf(
+			"delete channel: %w",
+			err,
+		)
+	}
+
+	return nil
+}
