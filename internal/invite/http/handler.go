@@ -29,6 +29,12 @@ type Service interface {
 		inviteID int64,
 		inviteeUserID int64,
 	) error
+
+	Decline(
+		ctx context.Context,
+		inviteID int64,
+		inviteeUserID int64,
+	) error
 }
 
 type Handler struct {
@@ -58,6 +64,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"POST /api/v1/me/server-invites/{inviteID}/accept",
 		requireAuth(http.HandlerFunc(h.accept)),
+	)
+
+	mux.Handle(
+		"POST /api/v1/me/server-invites/{inviteID}/decline",
+		requireAuth(http.HandlerFunc(h.decline)),
 	)
 }
 
@@ -260,40 +271,78 @@ func (h *Handler) accept(
 		userID,
 	)
 	if err != nil {
-		switch {
-		case errors.Is(err, invite.ErrInviteNotFound):
-			httpapi.WriteError(
-				w,
-				http.StatusNotFound,
-				"invitation not found",
-			)
-
-		case errors.Is(err, invite.ErrInviteNotPending):
-			httpapi.WriteError(
-				w,
-				http.StatusConflict,
-				"invitation is no longer pending",
-			)
-
-		case errors.Is(err, invite.ErrInviteExpired):
-			httpapi.WriteError(
-				w,
-				http.StatusConflict,
-				"invitation has expired",
-			)
-
-		default:
-			log.Printf("accept invitation: %v", err)
-
-			httpapi.WriteError(
-				w,
-				http.StatusInternalServerError,
-				"internal server error",
-			)
-		}
-
+		writeRespondError(w, "accept invitation", err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) decline(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	inviteID, ok := httpapi.PositiveInt64PathValue(
+		w,
+		r,
+		"inviteID",
+		"invitation",
+	)
+	if !ok {
+		return
+	}
+
+	if err := h.service.Decline(
+		r.Context(),
+		inviteID,
+		userID,
+	); err != nil {
+		writeRespondError(w, "decline invitation", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeRespondError(
+	w http.ResponseWriter,
+	operation string,
+	err error,
+) {
+	switch {
+	case errors.Is(err, invite.ErrInviteNotFound):
+		httpapi.WriteError(
+			w,
+			http.StatusNotFound,
+			"invitation not found",
+		)
+
+	case errors.Is(err, invite.ErrInviteNotPending):
+		httpapi.WriteError(
+			w,
+			http.StatusConflict,
+			"invitation is no longer pending",
+		)
+
+	case errors.Is(err, invite.ErrInviteExpired):
+		httpapi.WriteError(
+			w,
+			http.StatusConflict,
+			"invitation has expired",
+		)
+
+	default:
+		log.Printf("%s: %v", operation, err)
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+	}
 }

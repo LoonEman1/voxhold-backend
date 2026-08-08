@@ -92,3 +92,26 @@ func (s *Service) Accept(
 
 	return nil
 }
+
+func (s *Service) Decline(
+	ctx context.Context,
+	inviteID int64,
+	inviteeUserID int64,
+) error {
+	if inviteID <= 0 || inviteeUserID <= 0 {
+		return ErrInviteNotFound
+	}
+
+	if err := s.repository.Decline(
+		ctx,
+		inviteID,
+		inviteeUserID,
+	); err != nil {
+		return fmt.Errorf(
+			"decline invitation: %w",
+			err,
+		)
+	}
+
+	return nil
+}

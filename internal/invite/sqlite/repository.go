@@ -450,3 +450,135 @@ func (r *Repository) Accept(
 
 	return nil
 }
+
+func (r *Repository) Decline(
+	ctx context.Context,
+	inviteID int64,
+	inviteeUserID int64,
+) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf(
+			"begin decline invitation transaction: %w",
+			err,
+		)
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	const declineQuery = `
+	UPDATE server_invites
+	SET
+		status = ?,
+		responded_at = unixepoch()
+	WHERE id = ?
+	  AND invitee_user_id = ?
+	  AND status = ?
+	  AND expires_at > unixepoch()
+	RETURNING id
+	`
+
+	var declinedInviteID int64
+
+	err = tx.QueryRowContext(
+		ctx,
+		declineQuery,
+		invite.StatusDeclined,
+		inviteID,
+		inviteeUserID,
+		invite.StatusPending,
+	).Scan(&declinedInviteID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf(
+				"decline invitation: %w",
+				err,
+			)
+		}
+
+		const stateQuery = `
+		SELECT
+			status,
+			expires_at <= unixepoch()
+		FROM server_invites
+		WHERE id = ?
+		  AND invitee_user_id = ?
+		`
+
+		var status invite.Status
+		var expired bool
+
+		err = tx.QueryRowContext(
+			ctx,
+			stateQuery,
+			inviteID,
+			inviteeUserID,
+		).Scan(
+			&status,
+			&expired,
+		)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return invite.ErrInviteNotFound
+			}
+
+			return fmt.Errorf(
+				"get invitation state: %w",
+				err,
+			)
+		}
+
+		if status == invite.StatusExpired {
+			return invite.ErrInviteExpired
+		}
+
+		if status != invite.StatusPending {
+			return invite.ErrInviteNotPending
+		}
+
+		if expired {
+			const expireQuery = `
+			UPDATE server_invites
+			SET status = ?
+			WHERE id = ?
+			  AND status = ?
+			`
+
+			_, err = tx.ExecContext(
+				ctx,
+				expireQuery,
+				invite.StatusExpired,
+				inviteID,
+				invite.StatusPending,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"expire invitation: %w",
+					err,
+				)
+			}
+
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf(
+					"commit expired invitation: %w",
+					err,
+				)
+			}
+
+			return invite.ErrInviteExpired
+		}
+
+		return invite.ErrInviteNotPending
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf(
+			"commit decline invitation transaction: %w",
+			err,
+		)
+	}
+
+	return nil
+}

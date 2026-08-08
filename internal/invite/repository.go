@@ -21,4 +21,10 @@ type Repository interface {
 		inviteID int64,
 		inviteeUserID int64,
 	) error
+
+	Decline(
+		ctx context.Context,
+		inviteID int64,
+		inviteeUserID int64,
+	) error
 }
