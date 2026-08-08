@@ -25,4 +25,9 @@ type Repository interface {
 		serverID int64,
 		userID int64,
 	) error
+
+	ListByUserID(
+		ctx context.Context,
+		userID int64,
+	) ([]JoinedServer, error)
 }

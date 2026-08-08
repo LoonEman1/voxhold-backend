@@ -286,3 +286,72 @@ func (r *Repository) Leave(
 
 	return nil
 }
+
+func (r *Repository) ListByUserID(
+	ctx context.Context,
+	userID int64,
+) ([]server.JoinedServer, error) {
+	const query = `
+	SELECT
+		servers.id,
+		servers.name,
+		servers.created_by,
+		servers.created_at,
+		server_members.role,
+		server_members.joined_at
+	FROM server_members
+	JOIN servers
+		ON servers.id = server_members.server_id
+	WHERE server_members.user_id = ?
+	ORDER BY
+		server_members.joined_at ASC,
+		servers.id ASC
+	`
+
+	rows, err := r.db.QueryContext(
+		ctx,
+		query,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"query user servers: %w",
+			err,
+		)
+	}
+	defer rows.Close()
+
+	joinedServers := make([]server.JoinedServer, 0)
+
+	for rows.Next() {
+		var joinedServer server.JoinedServer
+
+		if err := rows.Scan(
+			&joinedServer.ID,
+			&joinedServer.Name,
+			&joinedServer.CreatedBy,
+			&joinedServer.CreatedAt,
+			&joinedServer.Role,
+			&joinedServer.JoinedAt,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"scan user server: %w",
+				err,
+			)
+		}
+
+		joinedServers = append(
+			joinedServers,
+			joinedServer,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"iterate user servers: %w",
+			err,
+		)
+	}
+
+	return joinedServers, nil
+}

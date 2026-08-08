@@ -21,3 +21,12 @@ type Member struct {
 	Role     Role
 	JoinedAt int64
 }
+
+type JoinedServer struct {
+	ID        int64
+	Name      string
+	CreatedBy int64
+	CreatedAt int64
+	Role      Role
+	JoinedAt  int64
+}

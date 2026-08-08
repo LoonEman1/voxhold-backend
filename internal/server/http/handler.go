@@ -36,6 +36,11 @@ type Service interface {
 		serverID int64,
 		userID int64,
 	) error
+
+	ListByUserID(
+		ctx context.Context,
+		userID int64,
+	) ([]server.JoinedServer, error)
 }
 
 type Handler struct {
@@ -70,6 +75,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"DELETE /api/v1/servers/{serverID}/members/me",
 		requireAuth(http.HandlerFunc(h.leave)),
+	)
+
+	mux.Handle(
+		"GET /api/v1/me/servers",
+		requireAuth(http.HandlerFunc(h.listForCurrentUser)),
 	)
 }
 
@@ -314,4 +324,39 @@ func (h *Handler) leave(
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listForCurrentUser(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	joinedServers, err := h.service.ListByUserID(
+		r.Context(),
+		userID,
+	)
+	if err != nil {
+		log.Printf(
+			"list servers for user %d: %v",
+			userID,
+			err,
+		)
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	httpapi.WriteJSON(
+		w,
+		http.StatusOK,
+		newJoinedServersResponse(joinedServers),
+	)
 }

@@ -116,3 +116,21 @@ func (s *Service) Leave(
 
 	return nil
 }
+
+func (s *Service) ListByUserID(
+	ctx context.Context,
+	userID int64,
+) ([]JoinedServer, error) {
+	joinedServers, err := s.repository.ListByUserID(
+		ctx,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list user servers: %w",
+			err,
+		)
+	}
+
+	return joinedServers, nil
+}
