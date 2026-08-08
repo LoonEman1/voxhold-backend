@@ -47,3 +47,27 @@ func (s *Service) Create(
 
 	return createdChannel, nil
 }
+
+func (s *Service) ListByServerID(
+	ctx context.Context,
+	serverID int64,
+	userID int64,
+) ([]Channel, error) {
+	if serverID <= 0 || userID <= 0 {
+		return nil, ErrForbidden
+	}
+
+	channels, err := s.repository.ListByServerID(
+		ctx,
+		serverID,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list server channels: %w",
+			err,
+		)
+	}
+
+	return channels, nil
+}

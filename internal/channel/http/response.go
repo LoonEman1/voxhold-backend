@@ -23,3 +23,22 @@ func newChannelResponse(value channel.Channel) channelResponse {
 		CreatedAt: value.CreatedAt,
 	}
 }
+
+func newChannelsResponse(
+	values []channel.Channel,
+) []channelResponse {
+	response := make(
+		[]channelResponse,
+		0,
+		len(values),
+	)
+
+	for _, value := range values {
+		response = append(
+			response,
+			newChannelResponse(value),
+		)
+	}
+
+	return response
+}

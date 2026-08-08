@@ -10,4 +10,10 @@ type Repository interface {
 		name string,
 		kind Kind,
 	) (Channel, error)
+
+	ListByServerID(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+	) ([]Channel, error)
 }
