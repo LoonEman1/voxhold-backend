@@ -173,3 +173,49 @@ func (s *Service) Authenticate(ctx context.Context, token string) (int64, error)
 
 	return userID, nil
 }
+
+func (s *Service) Refresh(
+	ctx context.Context,
+	currentToken string,
+) (SessionInfo, error) {
+	currentToken = strings.TrimSpace(currentToken)
+	if currentToken == "" {
+		return SessionInfo{}, ErrUnauthorized
+	}
+
+	currentTokenHash := hashSessionToken(currentToken)
+
+	newToken, newTokenHash, err := generateSessionToken()
+	if err != nil {
+		return SessionInfo{}, fmt.Errorf(
+			"generate refreshed session token: %w",
+			err,
+		)
+	}
+
+	newExpiresAt := time.Now().
+		Add(sessionLifetime).
+		Unix()
+
+	err = s.sessions.Rotate(
+		ctx,
+		currentTokenHash,
+		newTokenHash,
+		newExpiresAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SessionInfo{}, ErrUnauthorized
+		}
+
+		return SessionInfo{}, fmt.Errorf(
+			"refresh session: %w",
+			err,
+		)
+	}
+
+	return SessionInfo{
+		Token:     newToken,
+		ExpiresAt: newExpiresAt,
+	}, nil
+}

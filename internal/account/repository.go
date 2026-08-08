@@ -32,4 +32,11 @@ type SessionRepository interface {
 		ctx context.Context,
 		tokenHash []byte,
 	) (int64, error)
+
+	Rotate(
+		ctx context.Context,
+		oldTokenHash []byte,
+		newTokenHash []byte,
+		newExpiresAt int64,
+	) error
 }

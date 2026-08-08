@@ -47,6 +47,11 @@ type Service interface {
 	Authenticate(
 		ctx context.Context, token string,
 	) (int64, error)
+
+	Refresh(
+		ctx context.Context,
+		currentToken string,
+	) (account.SessionInfo, error)
 }
 
 type registerRequest struct {
@@ -82,6 +87,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(
 		"POST /api/v1/auth/logout",
 		h.logout,
+	)
+
+	mux.HandleFunc(
+		"POST /api/v1/auth/refresh",
+		h.refresh,
 	)
 }
 
@@ -224,5 +234,50 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		newAuthResponse(result),
+	)
+}
+
+func (h *Handler) refresh(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	currentToken, ok := bearerToken(r)
+	if !ok {
+		httpapi.WriteError(
+			w,
+			http.StatusUnauthorized,
+			"authorization token is required",
+		)
+		return
+	}
+
+	refreshedSession, err := h.service.Refresh(
+		r.Context(),
+		currentToken,
+	)
+	if err != nil {
+		if errors.Is(err, account.ErrUnauthorized) {
+			httpapi.WriteError(
+				w,
+				http.StatusUnauthorized,
+				"invalid or expired session",
+			)
+			return
+		}
+
+		log.Printf("refresh session: %v", err)
+
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+		return
+	}
+
+	httpapi.WriteJSON(
+		w,
+		http.StatusOK,
+		newSessionResponse(refreshedSession),
 	)
 }

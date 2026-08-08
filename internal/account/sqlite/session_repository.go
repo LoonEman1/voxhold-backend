@@ -82,3 +82,39 @@ func (r *SessionRepository) FindActiveUserIDByTokenHash(
 
 	return userID, nil
 }
+
+func (r *SessionRepository) Rotate(
+	ctx context.Context,
+	oldTokenHash []byte,
+	newTokenHash []byte,
+	newExpiresAt int64,
+) error {
+	const query = `
+	UPDATE sessions
+	SET
+		token_hash = ?,
+		expires_at = ?,
+		created_at = unixepoch()
+	WHERE token_hash = ?
+	  AND expires_at > unixepoch()
+	RETURNING id
+	`
+
+	var sessionID int64
+
+	err := r.db.QueryRowContext(
+		ctx,
+		query,
+		newTokenHash,
+		newExpiresAt,
+		oldTokenHash,
+	).Scan(&sessionID)
+	if err != nil {
+		return fmt.Errorf(
+			"rotate session: %w",
+			err,
+		)
+	}
+
+	return nil
+}

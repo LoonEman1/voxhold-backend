@@ -27,9 +27,15 @@ func newAuthResponse(result account.LoginResult) authResponse {
 			Username:  result.User.Username,
 			CreatedAt: result.User.CreatedAt,
 		},
-		Session: sessionResponse{
-			Token:     result.Session.Token,
-			ExpiresAt: result.Session.ExpiresAt,
-		},
+		Session: newSessionResponse(result.Session),
+	}
+}
+
+func newSessionResponse(
+	value account.SessionInfo,
+) sessionResponse {
+	return sessionResponse{
+		Token:     value.Token,
+		ExpiresAt: value.ExpiresAt,
 	}
 }
