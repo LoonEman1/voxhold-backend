@@ -21,6 +21,9 @@ import (
 	inviteDomain "voxhold-backend/internal/invite"
 	invitehttp "voxhold-backend/internal/invite/http"
 	inviteSqlite "voxhold-backend/internal/invite/sqlite"
+	messageDomain "voxhold-backend/internal/message"
+	messagehttp "voxhold-backend/internal/message/http"
+	messageSqlite "voxhold-backend/internal/message/sqlite"
 	profileDomain "voxhold-backend/internal/profile"
 	profilehttp "voxhold-backend/internal/profile/http"
 	profileSqlite "voxhold-backend/internal/profile/sqlite"
@@ -57,6 +60,10 @@ func main() {
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
 
+	messageRepository := messageSqlite.NewRepository(db)
+	messageService := messageDomain.NewService(messageRepository)
+	messageHandler := messagehttp.NewHandler(messageService)
+
 	mux := http.NewServeMux()
 	accountHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(
@@ -74,6 +81,11 @@ func main() {
 	)
 
 	profileHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
+
+	messageHandler.RegisterRoutes(
 		mux,
 		accountHandler.RequireAuth,
 	)
