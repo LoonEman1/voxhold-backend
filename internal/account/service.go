@@ -18,17 +18,20 @@ var (
 )
 
 type Service struct {
-	users    UserRepository
-	sessions SessionRepository
+	users          UserRepository
+	sessions       SessionRepository
+	sessionRevoker SessionRevoker
 }
 
 func NewService(
 	users UserRepository,
 	sessions SessionRepository,
+	sessionRevoker SessionRevoker,
 ) *Service {
 	return &Service{
-		users:    users,
-		sessions: sessions,
+		users:          users,
+		sessions:       sessions,
+		sessionRevoker: sessionRevoker,
 	}
 }
 
@@ -102,6 +105,8 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	if err := s.sessions.DeleteByTokenHash(ctx, tokenHash); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
+
+	s.sessionRevoker.RevokeSession(token)
 
 	return nil
 }
@@ -213,6 +218,8 @@ func (s *Service) Refresh(
 			err,
 		)
 	}
+
+	s.sessionRevoker.RevokeSession(currentToken)
 
 	return SessionInfo{
 		Token:     newToken,

@@ -199,6 +199,45 @@ func (h *Handler) connect(
 		return
 	}
 
+	client := realtime.NewClient(
+		userID,
+		authentication.Token,
+	)
+
+	if !h.hub.Register(client) {
+		_ = connection.Close(
+			websocket.StatusInternalError,
+			"failed to register connection",
+		)
+		return
+	}
+
+	defer h.hub.Unregister(client)
+
+	confirmedUserID, err := h.authenticator.Authenticate(
+		authContext,
+		authentication.Token,
+	)
+	if err != nil || confirmedUserID != userID {
+		status := websocket.StatusInternalError
+		reason := "internal server error"
+
+		if errors.Is(err, account.ErrUnauthorized) ||
+			confirmedUserID != userID {
+
+			status = websocket.StatusPolicyViolation
+			reason = "invalid or expired session"
+		} else {
+			log.Printf(
+				"confirm websocket session: %v",
+				err,
+			)
+		}
+
+		_ = connection.Close(status, reason)
+		return
+	}
+
 	if err := writeEvent(
 		connection,
 		realtime.OutgoingEvent{
@@ -217,10 +256,6 @@ func (h *Handler) connect(
 		return
 	}
 
-	client := realtime.NewClient(userID)
-
-	defer h.hub.Unregister(client)
-
 	connectionContext, stopConnection :=
 		context.WithCancel(context.Background())
 
@@ -230,6 +265,7 @@ func (h *Handler) connect(
 		connectionContext,
 		connection,
 		client,
+		authentication.Token,
 	)
 }
 
@@ -237,6 +273,7 @@ func (h *Handler) serveConnection(
 	parentContext context.Context,
 	connection *websocket.Conn,
 	client *realtime.Client,
+	sessionToken string,
 ) {
 	ctx, cancel := context.WithCancel(parentContext)
 	defer cancel()
@@ -257,6 +294,7 @@ func (h *Handler) serveConnection(
 			ctx,
 			connection,
 			client,
+			sessionToken,
 		)
 	}()
 
@@ -322,6 +360,7 @@ func (h *Handler) writeLoop(
 	ctx context.Context,
 	connection *websocket.Conn,
 	client *realtime.Client,
+	sessionToken string,
 ) error {
 	pingTicker := time.NewTicker(pingInterval)
 	defer pingTicker.Stop()
@@ -332,6 +371,13 @@ func (h *Handler) writeLoop(
 			return ctx.Err()
 
 		case <-client.Done():
+			if reason := client.CloseReason(); reason != "" {
+				_ = connection.Close(
+					websocket.StatusPolicyViolation,
+					reason,
+				)
+			}
+
 			return nil
 
 		case event := <-client.Outgoing():
@@ -360,9 +406,31 @@ func (h *Handler) writeLoop(
 					writeTimeout,
 				)
 
-			err := connection.Ping(pingContext)
+			authenticatedUserID, err :=
+				h.authenticator.Authenticate(
+					pingContext,
+					sessionToken,
+				)
+
+			if err == nil &&
+				authenticatedUserID != client.UserID() {
+
+				err = account.ErrUnauthorized
+			}
+
+			if err == nil {
+				err = connection.Ping(pingContext)
+			}
 
 			cancel()
+
+			if errors.Is(err, account.ErrUnauthorized) {
+				_ = connection.Close(
+					websocket.StatusPolicyViolation,
+					"session expired or revoked",
+				)
+				return nil
+			}
 
 			if err != nil {
 				return err
@@ -428,42 +496,35 @@ func (h *Handler) subscribeToChannel(
 		)
 	}
 
-	if err := h.channelAccess.CheckAccess(
+	allowed, err := h.checkChannelAccess(
 		ctx,
-		data.ServerID,
-		data.ChannelID,
-		client.UserID(),
-	); err != nil {
-		switch {
-		case errors.Is(err, channel.ErrNotFound),
-			errors.Is(err, channel.ErrForbidden):
-
-			return queueError(
-				client,
-				event.RequestID,
-				realtime.ErrorForbidden,
-				"not allowed to subscribe to channel",
-			)
-
-		default:
-			log.Printf(
-				"check channel subscription access: %v",
-				err,
-			)
-
-			return queueError(
-				client,
-				event.RequestID,
-				realtime.ErrorInternal,
-				"internal server error",
-			)
-		}
+		client,
+		event.RequestID,
+		data,
+	)
+	if err != nil || !allowed {
+		return err
 	}
 
 	h.hub.Subscribe(
 		client,
+		data.ServerID,
 		data.ChannelID,
 	)
+
+	allowed, err = h.checkChannelAccess(
+		ctx,
+		client,
+		event.RequestID,
+		data,
+	)
+	if err != nil || !allowed {
+		h.hub.Unsubscribe(
+			client,
+			data.ChannelID,
+		)
+		return err
+	}
 
 	return queueEvent(
 		client,
@@ -472,6 +533,46 @@ func (h *Handler) subscribeToChannel(
 			Type:      realtime.EventChannelSubscribed,
 			Data:      data,
 		},
+	)
+}
+
+func (h *Handler) checkChannelAccess(
+	ctx context.Context,
+	client *realtime.Client,
+	requestID string,
+	data realtime.ChannelSubscriptionData,
+) (bool, error) {
+	err := h.channelAccess.CheckAccess(
+		ctx,
+		data.ServerID,
+		data.ChannelID,
+		client.UserID(),
+	)
+	if err == nil {
+		return true, nil
+	}
+
+	if errors.Is(err, channel.ErrNotFound) ||
+		errors.Is(err, channel.ErrForbidden) {
+
+		return false, queueError(
+			client,
+			requestID,
+			realtime.ErrorForbidden,
+			"not allowed to subscribe to channel",
+		)
+	}
+
+	log.Printf(
+		"check channel subscription access: %v",
+		err,
+	)
+
+	return false, queueError(
+		client,
+		requestID,
+		realtime.ErrorInternal,
+		"internal server error",
 	)
 }
 

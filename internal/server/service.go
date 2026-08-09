@@ -6,11 +6,18 @@ import (
 )
 
 type Service struct {
-	repository Repository
+	repository    Repository
+	accessRevoker AccessRevoker
 }
 
-func NewService(repository Repository) *Service {
-	return &Service{repository: repository}
+func NewService(
+	repository Repository,
+	accessRevoker AccessRevoker,
+) *Service {
+	return &Service{
+		repository:    repository,
+		accessRevoker: accessRevoker,
+	}
 }
 
 func (s *Service) Create(
@@ -91,6 +98,8 @@ func (s *Service) Delete(
 		)
 	}
 
+	s.accessRevoker.RevokeServer(serverID)
+
 	return nil
 }
 
@@ -113,6 +122,11 @@ func (s *Service) Leave(
 			err,
 		)
 	}
+
+	s.accessRevoker.RevokeUserFromServer(
+		userID,
+		serverID,
+	)
 
 	return nil
 }

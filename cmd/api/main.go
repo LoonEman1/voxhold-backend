@@ -42,14 +42,23 @@ func main() {
 
 	log.Println("database is ready")
 
+	realtimeHub := realtimeDomain.NewHub()
+
 	userRepository := accountSqlite.NewUserRepository(db)
 	sessionRepository := accountSqlite.NewSessionRepository(db)
 
-	accountService := account.NewService(userRepository, sessionRepository)
+	accountService := account.NewService(
+		userRepository,
+		sessionRepository,
+		realtimeHub,
+	)
 	accountHandler := accounthttp.NewHandler(accountService)
 
 	serverRepository := serverSqlite.NewRepository(db)
-	serverService := serverDomain.NewService(serverRepository)
+	serverService := serverDomain.NewService(
+		serverRepository,
+		realtimeHub,
+	)
 	serverHandler := serverhttp.NewHandler(serverService)
 
 	channelRepository := channelSqlite.NewRepository(db)
@@ -63,8 +72,6 @@ func main() {
 	profileRepository := profileSqlite.NewRepository(db)
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
-
-	realtimeHub := realtimeDomain.NewHub()
 
 	messageEventPublisher :=
 		realtimeDomain.NewMessageEventPublisher(

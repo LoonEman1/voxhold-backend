@@ -1,27 +1,44 @@
 package realtime
 
-import "sync"
+import (
+	"crypto/sha256"
+	"strings"
+	"sync"
+)
 
 const outgoingBufferSize = 128
 
 type Client struct {
-	userID int64
+	userID     int64
+	sessionKey [sha256.Size]byte
 
-	outgoing  chan OutgoingEvent
-	done      chan struct{}
-	closeOnce sync.Once
+	outgoing    chan OutgoingEvent
+	done        chan struct{}
+	closeOnce   sync.Once
+	stateMu     sync.RWMutex
+	closeReason string
 
 	subscriptionsMu sync.RWMutex
-	subscriptions   map[int64]struct{}
+	subscriptions   map[int64]int64
 }
 
-func NewClient(userID int64) *Client {
+func NewClient(
+	userID int64,
+	sessionToken string,
+) *Client {
 	return &Client{
 		userID:        userID,
+		sessionKey:    newSessionKey(sessionToken),
 		outgoing:      make(chan OutgoingEvent, outgoingBufferSize),
 		done:          make(chan struct{}),
-		subscriptions: make(map[int64]struct{}),
+		subscriptions: make(map[int64]int64),
 	}
+}
+
+func newSessionKey(token string) [sha256.Size]byte {
+	return sha256.Sum256(
+		[]byte(strings.TrimSpace(token)),
+	)
 }
 
 func (c *Client) UserID() int64 {
@@ -37,14 +54,32 @@ func (c *Client) Done() <-chan struct{} {
 }
 
 func (c *Client) Close() {
+	c.CloseWithReason("")
+}
+
+func (c *Client) CloseWithReason(reason string) {
 	c.closeOnce.Do(func() {
+		c.stateMu.Lock()
+		defer c.stateMu.Unlock()
+
+		c.closeReason = reason
 		close(c.done)
 	})
+}
+
+func (c *Client) CloseReason() string {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.closeReason
 }
 
 func (c *Client) enqueue(
 	event OutgoingEvent,
 ) bool {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
 	select {
 	case <-c.done:
 		return false
@@ -55,21 +90,19 @@ func (c *Client) enqueue(
 	case c.outgoing <- event:
 		return true
 
-	case <-c.done:
-		return false
-
 	default:
 		return false
 	}
 }
 
 func (c *Client) addSubscription(
+	serverID int64,
 	channelID int64,
 ) {
 	c.subscriptionsMu.Lock()
 	defer c.subscriptionsMu.Unlock()
 
-	c.subscriptions[channelID] = struct{}{}
+	c.subscriptions[channelID] = serverID
 }
 
 func (c *Client) removeSubscription(
@@ -96,6 +129,27 @@ func (c *Client) subscriptionIDs() []int64 {
 			channelIDs,
 			channelID,
 		)
+	}
+
+	return channelIDs
+}
+
+func (c *Client) subscriptionIDsForServer(
+	serverID int64,
+) []int64 {
+	c.subscriptionsMu.RLock()
+	defer c.subscriptionsMu.RUnlock()
+
+	channelIDs := make([]int64, 0)
+
+	for channelID, subscribedServerID := range c.subscriptions {
+
+		if subscribedServerID == serverID {
+			channelIDs = append(
+				channelIDs,
+				channelID,
+			)
+		}
 	}
 
 	return channelIDs
