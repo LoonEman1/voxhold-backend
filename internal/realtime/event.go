@@ -16,6 +16,9 @@ const (
 	EventChannelUnsubscribe  EventType = "channel.unsubscribe"
 	EventChannelUnsubscribed EventType = "channel.unsubscribed"
 
+	EventServerMemberRemoved EventType = "server.member_removed"
+	EventServerDeleted       EventType = "server.deleted"
+
 	EventMessageCreated EventType = "message.created"
 	EventMessageUpdated EventType = "message.updated"
 	EventMessageDeleted EventType = "message.deleted"
@@ -74,4 +77,13 @@ type MessageCreatedData struct {
 	Content   string            `json:"content"`
 	CreatedAt int64             `json:"created_at"`
 	EditedAt  *int64            `json:"edited_at"`
+}
+
+type ServerMemberRemovedData struct {
+	ServerID int64 `json:"server_id"`
+	UserID   int64 `json:"user_id"`
+}
+
+type ServerDeletedData struct {
+	ServerID int64 `json:"server_id"`
 }

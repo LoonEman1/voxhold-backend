@@ -210,13 +210,26 @@ func (h *Hub) RevokeUserFromServer(
 		return
 	}
 
+	serverClients := h.clientsForServer(serverID)
+
 	h.clientsMu.RLock()
-	clients := clientSetSnapshot(
+	userClients := clientSetSnapshot(
 		h.clientsByUser[userID],
 	)
 	h.clientsMu.RUnlock()
 
-	for _, client := range clients {
+	h.broadcastToClients(
+		append(serverClients, userClients...),
+		OutgoingEvent{
+			Type: EventServerMemberRemoved,
+			Data: ServerMemberRemovedData{
+				ServerID: serverID,
+				UserID:   userID,
+			},
+		},
+	)
+
+	for _, client := range userClients {
 		h.unsubscribeFromServer(
 			client,
 			serverID,
@@ -229,15 +242,71 @@ func (h *Hub) RevokeServer(serverID int64) {
 		return
 	}
 
-	h.clientsMu.RLock()
-	clients := clientSetSnapshot(h.clients)
-	h.clientsMu.RUnlock()
+	clients := h.clientsForServer(serverID)
+
+	h.broadcastToClients(
+		clients,
+		OutgoingEvent{
+			Type: EventServerDeleted,
+			Data: ServerDeletedData{
+				ServerID: serverID,
+			},
+		},
+	)
 
 	for _, client := range clients {
 		h.unsubscribeFromServer(
 			client,
 			serverID,
 		)
+	}
+}
+
+func (h *Hub) clientsForServer(
+	serverID int64,
+) []*Client {
+	h.clientsMu.RLock()
+	clients := clientSetSnapshot(h.clients)
+	h.clientsMu.RUnlock()
+
+	serverClients := make(
+		[]*Client,
+		0,
+		len(clients),
+	)
+
+	for _, client := range clients {
+		if client.hasSubscriptionForServer(serverID) {
+			serverClients = append(
+				serverClients,
+				client,
+			)
+		}
+
+	}
+
+	return serverClients
+}
+
+func (h *Hub) broadcastToClients(
+	clients []*Client,
+	event OutgoingEvent,
+) {
+	delivered := make(
+		map[*Client]struct{},
+		len(clients),
+	)
+
+	for _, client := range clients {
+		if _, exists := delivered[client]; exists {
+			continue
+		}
+
+		delivered[client] = struct{}{}
+
+		if !client.enqueue(event) {
+			h.Unregister(client)
+		}
 	}
 }
 
