@@ -59,4 +59,23 @@ type Repository interface {
 		channelID int64,
 		userID int64,
 	) ([]PinnedMessage, error)
+
+	Search(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+		query string,
+		beforeID *int64,
+		limit int,
+	) ([]SearchResult, error)
+
+	GetContext(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		messageID int64,
+		userID int64,
+		before int,
+		after int,
+	) (Context, error)
 }

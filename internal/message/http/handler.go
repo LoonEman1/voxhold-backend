@@ -68,6 +68,22 @@ type Service interface {
 		channelID int64,
 		userID int64,
 	) ([]message.PinnedMessage, error)
+
+	Search(
+		ctx context.Context,
+		serverID int64,
+		userID int64,
+		input message.SearchInput,
+	) (message.SearchPage, error)
+
+	GetContext(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		messageID int64,
+		userID int64,
+		input message.ContextInput,
+	) (message.Context, error)
 }
 
 type Handler struct {
@@ -117,6 +133,16 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"GET /api/v1/servers/{serverID}/channels/{channelID}/pins",
 		requireAuth(http.HandlerFunc(h.listPinned)),
+	)
+
+	mux.Handle(
+		"GET /api/v1/servers/{serverID}/messages/search",
+		requireAuth(http.HandlerFunc(h.search)),
+	)
+
+	mux.Handle(
+		"GET /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/context",
+		requireAuth(http.HandlerFunc(h.getContext)),
 	)
 }
 
