@@ -138,3 +138,32 @@ func (s *Service) Delete(
 
 	return nil
 }
+
+func (s *Service) CheckAccess(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || channelID <= 0 {
+		return ErrNotFound
+	}
+
+	if userID <= 0 {
+		return ErrForbidden
+	}
+
+	if err := s.repository.CheckAccess(
+		ctx,
+		serverID,
+		channelID,
+		userID,
+	); err != nil {
+		return fmt.Errorf(
+			"check channel access: %w",
+			err,
+		)
+	}
+
+	return nil
+}

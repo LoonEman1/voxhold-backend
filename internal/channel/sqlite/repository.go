@@ -399,3 +399,56 @@ func (r *Repository) Delete(
 
 	return channel.ErrForbidden
 }
+
+func (r *Repository) CheckAccess(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) error {
+	const query = `
+	SELECT
+		EXISTS (
+			SELECT 1
+			FROM channels
+			WHERE id = ?
+			  AND server_id = ?
+		),
+		EXISTS (
+			SELECT 1
+			FROM server_members
+			WHERE server_id = ?
+			  AND user_id = ?
+		)
+	`
+
+	var channelExists bool
+	var userIsMember bool
+
+	if err := r.db.QueryRowContext(
+		ctx,
+		query,
+		channelID,
+		serverID,
+		serverID,
+		userID,
+	).Scan(
+		&channelExists,
+		&userIsMember,
+	); err != nil {
+		return fmt.Errorf(
+			"query channel access: %w",
+			err,
+		)
+	}
+
+	if !channelExists {
+		return channel.ErrNotFound
+	}
+
+	if !userIsMember {
+		return channel.ErrForbidden
+	}
+
+	return nil
+}
