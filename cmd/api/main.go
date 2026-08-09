@@ -27,6 +27,8 @@ import (
 	profileDomain "voxhold-backend/internal/profile"
 	profilehttp "voxhold-backend/internal/profile/http"
 	profileSqlite "voxhold-backend/internal/profile/sqlite"
+
+	realtimehttp "voxhold-backend/internal/realtime/http"
 )
 
 func main() {
@@ -64,6 +66,10 @@ func main() {
 	messageService := messageDomain.NewService(messageRepository)
 	messageHandler := messagehttp.NewHandler(messageService)
 
+	webSocketHandler := realtimehttp.NewHandler(
+		accountService,
+	)
+
 	mux := http.NewServeMux()
 	accountHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(
@@ -89,6 +95,8 @@ func main() {
 		mux,
 		accountHandler.RequireAuth,
 	)
+
+	webSocketHandler.RegisterRoutes(mux)
 
 	port := os.Getenv("HTTP_PORT")
 	if port == "" {
