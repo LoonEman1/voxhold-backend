@@ -37,3 +37,82 @@ func (p *MessageEventPublisher) PublishMessageCreated(
 		},
 	)
 }
+
+func (p *MessageEventPublisher) PublishMessageUpdated(
+	value message.Message,
+) {
+	p.hub.Publish(
+		value.ChannelID,
+		OutgoingEvent{
+			Type: EventMessageUpdated,
+			Data: newMessageData(value),
+		},
+	)
+}
+
+func (p *MessageEventPublisher) PublishMessageDeleted(
+	value message.Message,
+) {
+	p.hub.Publish(
+		value.ChannelID,
+		OutgoingEvent{
+			Type: EventMessageDeleted,
+			Data: MessageDeletedData{
+				ChannelID: value.ChannelID,
+				MessageID: value.ID,
+			},
+		},
+	)
+}
+
+func (p *MessageEventPublisher) PublishMessagePinned(
+	value message.Pin,
+) {
+	p.hub.Publish(
+		value.ChannelID,
+		OutgoingEvent{
+			Type: EventMessagePinned,
+			Data: MessagePinnedData{
+				ChannelID: value.ChannelID,
+				MessageID: value.MessageID,
+				PinnedBy: MessageAuthorData{
+					UserID:   value.PinnedBy.UserID,
+					Username: value.PinnedBy.Username,
+				},
+				PinnedAt: value.PinnedAt,
+			},
+		},
+	)
+}
+
+func (p *MessageEventPublisher) PublishMessageUnpinned(
+	channelID int64,
+	messageID int64,
+) {
+	p.hub.Publish(
+		channelID,
+		OutgoingEvent{
+			Type: EventMessageUnpinned,
+			Data: MessageUnpinnedData{
+				ChannelID: channelID,
+				MessageID: messageID,
+			},
+		},
+	)
+}
+
+func newMessageData(
+	value message.Message,
+) MessageCreatedData {
+	return MessageCreatedData{
+		ID:        value.ID,
+		ChannelID: value.ChannelID,
+		Author: MessageAuthorData{
+			UserID:   value.Author.UserID,
+			Username: value.Author.Username,
+		},
+		Content:   value.Content,
+		CreatedAt: value.CreatedAt,
+		EditedAt:  value.EditedAt,
+	}
+}

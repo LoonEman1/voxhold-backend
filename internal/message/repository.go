@@ -19,4 +19,44 @@ type Repository interface {
 		beforeID *int64,
 		limit int,
 	) ([]Message, error)
+
+	Update(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		messageID int64,
+		userID int64,
+		content string,
+	) (Message, error)
+
+	Delete(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		messageID int64,
+		userID int64,
+	) (Message, error)
+
+	Pin(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		messageID int64,
+		userID int64,
+	) (Pin, bool, error)
+
+	Unpin(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		messageID int64,
+		userID int64,
+	) (bool, error)
+
+	ListPinned(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		userID int64,
+	) ([]PinnedMessage, error)
 }

@@ -28,6 +28,22 @@ var (
 	ErrTextChannelRequired = errors.New(
 		"messages can only be sent to text channels",
 	)
+
+	ErrMessageNotFound = errors.New(
+		"message not found",
+	)
+
+	ErrEditForbidden = errors.New(
+		"only the message author can edit it",
+	)
+
+	ErrDeleteForbidden = errors.New(
+		"not allowed to delete this message",
+	)
+
+	ErrPinForbidden = errors.New(
+		"not allowed to manage pinned messages",
+	)
 )
 
 type CreateInput struct {

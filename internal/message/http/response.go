@@ -42,6 +42,38 @@ type messagePageResponse struct {
 	Pagination paginationResponse `json:"pagination"`
 }
 
+type pinnedMessageResponse struct {
+	Message  messageResponse `json:"message"`
+	PinnedBy authorResponse  `json:"pinned_by"`
+	PinnedAt int64           `json:"pinned_at"`
+}
+
+func newPinnedMessagesResponse(
+	values []message.PinnedMessage,
+) []pinnedMessageResponse {
+	response := make(
+		[]pinnedMessageResponse,
+		0,
+		len(values),
+	)
+
+	for _, value := range values {
+		response = append(
+			response,
+			pinnedMessageResponse{
+				Message: newMessageResponse(value.Message),
+				PinnedBy: authorResponse{
+					UserID:   value.PinnedBy.UserID,
+					Username: value.PinnedBy.Username,
+				},
+				PinnedAt: value.PinnedAt,
+			},
+		)
+	}
+
+	return response
+}
+
 func newMessagePageResponse(
 	page message.Page,
 ) messagePageResponse {

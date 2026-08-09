@@ -124,3 +124,170 @@ func (s *Service) ListByChannelID(
 		HasMore:      hasMore,
 	}, nil
 }
+
+func (s *Service) Update(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	messageID int64,
+	userID int64,
+	input UpdateInput,
+) (Message, error) {
+	if serverID <= 0 || channelID <= 0 || messageID <= 0 {
+		return Message{}, ErrMessageNotFound
+	}
+
+	if userID <= 0 {
+		return Message{}, ErrForbidden
+	}
+
+	input = input.Normalize()
+	if err := input.Validate(); err != nil {
+		return Message{}, err
+	}
+
+	updatedMessage, err := s.repository.Update(
+		ctx,
+		serverID,
+		channelID,
+		messageID,
+		userID,
+		input.Content,
+	)
+	if err != nil {
+		return Message{}, fmt.Errorf(
+			"update message: %w",
+			err,
+		)
+	}
+
+	s.events.PublishMessageUpdated(updatedMessage)
+
+	return updatedMessage, nil
+}
+
+func (s *Service) Delete(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	messageID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || channelID <= 0 || messageID <= 0 {
+		return ErrMessageNotFound
+	}
+
+	if userID <= 0 {
+		return ErrForbidden
+	}
+
+	deletedMessage, err := s.repository.Delete(
+		ctx,
+		serverID,
+		channelID,
+		messageID,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete message: %w", err)
+	}
+
+	s.events.PublishMessageDeleted(deletedMessage)
+
+	return nil
+}
+
+func (s *Service) Pin(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	messageID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || channelID <= 0 || messageID <= 0 {
+		return ErrMessageNotFound
+	}
+
+	pin, created, err := s.repository.Pin(
+		ctx,
+		serverID,
+		channelID,
+		messageID,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("pin message: %w", err)
+	}
+
+	if created {
+		s.events.PublishMessagePinned(pin)
+	}
+
+	return nil
+}
+
+func (s *Service) Unpin(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	messageID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || channelID <= 0 || messageID <= 0 {
+		return ErrMessageNotFound
+	}
+
+	deleted, err := s.repository.Unpin(
+		ctx,
+		serverID,
+		channelID,
+		messageID,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("unpin message: %w", err)
+	}
+
+	if deleted {
+		s.events.PublishMessageUnpinned(
+			channelID,
+			messageID,
+		)
+	}
+
+	return nil
+}
+
+func (s *Service) ListPinned(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) ([]PinnedMessage, error) {
+	if serverID <= 0 || channelID <= 0 {
+		return nil, ErrChannelNotFound
+	}
+
+	if userID <= 0 {
+		return nil, ErrForbidden
+	}
+
+	pinnedMessages, err := s.repository.ListPinned(
+		ctx,
+		serverID,
+		channelID,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"list pinned messages: %w",
+			err,
+		)
+	}
+
+	if pinnedMessages == nil {
+		pinnedMessages = make([]PinnedMessage, 0)
+	}
+
+	return pinnedMessages, nil
+}
