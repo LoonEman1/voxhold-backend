@@ -1,6 +1,9 @@
 package realtime
 
-import "sync"
+import (
+	"slices"
+	"sync"
+)
 
 type room struct {
 	mu      sync.RWMutex
@@ -67,6 +70,9 @@ type Hub struct {
 	clients          map[*Client]struct{}
 	clientsByUser    map[int64]map[*Client]struct{}
 	clientsBySession map[[32]byte]map[*Client]struct{}
+
+	presenceMu sync.RWMutex
+	presence   map[int64]map[int64]int
 }
 
 func NewHub() *Hub {
@@ -75,6 +81,7 @@ func NewHub() *Hub {
 		clients:          make(map[*Client]struct{}),
 		clientsByUser:    make(map[int64]map[*Client]struct{}),
 		clientsBySession: make(map[[32]byte]map[*Client]struct{}),
+		presence:         make(map[int64]map[int64]int),
 	}
 }
 
@@ -84,15 +91,16 @@ func (h *Hub) Register(client *Client) bool {
 	}
 
 	h.clientsMu.Lock()
-	defer h.clientsMu.Unlock()
 
 	select {
 	case <-client.Done():
+		h.clientsMu.Unlock()
 		return false
 	default:
 	}
 
 	if _, exists := h.clients[client]; exists {
+		h.clientsMu.Unlock()
 		return false
 	}
 
@@ -111,6 +119,9 @@ func (h *Hub) Register(client *Client) bool {
 		h.clientsBySession[client.sessionKey] = sessionClients
 	}
 	sessionClients[client] = struct{}{}
+	h.clientsMu.Unlock()
+
+	h.registerPresence(client)
 
 	return true
 }
@@ -168,8 +179,6 @@ func (h *Hub) Unregister(client *Client) {
 	}
 
 	h.clientsMu.Lock()
-	defer h.clientsMu.Unlock()
-
 	delete(h.clients, client)
 
 	userClients := h.clientsByUser[client.userID]
@@ -183,6 +192,9 @@ func (h *Hub) Unregister(client *Client) {
 	if len(sessionClients) == 0 {
 		delete(h.clientsBySession, client.sessionKey)
 	}
+	h.clientsMu.Unlock()
+
+	h.unregisterPresence(client)
 }
 
 func (h *Hub) RevokeSession(token string) {
@@ -230,6 +242,7 @@ func (h *Hub) RevokeUserFromServer(
 	)
 
 	for _, client := range userClients {
+		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
 			serverID,
@@ -255,11 +268,16 @@ func (h *Hub) RevokeServer(serverID int64) {
 	)
 
 	for _, client := range clients {
+		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
 			serverID,
 		)
 	}
+
+	h.presenceMu.Lock()
+	delete(h.presence, serverID)
+	h.presenceMu.Unlock()
 }
 
 func (h *Hub) clientsForServer(
@@ -276,7 +294,7 @@ func (h *Hub) clientsForServer(
 	)
 
 	for _, client := range clients {
-		if client.hasSubscriptionForServer(serverID) {
+		if client.hasServer(serverID) {
 			serverClients = append(
 				serverClients,
 				client,
@@ -286,6 +304,199 @@ func (h *Hub) clientsForServer(
 	}
 
 	return serverClients
+}
+
+func (h *Hub) AddUserToServer(
+	userID int64,
+	serverID int64,
+) {
+	if userID <= 0 || serverID <= 0 {
+		return
+	}
+
+	h.clientsMu.RLock()
+	clients := clientSetSnapshot(h.clientsByUser[userID])
+	h.clientsMu.RUnlock()
+
+	for _, client := range clients {
+		if !client.addServer(serverID) {
+			continue
+		}
+
+		becameOnline := h.incrementPresence(
+			serverID,
+			userID,
+		)
+		if becameOnline {
+			h.broadcastPresence(
+				serverID,
+				userID,
+				PresenceOnline,
+			)
+		}
+
+		h.sendPresenceSnapshot(client, []int64{serverID})
+	}
+}
+
+func (h *Hub) registerPresence(client *Client) {
+	serverIDs := client.serverIDs()
+
+	for _, serverID := range serverIDs {
+		if h.incrementPresence(serverID, client.UserID()) {
+			h.broadcastPresence(
+				serverID,
+				client.UserID(),
+				PresenceOnline,
+			)
+		}
+	}
+
+	h.sendPresenceSnapshot(client, serverIDs)
+}
+
+func (h *Hub) unregisterPresence(client *Client) {
+	for _, serverID := range client.serverIDs() {
+		h.removeClientServer(client, serverID, true)
+	}
+}
+
+func (h *Hub) removeClientServer(
+	client *Client,
+	serverID int64,
+	announce bool,
+) {
+	if !client.removeServer(serverID) {
+		return
+	}
+
+	becameOffline := h.decrementPresence(
+		serverID,
+		client.UserID(),
+	)
+	if announce && becameOffline {
+		h.broadcastPresence(
+			serverID,
+			client.UserID(),
+			PresenceOffline,
+		)
+	}
+}
+
+func (h *Hub) incrementPresence(
+	serverID int64,
+	userID int64,
+) bool {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+
+	serverPresence := h.presence[serverID]
+	if serverPresence == nil {
+		serverPresence = make(map[int64]int)
+		h.presence[serverID] = serverPresence
+	}
+
+	wasOffline := serverPresence[userID] == 0
+	serverPresence[userID]++
+
+	return wasOffline
+}
+
+func (h *Hub) decrementPresence(
+	serverID int64,
+	userID int64,
+) bool {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+
+	serverPresence := h.presence[serverID]
+	if serverPresence == nil || serverPresence[userID] == 0 {
+		return false
+	}
+
+	serverPresence[userID]--
+	if serverPresence[userID] > 0 {
+		return false
+	}
+
+	delete(serverPresence, userID)
+	if len(serverPresence) == 0 {
+		delete(h.presence, serverID)
+	}
+
+	return true
+}
+
+func (h *Hub) onlineUserIDs(serverID int64) []int64 {
+	h.presenceMu.RLock()
+	defer h.presenceMu.RUnlock()
+
+	serverPresence := h.presence[serverID]
+	userIDs := make([]int64, 0, len(serverPresence))
+
+	for userID, connections := range serverPresence {
+		if connections > 0 {
+			userIDs = append(userIDs, userID)
+		}
+	}
+
+	slices.Sort(userIDs)
+
+	return userIDs
+}
+
+func (h *Hub) sendPresenceSnapshot(
+	client *Client,
+	serverIDs []int64,
+) {
+	servers := make(
+		[]ServerPresenceSnapshotData,
+		0,
+		len(serverIDs),
+	)
+
+	slices.Sort(serverIDs)
+
+	for _, serverID := range serverIDs {
+		servers = append(
+			servers,
+			ServerPresenceSnapshotData{
+				ServerID: serverID,
+				OnlineUserIDs: h.onlineUserIDs(
+					serverID,
+				),
+			},
+		)
+	}
+
+	if !client.enqueue(
+		OutgoingEvent{
+			Type: EventPresenceSnapshot,
+			Data: PresenceSnapshotData{
+				Servers: servers,
+			},
+		},
+	) {
+		h.Unregister(client)
+	}
+}
+
+func (h *Hub) broadcastPresence(
+	serverID int64,
+	userID int64,
+	status PresenceStatus,
+) {
+	h.broadcastToClients(
+		h.clientsForServer(serverID),
+		OutgoingEvent{
+			Type: EventPresenceUpdated,
+			Data: PresenceUpdatedData{
+				ServerID: serverID,
+				UserID:   userID,
+				Status:   status,
+			},
+		},
+	)
 }
 
 func (h *Hub) broadcastToClients(

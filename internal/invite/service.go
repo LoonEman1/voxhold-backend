@@ -9,12 +9,17 @@ import (
 const directInviteLifetime = 7 * 24 * time.Hour
 
 type Service struct {
-	repository Repository
+	repository  Repository
+	memberships MembershipRegistrar
 }
 
-func NewService(repository Repository) *Service {
+func NewService(
+	repository Repository,
+	memberships MembershipRegistrar,
+) *Service {
 	return &Service{
-		repository: repository,
+		repository:  repository,
+		memberships: memberships,
 	}
 }
 
@@ -79,16 +84,22 @@ func (s *Service) Accept(
 		return ErrInviteNotFound
 	}
 
-	if err := s.repository.Accept(
+	serverID, err := s.repository.Accept(
 		ctx,
 		inviteID,
 		inviteeUserID,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf(
 			"accept invitation: %w",
 			err,
 		)
 	}
+
+	s.memberships.AddUserToServer(
+		inviteeUserID,
+		serverID,
+	)
 
 	return nil
 }

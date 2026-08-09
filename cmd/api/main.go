@@ -66,7 +66,10 @@ func main() {
 	channelHandler := channelhttp.NewHandler(channelService)
 
 	inviteRepository := inviteSqlite.NewRepository(db)
-	inviteService := inviteDomain.NewService(inviteRepository)
+	inviteService := inviteDomain.NewService(
+		inviteRepository,
+		realtimeHub,
+	)
 	inviteHandler := invitehttp.NewHandler(inviteService)
 
 	profileRepository := profileSqlite.NewRepository(db)
@@ -92,6 +95,7 @@ func main() {
 	webSocketHandler := realtimehttp.NewHandler(
 		accountService,
 		channelService,
+		serverService,
 		realtimeHub,
 	)
 

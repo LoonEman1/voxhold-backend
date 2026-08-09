@@ -4,7 +4,7 @@ import "testing"
 
 func TestHubRevokeSession(t *testing.T) {
 	hub := NewHub()
-	client := NewClient(1, "session-token")
+	client := NewClient(1, "session-token", []int64{10})
 
 	if !hub.Register(client) {
 		t.Fatal("register client")
@@ -35,8 +35,8 @@ func TestHubRevokeSession(t *testing.T) {
 
 func TestHubRevokeUserFromServer(t *testing.T) {
 	hub := NewHub()
-	client := NewClient(1, "session-token")
-	observer := NewClient(2, "observer-session")
+	client := NewClient(1, "session-token", []int64{10, 20})
+	observer := NewClient(2, "observer-session", []int64{10})
 
 	if !hub.Register(client) {
 		t.Fatal("register client")
@@ -44,6 +44,8 @@ func TestHubRevokeUserFromServer(t *testing.T) {
 	if !hub.Register(observer) {
 		t.Fatal("register observer")
 	}
+	drainOutgoingEvents(client)
+	drainOutgoingEvents(observer)
 
 	hub.Subscribe(client, 10, 100)
 	hub.Subscribe(client, 20, 200)
@@ -77,11 +79,13 @@ func TestHubRevokeUserFromServer(t *testing.T) {
 
 func TestHubRevokeServer(t *testing.T) {
 	hub := NewHub()
-	firstClient := NewClient(1, "first-session")
-	secondClient := NewClient(2, "second-session")
+	firstClient := NewClient(1, "first-session", []int64{10})
+	secondClient := NewClient(2, "second-session", []int64{10})
 
 	hub.Register(firstClient)
 	hub.Register(secondClient)
+	drainOutgoingEvents(firstClient)
+	drainOutgoingEvents(secondClient)
 	hub.Subscribe(firstClient, 10, 100)
 	hub.Subscribe(firstClient, 10, 101)
 	hub.Subscribe(secondClient, 10, 100)
@@ -100,6 +104,69 @@ func TestHubRevokeServer(t *testing.T) {
 			"message delivered after server revocation: %d",
 			delivered,
 		)
+	}
+}
+
+func TestHubPresenceUsesAllUserConnections(t *testing.T) {
+	hub := NewHub()
+	observer := NewClient(2, "observer", []int64{10})
+	first := NewClient(1, "first", []int64{10})
+	second := NewClient(1, "second", []int64{10})
+
+	hub.Register(observer)
+	drainOutgoingEvents(observer)
+
+	hub.Register(first)
+	assertPresenceUpdatedEvent(
+		t,
+		observer,
+		10,
+		1,
+		PresenceOnline,
+	)
+	drainOutgoingEvents(first)
+
+	hub.Register(second)
+	assertNoOutgoingEvent(t, observer)
+	drainOutgoingEvents(second)
+
+	hub.Unregister(first)
+	assertNoOutgoingEvent(t, observer)
+
+	hub.Unregister(second)
+	assertPresenceUpdatedEvent(
+		t,
+		observer,
+		10,
+		1,
+		PresenceOffline,
+	)
+}
+
+func assertPresenceUpdatedEvent(
+	t *testing.T,
+	client *Client,
+	serverID int64,
+	userID int64,
+	status PresenceStatus,
+) {
+	t.Helper()
+
+	event := nextOutgoingEvent(t, client)
+	if event.Type != EventPresenceUpdated {
+		t.Fatalf("unexpected event type: %s", event.Type)
+	}
+
+	data, ok := event.Data.(PresenceUpdatedData)
+	if !ok {
+		t.Fatalf("unexpected event data: %T", event.Data)
+	}
+
+	if data.ServerID != serverID ||
+		data.UserID != userID ||
+		data.Status != status {
+
+		t.Fatalf("unexpected event data: %+v", data)
 	}
 }
 
@@ -173,5 +240,16 @@ func assertNoOutgoingEvent(
 	case event := <-client.Outgoing():
 		t.Fatalf("unexpected outgoing event: %s", event.Type)
 	default:
+	}
+}
+
+func drainOutgoingEvents(client *Client) {
+	for {
+		select {
+		case <-client.Outgoing():
+			continue
+		default:
+			return
+		}
 	}
 }

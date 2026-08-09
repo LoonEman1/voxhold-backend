@@ -15,6 +15,7 @@ import (
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/channel"
 	"voxhold-backend/internal/realtime"
+	serverDomain "voxhold-backend/internal/server"
 )
 
 const (
@@ -40,20 +41,30 @@ type ChannelAccess interface {
 	) error
 }
 
+type MembershipLister interface {
+	ListByUserID(
+		ctx context.Context,
+		userID int64,
+	) ([]serverDomain.JoinedServer, error)
+}
+
 type Handler struct {
 	authenticator Authenticator
 	channelAccess ChannelAccess
+	memberships   MembershipLister
 	hub           *realtime.Hub
 }
 
 func NewHandler(
 	authenticator Authenticator,
 	channelAccess ChannelAccess,
+	memberships MembershipLister,
 	hub *realtime.Hub,
 ) *Handler {
 	return &Handler{
 		authenticator: authenticator,
 		channelAccess: channelAccess,
+		memberships:   memberships,
 		hub:           hub,
 	}
 }
@@ -199,9 +210,31 @@ func (h *Handler) connect(
 		return
 	}
 
+	joinedServers, err := h.memberships.ListByUserID(
+		authContext,
+		userID,
+	)
+	if err != nil {
+		log.Printf(
+			"list websocket user memberships: %v",
+			err,
+		)
+		_ = connection.Close(
+			websocket.StatusInternalError,
+			"internal server error",
+		)
+		return
+	}
+
+	serverIDs := make([]int64, 0, len(joinedServers))
+	for _, joinedServer := range joinedServers {
+		serverIDs = append(serverIDs, joinedServer.ID)
+	}
+
 	client := realtime.NewClient(
 		userID,
 		authentication.Token,
+		serverIDs,
 	)
 
 	if !h.hub.Register(client) {

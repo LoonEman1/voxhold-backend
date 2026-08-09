@@ -299,10 +299,10 @@ func (r *Repository) Accept(
 	ctx context.Context,
 	inviteID int64,
 	inviteeUserID int64,
-) error {
+) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf(
+		return 0, fmt.Errorf(
 			"begin accept invitation transaction: %w",
 			err,
 		)
@@ -336,7 +336,7 @@ func (r *Repository) Accept(
 	).Scan(&serverID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf(
+			return 0, fmt.Errorf(
 				"accept invitation: %w",
 				err,
 			)
@@ -365,21 +365,21 @@ func (r *Repository) Accept(
 		)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return invite.ErrInviteNotFound
+				return 0, invite.ErrInviteNotFound
 			}
 
-			return fmt.Errorf(
+			return 0, fmt.Errorf(
 				"get invitation state: %w",
 				err,
 			)
 		}
 
 		if status == invite.StatusExpired {
-			return invite.ErrInviteExpired
+			return 0, invite.ErrInviteExpired
 		}
 
 		if status != invite.StatusPending {
-			return invite.ErrInviteNotPending
+			return 0, invite.ErrInviteNotPending
 		}
 
 		if expired {
@@ -398,23 +398,23 @@ func (r *Repository) Accept(
 				invite.StatusPending,
 			)
 			if err != nil {
-				return fmt.Errorf(
+				return 0, fmt.Errorf(
 					"expire invitation: %w",
 					err,
 				)
 			}
 
 			if err := tx.Commit(); err != nil {
-				return fmt.Errorf(
+				return 0, fmt.Errorf(
 					"commit expired invitation: %w",
 					err,
 				)
 			}
 
-			return invite.ErrInviteExpired
+			return 0, invite.ErrInviteExpired
 		}
 
-		return invite.ErrInviteNotPending
+		return 0, invite.ErrInviteNotPending
 	}
 
 	const addMemberQuery = `
@@ -435,20 +435,20 @@ func (r *Repository) Accept(
 		server.RoleMember,
 	)
 	if err != nil {
-		return fmt.Errorf(
+		return 0, fmt.Errorf(
 			"add invited server member: %w",
 			err,
 		)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf(
+		return 0, fmt.Errorf(
 			"commit accept invitation transaction: %w",
 			err,
 		)
 	}
 
-	return nil
+	return serverID, nil
 }
 
 func (r *Repository) Decline(

@@ -43,6 +43,11 @@ func (s *Service) Create(
 		)
 	}
 
+	s.accessRevoker.AddUserToServer(
+		createdBy,
+		createdServer.ID,
+	)
+
 	return createdServer, nil
 }
 

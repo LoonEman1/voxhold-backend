@@ -20,19 +20,32 @@ type Client struct {
 
 	subscriptionsMu sync.RWMutex
 	subscriptions   map[int64]int64
+
+	serversMu sync.RWMutex
+	servers   map[int64]struct{}
 }
 
 func NewClient(
 	userID int64,
 	sessionToken string,
+	serverIDs []int64,
 ) *Client {
-	return &Client{
+	client := &Client{
 		userID:        userID,
 		sessionKey:    newSessionKey(sessionToken),
 		outgoing:      make(chan OutgoingEvent, outgoingBufferSize),
 		done:          make(chan struct{}),
 		subscriptions: make(map[int64]int64),
+		servers:       make(map[int64]struct{}, len(serverIDs)),
 	}
+
+	for _, serverID := range serverIDs {
+		if serverID > 0 {
+			client.servers[serverID] = struct{}{}
+		}
+	}
+
+	return client
 }
 
 func newSessionKey(token string) [sha256.Size]byte {
@@ -168,6 +181,50 @@ func (c *Client) hasSubscriptionForServer(
 	}
 
 	return false
+}
+
+func (c *Client) serverIDs() []int64 {
+	c.serversMu.RLock()
+	defer c.serversMu.RUnlock()
+
+	serverIDs := make([]int64, 0, len(c.servers))
+	for serverID := range c.servers {
+		serverIDs = append(serverIDs, serverID)
+	}
+
+	return serverIDs
+}
+
+func (c *Client) hasServer(serverID int64) bool {
+	c.serversMu.RLock()
+	defer c.serversMu.RUnlock()
+
+	_, exists := c.servers[serverID]
+	return exists
+}
+
+func (c *Client) addServer(serverID int64) bool {
+	c.serversMu.Lock()
+	defer c.serversMu.Unlock()
+
+	if _, exists := c.servers[serverID]; exists {
+		return false
+	}
+
+	c.servers[serverID] = struct{}{}
+	return true
+}
+
+func (c *Client) removeServer(serverID int64) bool {
+	c.serversMu.Lock()
+	defer c.serversMu.Unlock()
+
+	if _, exists := c.servers[serverID]; !exists {
+		return false
+	}
+
+	delete(c.servers, serverID)
+	return true
 }
 
 func (c *Client) Send(
