@@ -61,3 +61,17 @@ type ErrorData struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
 }
+
+type MessageAuthorData struct {
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+}
+
+type MessageCreatedData struct {
+	ID        int64             `json:"id"`
+	ChannelID int64             `json:"channel_id"`
+	Author    MessageAuthorData `json:"author"`
+	Content   string            `json:"content"`
+	CreatedAt int64             `json:"created_at"`
+	EditedAt  *int64            `json:"edited_at"`
+}

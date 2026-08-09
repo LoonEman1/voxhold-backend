@@ -8,11 +8,16 @@ import (
 
 type Service struct {
 	repository Repository
+	events     EventPublisher
 }
 
-func NewService(repository Repository) *Service {
+func NewService(
+	repository Repository,
+	events EventPublisher,
+) *Service {
 	return &Service{
 		repository: repository,
+		events:     events,
 	}
 }
 
@@ -50,6 +55,10 @@ func (s *Service) Create(
 			err,
 		)
 	}
+
+	s.events.PublishMessageCreated(
+		createdMessage,
+	)
 
 	return createdMessage, nil
 }

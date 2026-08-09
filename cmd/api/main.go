@@ -29,6 +29,8 @@ import (
 	profileSqlite "voxhold-backend/internal/profile/sqlite"
 
 	realtimehttp "voxhold-backend/internal/realtime/http"
+
+	realtimeDomain "voxhold-backend/internal/realtime"
 )
 
 func main() {
@@ -62,12 +64,28 @@ func main() {
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
 
+	realtimeHub := realtimeDomain.NewHub()
+
+	messageEventPublisher :=
+		realtimeDomain.NewMessageEventPublisher(
+			realtimeHub,
+		)
+
 	messageRepository := messageSqlite.NewRepository(db)
-	messageService := messageDomain.NewService(messageRepository)
-	messageHandler := messagehttp.NewHandler(messageService)
+
+	messageService := messageDomain.NewService(
+		messageRepository,
+		messageEventPublisher,
+	)
+
+	messageHandler := messagehttp.NewHandler(
+		messageService,
+	)
 
 	webSocketHandler := realtimehttp.NewHandler(
 		accountService,
+		channelService,
+		realtimeHub,
 	)
 
 	mux := http.NewServeMux()

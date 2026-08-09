@@ -100,3 +100,9 @@ func (c *Client) subscriptionIDs() []int64 {
 
 	return channelIDs
 }
+
+func (c *Client) Send(
+	event OutgoingEvent,
+) bool {
+	return c.enqueue(event)
+}
