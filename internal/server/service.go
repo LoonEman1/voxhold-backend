@@ -8,15 +8,18 @@ import (
 type Service struct {
 	repository    Repository
 	accessRevoker AccessRevoker
+	events        EventPublisher
 }
 
 func NewService(
 	repository Repository,
 	accessRevoker AccessRevoker,
+	events EventPublisher,
 ) *Service {
 	return &Service{
 		repository:    repository,
 		accessRevoker: accessRevoker,
+		events:        events,
 	}
 }
 
@@ -176,4 +179,81 @@ func (s *Service) ListMembers(
 	}
 
 	return members, nil
+}
+
+func (s *Service) UpdateMemberRole(
+	ctx context.Context,
+	serverID int64,
+	requesterUserID int64,
+	targetUserID int64,
+	input UpdateMemberRoleInput,
+) (ServerMember, error) {
+	if serverID <= 0 || requesterUserID <= 0 {
+		return ServerMember{}, ErrManageMembersForbidden
+	}
+
+	if targetUserID <= 0 {
+		return ServerMember{}, ErrMemberNotFound
+	}
+
+	if err := input.Validate(); err != nil {
+		return ServerMember{}, err
+	}
+
+	member, changed, err := s.repository.UpdateMemberRole(
+		ctx,
+		serverID,
+		requesterUserID,
+		targetUserID,
+		input.Role,
+	)
+	if err != nil {
+		return ServerMember{}, fmt.Errorf(
+			"update server member role: %w",
+			err,
+		)
+	}
+
+	if changed {
+		s.events.PublishServerMemberRoleUpdated(
+			serverID,
+			member,
+		)
+	}
+
+	return member, nil
+}
+
+func (s *Service) KickMember(
+	ctx context.Context,
+	serverID int64,
+	requesterUserID int64,
+	targetUserID int64,
+) error {
+	if serverID <= 0 || requesterUserID <= 0 {
+		return ErrManageMembersForbidden
+	}
+
+	if targetUserID <= 0 {
+		return ErrMemberNotFound
+	}
+
+	if err := s.repository.KickMember(
+		ctx,
+		serverID,
+		requesterUserID,
+		targetUserID,
+	); err != nil {
+		return fmt.Errorf(
+			"kick server member: %w",
+			err,
+		)
+	}
+
+	s.accessRevoker.RevokeUserFromServer(
+		targetUserID,
+		serverID,
+	)
+
+	return nil
 }

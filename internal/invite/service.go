@@ -9,17 +9,23 @@ import (
 const directInviteLifetime = 7 * 24 * time.Hour
 
 type Service struct {
-	repository  Repository
-	memberships MembershipRegistrar
+	repository   Repository
+	memberships  MembershipRegistrar
+	events       EventPublisher
+	memberEvents MemberEventPublisher
 }
 
 func NewService(
 	repository Repository,
 	memberships MembershipRegistrar,
+	events EventPublisher,
+	memberEvents MemberEventPublisher,
 ) *Service {
 	return &Service{
-		repository:  repository,
-		memberships: memberships,
+		repository:   repository,
+		memberships:  memberships,
+		events:       events,
+		memberEvents: memberEvents,
 	}
 }
 
@@ -49,6 +55,8 @@ func (s *Service) CreateDirect(
 			err,
 		)
 	}
+
+	s.events.PublishInvitationReceived(createdInvite)
 
 	return createdInvite, nil
 }
@@ -84,7 +92,7 @@ func (s *Service) Accept(
 		return ErrInviteNotFound
 	}
 
-	serverID, err := s.repository.Accept(
+	serverID, member, err := s.repository.Accept(
 		ctx,
 		inviteID,
 		inviteeUserID,
@@ -95,6 +103,11 @@ func (s *Service) Accept(
 			err,
 		)
 	}
+
+	s.memberEvents.PublishServerMemberJoined(
+		serverID,
+		member,
+	)
 
 	s.memberships.AddUserToServer(
 		inviteeUserID,

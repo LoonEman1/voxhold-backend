@@ -7,11 +7,16 @@ import (
 
 type Service struct {
 	repository Repository
+	events     EventPublisher
 }
 
-func NewService(repository Repository) *Service {
+func NewService(
+	repository Repository,
+	events EventPublisher,
+) *Service {
 	return &Service{
 		repository: repository,
+		events:     events,
 	}
 }
 
@@ -44,6 +49,8 @@ func (s *Service) Create(
 			err,
 		)
 	}
+
+	s.events.PublishChannelCreated(createdChannel)
 
 	return createdChannel, nil
 }
@@ -107,6 +114,8 @@ func (s *Service) Update(
 		)
 	}
 
+	s.events.PublishChannelUpdated(updatedChannel)
+
 	return updatedChannel, nil
 }
 
@@ -124,17 +133,20 @@ func (s *Service) Delete(
 		return ErrForbidden
 	}
 
-	if err := s.repository.Delete(
+	deletedChannel, err := s.repository.Delete(
 		ctx,
 		serverID,
 		channelID,
 		userID,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf(
 			"delete channel: %w",
 			err,
 		)
 	}
+
+	s.events.PublishChannelDeleted(deletedChannel)
 
 	return nil
 }

@@ -43,16 +43,21 @@ func (r *Repository) CreateDirect(
 	}()
 
 	const permissionQuery = `
-	SELECT EXISTS (
-		SELECT 1
-		FROM server_members
-		WHERE server_id = ?
-		  AND user_id = ?
-		  AND role IN (?, ?)
-	)
+	SELECT
+		servers.name,
+		users.username
+	FROM server_members
+	JOIN servers
+		ON servers.id = server_members.server_id
+	JOIN users
+		ON users.id = server_members.user_id
+	WHERE server_members.server_id = ?
+	  AND server_members.user_id = ?
+	  AND server_members.role IN (?, ?)
 	`
 
-	var allowed bool
+	var serverName string
+	var inviterUsername string
 
 	err = tx.QueryRowContext(
 		ctx,
@@ -61,16 +66,19 @@ func (r *Repository) CreateDirect(
 		inviterUserID,
 		server.RoleOwner,
 		server.RoleAdmin,
-	).Scan(&allowed)
+	).Scan(
+		&serverName,
+		&inviterUsername,
+	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return invite.Invite{}, invite.ErrForbidden
+		}
+
 		return invite.Invite{}, fmt.Errorf(
 			"check invite permission: %w",
 			err,
 		)
-	}
-
-	if !allowed {
-		return invite.Invite{}, invite.ErrForbidden
 	}
 
 	const findUserQuery = `
@@ -215,6 +223,9 @@ func (r *Repository) CreateDirect(
 		)
 	}
 
+	createdInvite.ServerName = serverName
+	createdInvite.InviterUsername = inviterUsername
+
 	return createdInvite, nil
 }
 
@@ -299,10 +310,10 @@ func (r *Repository) Accept(
 	ctx context.Context,
 	inviteID int64,
 	inviteeUserID int64,
-) (int64, error) {
+) (int64, server.ServerMember, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf(
+		return 0, server.ServerMember{}, fmt.Errorf(
 			"begin accept invitation transaction: %w",
 			err,
 		)
@@ -336,7 +347,7 @@ func (r *Repository) Accept(
 	).Scan(&serverID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return 0, fmt.Errorf(
+			return 0, server.ServerMember{}, fmt.Errorf(
 				"accept invitation: %w",
 				err,
 			)
@@ -365,21 +376,24 @@ func (r *Repository) Accept(
 		)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return 0, invite.ErrInviteNotFound
+				return 0, server.ServerMember{},
+					invite.ErrInviteNotFound
 			}
 
-			return 0, fmt.Errorf(
+			return 0, server.ServerMember{}, fmt.Errorf(
 				"get invitation state: %w",
 				err,
 			)
 		}
 
 		if status == invite.StatusExpired {
-			return 0, invite.ErrInviteExpired
+			return 0, server.ServerMember{},
+				invite.ErrInviteExpired
 		}
 
 		if status != invite.StatusPending {
-			return 0, invite.ErrInviteNotPending
+			return 0, server.ServerMember{},
+				invite.ErrInviteNotPending
 		}
 
 		if expired {
@@ -398,23 +412,25 @@ func (r *Repository) Accept(
 				invite.StatusPending,
 			)
 			if err != nil {
-				return 0, fmt.Errorf(
+				return 0, server.ServerMember{}, fmt.Errorf(
 					"expire invitation: %w",
 					err,
 				)
 			}
 
 			if err := tx.Commit(); err != nil {
-				return 0, fmt.Errorf(
+				return 0, server.ServerMember{}, fmt.Errorf(
 					"commit expired invitation: %w",
 					err,
 				)
 			}
 
-			return 0, invite.ErrInviteExpired
+			return 0, server.ServerMember{},
+				invite.ErrInviteExpired
 		}
 
-		return 0, invite.ErrInviteNotPending
+		return 0, server.ServerMember{},
+			invite.ErrInviteNotPending
 	}
 
 	const addMemberQuery = `
@@ -435,20 +451,78 @@ func (r *Repository) Accept(
 		server.RoleMember,
 	)
 	if err != nil {
-		return 0, fmt.Errorf(
+		return 0, server.ServerMember{}, fmt.Errorf(
 			"add invited server member: %w",
 			err,
 		)
 	}
 
+	acceptedMember, err := selectAcceptedMember(
+		ctx,
+		tx,
+		serverID,
+		inviteeUserID,
+	)
+	if err != nil {
+		return 0, server.ServerMember{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf(
+		return 0, server.ServerMember{}, fmt.Errorf(
 			"commit accept invitation transaction: %w",
 			err,
 		)
 	}
 
-	return serverID, nil
+	return serverID, acceptedMember, nil
+}
+
+func selectAcceptedMember(
+	ctx context.Context,
+	tx *sql.Tx,
+	serverID int64,
+	userID int64,
+) (server.ServerMember, error) {
+	const query = `
+	SELECT
+		server_members.user_id,
+		users.username,
+		users.created_at,
+		server_members.role,
+		server_members.joined_at,
+		COALESCE(user_profiles.about, ''),
+		user_profiles.country_code,
+		user_profiles.last_seen_at
+	FROM server_members
+	JOIN users
+		ON users.id = server_members.user_id
+	LEFT JOIN user_profiles
+		ON user_profiles.user_id = server_members.user_id
+	WHERE server_members.server_id = ?
+	  AND server_members.user_id = ?
+	`
+
+	var member server.ServerMember
+
+	if err := tx.QueryRowContext(
+		ctx, query, serverID, userID,
+	).Scan(
+		&member.UserID,
+		&member.Username,
+		&member.CreatedAt,
+		&member.Role,
+		&member.JoinedAt,
+		&member.About,
+		&member.CountryCode,
+		&member.LastSeenAt,
+	); err != nil {
+		return server.ServerMember{}, fmt.Errorf(
+			"select accepted server member: %w",
+			err,
+		)
+	}
+
+	return member, nil
 }
 
 func (r *Repository) Decline(

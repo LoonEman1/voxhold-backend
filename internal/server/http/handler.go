@@ -47,6 +47,21 @@ type Service interface {
 		serverID int64,
 		requesterUserID int64,
 	) ([]server.ServerMember, error)
+
+	UpdateMemberRole(
+		ctx context.Context,
+		serverID int64,
+		requesterUserID int64,
+		targetUserID int64,
+		input server.UpdateMemberRoleInput,
+	) (server.ServerMember, error)
+
+	KickMember(
+		ctx context.Context,
+		serverID int64,
+		requesterUserID int64,
+		targetUserID int64,
+	) error
 }
 
 type Handler struct {
@@ -92,6 +107,16 @@ func (h *Handler) RegisterRoutes(
 		"GET /api/v1/servers/{serverID}/members",
 		requireAuth(http.HandlerFunc(h.listMembers)),
 	)
+
+	mux.Handle(
+		"PATCH /api/v1/servers/{serverID}/members/{userID}/role",
+		requireAuth(http.HandlerFunc(h.updateMemberRole)),
+	)
+
+	mux.Handle(
+		"DELETE /api/v1/servers/{serverID}/members/{userID}",
+		requireAuth(http.HandlerFunc(h.kickMember)),
+	)
 }
 
 type createRequest struct {
@@ -100,6 +125,10 @@ type createRequest struct {
 
 type updateRequest struct {
 	Name string `json:"name"`
+}
+
+type updateMemberRoleRequest struct {
+	Role server.Role `json:"role"`
 }
 
 func (h *Handler) create(
@@ -427,4 +456,145 @@ func (h *Handler) listMembers(
 		http.StatusOK,
 		newServerMembersResponse(members),
 	)
+}
+
+func (h *Handler) updateMemberRole(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	serverID, ok := httpapi.PositiveInt64PathValue(
+		w, r, "serverID", "server",
+	)
+	if !ok {
+		return
+	}
+
+	targetUserID, ok := httpapi.PositiveInt64PathValue(
+		w, r, "userID", "user",
+	)
+	if !ok {
+		return
+	}
+
+	var request updateMemberRoleRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&request); err != nil {
+		httpapi.WriteError(
+			w,
+			http.StatusBadRequest,
+			"invalid JSON body",
+		)
+		return
+	}
+
+	member, err := h.service.UpdateMemberRole(
+		r.Context(),
+		serverID,
+		requesterUserID,
+		targetUserID,
+		server.UpdateMemberRoleInput{Role: request.Role},
+	)
+	if err != nil {
+		writeManageMemberError(
+			w, "update member role", serverID, err,
+		)
+		return
+	}
+
+	httpapi.WriteJSON(
+		w,
+		http.StatusOK,
+		newServerMemberResponse(member),
+	)
+}
+
+func (h *Handler) kickMember(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	serverID, ok := httpapi.PositiveInt64PathValue(
+		w, r, "serverID", "server",
+	)
+	if !ok {
+		return
+	}
+
+	targetUserID, ok := httpapi.PositiveInt64PathValue(
+		w, r, "userID", "user",
+	)
+	if !ok {
+		return
+	}
+
+	if err := h.service.KickMember(
+		r.Context(),
+		serverID,
+		requesterUserID,
+		targetUserID,
+	); err != nil {
+		writeManageMemberError(
+			w, "kick member", serverID, err,
+		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeManageMemberError(
+	w http.ResponseWriter,
+	operation string,
+	serverID int64,
+	err error,
+) {
+	switch {
+	case errors.Is(err, server.ErrRoleInvalid):
+		httpapi.WriteError(
+			w, http.StatusBadRequest, err.Error(),
+		)
+
+	case errors.Is(err, server.ErrMemberNotFound):
+		httpapi.WriteError(
+			w, http.StatusNotFound, "server member not found",
+		)
+
+	case errors.Is(err, server.ErrManageMembersForbidden):
+		httpapi.WriteError(
+			w, http.StatusForbidden, err.Error(),
+		)
+
+	case errors.Is(err, server.ErrOwnerRoleImmutable),
+		errors.Is(err, server.ErrCannotChangeOwnRole),
+		errors.Is(err, server.ErrOwnerCannotBeKicked),
+		errors.Is(err, server.ErrCannotKickSelf):
+
+		httpapi.WriteError(
+			w, http.StatusConflict, err.Error(),
+		)
+
+	default:
+		log.Printf(
+			"%s in server %d: %v",
+			operation,
+			serverID,
+			err,
+		)
+		httpapi.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"internal server error",
+		)
+	}
 }

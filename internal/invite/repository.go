@@ -1,6 +1,10 @@
 package invite
 
-import "context"
+import (
+	"context"
+
+	"voxhold-backend/internal/server"
+)
 
 type Repository interface {
 	CreateDirect(
@@ -20,7 +24,7 @@ type Repository interface {
 		ctx context.Context,
 		inviteID int64,
 		inviteeUserID int64,
-	) (int64, error)
+	) (int64, server.ServerMember, error)
 
 	Decline(
 		ctx context.Context,

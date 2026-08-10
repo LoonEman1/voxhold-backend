@@ -244,6 +244,28 @@ func (r *Repository) Leave(
 		return server.ErrOwnerCannotLeave
 	}
 
+	const deleteReadsQuery = `
+	DELETE FROM channel_reads
+	WHERE user_id = ?
+	  AND channel_id IN (
+		SELECT id
+		FROM channels
+		WHERE server_id = ?
+	  )
+	`
+
+	if _, err := tx.ExecContext(
+		ctx,
+		deleteReadsQuery,
+		userID,
+		serverID,
+	); err != nil {
+		return fmt.Errorf(
+			"delete leaving member read states: %w",
+			err,
+		)
+	}
+
 	const deleteMembershipQuery = `
 	DELETE FROM server_members
 	WHERE server_id = ?

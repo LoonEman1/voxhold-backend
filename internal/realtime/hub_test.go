@@ -143,6 +143,68 @@ func TestHubPresenceUsesAllUserConnections(t *testing.T) {
 	)
 }
 
+func TestHubPublishToChannelAndUserDeduplicatesClients(
+	t *testing.T,
+) {
+	hub := NewHub()
+	subscribed := NewClient(1, "subscribed", []int64{10})
+	secondDevice := NewClient(1, "second", []int64{10})
+	observer := NewClient(2, "observer", []int64{10})
+
+	hub.Register(subscribed)
+	hub.Register(secondDevice)
+	hub.Register(observer)
+	drainOutgoingEvents(subscribed)
+	drainOutgoingEvents(secondDevice)
+	drainOutgoingEvents(observer)
+
+	hub.Subscribe(subscribed, 10, 100)
+	hub.Subscribe(observer, 10, 100)
+
+	delivered := hub.PublishToChannelAndUser(
+		100,
+		1,
+		OutgoingEvent{Type: EventChannelRead},
+	)
+	if delivered != 3 {
+		t.Fatalf("unexpected delivery count: %d", delivered)
+	}
+
+	for _, client := range []*Client{
+		subscribed,
+		secondDevice,
+		observer,
+	} {
+		event := nextOutgoingEvent(t, client)
+		if event.Type != EventChannelRead {
+			t.Fatalf("unexpected event type: %s", event.Type)
+		}
+		assertNoOutgoingEvent(t, client)
+	}
+}
+
+func TestHubRemoveChannelClearsSubscriptions(t *testing.T) {
+	hub := NewHub()
+	client := NewClient(1, "session", []int64{10})
+
+	hub.Register(client)
+	drainOutgoingEvents(client)
+	hub.Subscribe(client, 10, 100)
+
+	hub.RemoveChannel(100)
+
+	if channelIDs := client.subscriptionIDs(); len(channelIDs) != 0 {
+		t.Fatalf("subscriptions were not cleared: %v", channelIDs)
+	}
+
+	if delivered := hub.Publish(
+		100,
+		OutgoingEvent{Type: EventMessageCreated},
+	); delivered != 0 {
+		t.Fatalf("event delivered to removed channel: %d", delivered)
+	}
+}
+
 func assertPresenceUpdatedEvent(
 	t *testing.T,
 	client *Client,

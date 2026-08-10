@@ -27,6 +27,9 @@ import (
 	profileDomain "voxhold-backend/internal/profile"
 	profilehttp "voxhold-backend/internal/profile/http"
 	profileSqlite "voxhold-backend/internal/profile/sqlite"
+	readstateDomain "voxhold-backend/internal/readstate"
+	readstatehttp "voxhold-backend/internal/readstate/http"
+	readstateSqlite "voxhold-backend/internal/readstate/sqlite"
 
 	realtimehttp "voxhold-backend/internal/realtime/http"
 
@@ -43,6 +46,12 @@ func main() {
 	log.Println("database is ready")
 
 	realtimeHub := realtimeDomain.NewHub()
+	serverEventPublisher :=
+		realtimeDomain.NewServerEventPublisher(realtimeHub)
+	channelEventPublisher :=
+		realtimeDomain.NewChannelEventPublisher(realtimeHub)
+	inviteEventPublisher :=
+		realtimeDomain.NewInviteEventPublisher(realtimeHub)
 
 	userRepository := accountSqlite.NewUserRepository(db)
 	sessionRepository := accountSqlite.NewSessionRepository(db)
@@ -58,17 +67,23 @@ func main() {
 	serverService := serverDomain.NewService(
 		serverRepository,
 		realtimeHub,
+		serverEventPublisher,
 	)
 	serverHandler := serverhttp.NewHandler(serverService)
 
 	channelRepository := channelSqlite.NewRepository(db)
-	channelService := channelDomain.NewService(channelRepository)
+	channelService := channelDomain.NewService(
+		channelRepository,
+		channelEventPublisher,
+	)
 	channelHandler := channelhttp.NewHandler(channelService)
 
 	inviteRepository := inviteSqlite.NewRepository(db)
 	inviteService := inviteDomain.NewService(
 		inviteRepository,
 		realtimeHub,
+		inviteEventPublisher,
+		serverEventPublisher,
 	)
 	inviteHandler := invitehttp.NewHandler(inviteService)
 
@@ -92,10 +107,20 @@ func main() {
 		messageService,
 	)
 
+	readEventPublisher :=
+		realtimeDomain.NewReadEventPublisher(realtimeHub)
+	readRepository := readstateSqlite.NewRepository(db)
+	readService := readstateDomain.NewService(
+		readRepository,
+		readEventPublisher,
+	)
+	readHandler := readstatehttp.NewHandler(readService)
+
 	webSocketHandler := realtimehttp.NewHandler(
 		accountService,
 		channelService,
 		serverService,
+		readService,
 		realtimeHub,
 	)
 
@@ -121,6 +146,11 @@ func main() {
 	)
 
 	messageHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
+
+	readHandler.RegisterRoutes(
 		mux,
 		accountHandler.RequireAuth,
 	)

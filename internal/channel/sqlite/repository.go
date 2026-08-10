@@ -327,7 +327,7 @@ func (r *Repository) Delete(
 	serverID int64,
 	channelID int64,
 	userID int64,
-) error {
+) (channel.Channel, error) {
 	const query = `
 	DELETE FROM channels
 	WHERE id = ?
@@ -339,9 +339,19 @@ func (r *Repository) Delete(
 		  AND server_members.user_id = ?
 		  AND server_members.role IN (?, ?)
 	)
+	RETURNING
+		id,
+		server_id,
+		name,
+		kind,
+		position,
+		created_by,
+		created_at
 	`
 
-	result, err := r.db.ExecContext(
+	var deletedChannel channel.Channel
+
+	err := r.db.QueryRowContext(
 		ctx,
 		query,
 		channelID,
@@ -350,24 +360,24 @@ func (r *Repository) Delete(
 		userID,
 		server.RoleOwner,
 		server.RoleAdmin,
+	).Scan(
+		&deletedChannel.ID,
+		&deletedChannel.ServerID,
+		&deletedChannel.Name,
+		&deletedChannel.Kind,
+		&deletedChannel.Position,
+		&deletedChannel.CreatedBy,
+		&deletedChannel.CreatedAt,
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"delete channel: %w",
-			err,
-		)
-	}
-
-	affectedRows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf(
-			"get deleted channel count: %w",
-			err,
-		)
-	}
-
-	if affectedRows > 0 {
-		return nil
+		if !errors.Is(err, sql.ErrNoRows) {
+			return channel.Channel{}, fmt.Errorf(
+				"delete channel: %w",
+				err,
+			)
+		}
+	} else {
+		return deletedChannel, nil
 	}
 
 	const existsQuery = `
@@ -387,17 +397,17 @@ func (r *Repository) Delete(
 		channelID,
 		serverID,
 	).Scan(&exists); err != nil {
-		return fmt.Errorf(
+		return channel.Channel{}, fmt.Errorf(
 			"check channel existence: %w",
 			err,
 		)
 	}
 
 	if !exists {
-		return channel.ErrNotFound
+		return channel.Channel{}, channel.ErrNotFound
 	}
 
-	return channel.ErrForbidden
+	return channel.Channel{}, channel.ErrForbidden
 }
 
 func (r *Repository) CheckAccess(

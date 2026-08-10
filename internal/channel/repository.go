@@ -30,7 +30,7 @@ type Repository interface {
 		serverID int64,
 		channelID int64,
 		userID int64,
-	) error
+	) (Channel, error)
 
 	CheckAccess(
 		ctx context.Context,

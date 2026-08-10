@@ -8,6 +8,7 @@ import (
 type room struct {
 	mu      sync.RWMutex
 	clients map[*Client]struct{}
+	closed  bool
 }
 
 func newRoom() *room {
@@ -20,6 +21,10 @@ func (r *room) add(client *Client) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.closed {
+		return false
+	}
+
 	if _, exists := r.clients[client]; exists {
 		return false
 	}
@@ -27,6 +32,30 @@ func (r *room) add(client *Client) bool {
 	r.clients[client] = struct{}{}
 
 	return true
+}
+
+func (r *room) closeAndSnapshot() []*Client {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return nil
+	}
+
+	r.closed = true
+	clients := make(
+		[]*Client,
+		0,
+		len(r.clients),
+	)
+
+	for client := range r.clients {
+		clients = append(clients, client)
+	}
+
+	clear(r.clients)
+
+	return clients
 }
 
 func (r *room) remove(client *Client) bool {
@@ -502,11 +531,12 @@ func (h *Hub) broadcastPresence(
 func (h *Hub) broadcastToClients(
 	clients []*Client,
 	event OutgoingEvent,
-) {
+) int {
 	delivered := make(
 		map[*Client]struct{},
 		len(clients),
 	)
+	deliveredCount := 0
 
 	for _, client := range clients {
 		if _, exists := delivered[client]; exists {
@@ -517,8 +547,13 @@ func (h *Hub) broadcastToClients(
 
 		if !client.enqueue(event) {
 			h.Unregister(client)
+			continue
 		}
+
+		deliveredCount++
 	}
+
+	return deliveredCount
 }
 
 func (h *Hub) unsubscribeFromServer(
@@ -573,6 +608,77 @@ func (h *Hub) Publish(
 	}
 
 	return delivered
+}
+
+func (h *Hub) PublishToServer(
+	serverID int64,
+	event OutgoingEvent,
+) int {
+	if serverID <= 0 {
+		return 0
+	}
+
+	clients := h.clientsForServer(serverID)
+	return h.broadcastToClients(clients, event)
+}
+
+func (h *Hub) PublishToUser(
+	userID int64,
+	event OutgoingEvent,
+) int {
+	if userID <= 0 {
+		return 0
+	}
+
+	h.clientsMu.RLock()
+	clients := clientSetSnapshot(h.clientsByUser[userID])
+	h.clientsMu.RUnlock()
+
+	return h.broadcastToClients(clients, event)
+}
+
+func (h *Hub) PublishToChannelAndUser(
+	channelID int64,
+	userID int64,
+	event OutgoingEvent,
+) int {
+	if channelID <= 0 || userID <= 0 {
+		return 0
+	}
+
+	var clients []*Client
+
+	if room := h.getRoom(channelID); room != nil {
+		clients = room.snapshot()
+	}
+
+	h.clientsMu.RLock()
+	clients = append(
+		clients,
+		clientSetSnapshot(h.clientsByUser[userID])...,
+	)
+	h.clientsMu.RUnlock()
+
+	return h.broadcastToClients(clients, event)
+}
+
+func (h *Hub) RemoveChannel(channelID int64) {
+	if channelID <= 0 {
+		return
+	}
+
+	h.roomsMu.Lock()
+	room := h.rooms[channelID]
+	if room == nil {
+		h.roomsMu.Unlock()
+		return
+	}
+	delete(h.rooms, channelID)
+	h.roomsMu.Unlock()
+
+	for _, client := range room.closeAndSnapshot() {
+		client.removeSubscription(channelID)
+	}
 }
 
 func (h *Hub) getRoom(

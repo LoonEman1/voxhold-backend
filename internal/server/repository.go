@@ -36,4 +36,19 @@ type Repository interface {
 		serverID int64,
 		requesterUserID int64,
 	) ([]ServerMember, error)
+
+	UpdateMemberRole(
+		ctx context.Context,
+		serverID int64,
+		requesterUserID int64,
+		targetUserID int64,
+		role Role,
+	) (ServerMember, bool, error)
+
+	KickMember(
+		ctx context.Context,
+		serverID int64,
+		requesterUserID int64,
+		targetUserID int64,
+	) error
 }

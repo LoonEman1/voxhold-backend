@@ -11,12 +11,14 @@ const (
 )
 
 type Invite struct {
-	ID            int64
-	ServerID      int64
-	InviterUserID int64
-	InviteeUserID int64
-	Status        Status
-	ExpiresAt     int64
-	RespondedAt   *int64
-	CreatedAt     int64
+	ID              int64
+	ServerID        int64
+	ServerName      string
+	InviterUserID   int64
+	InviterUsername string
+	InviteeUserID   int64
+	Status          Status
+	ExpiresAt       int64
+	RespondedAt     *int64
+	CreatedAt       int64
 }

@@ -14,6 +14,7 @@ import (
 
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/channel"
+	"voxhold-backend/internal/readstate"
 	"voxhold-backend/internal/realtime"
 	serverDomain "voxhold-backend/internal/server"
 )
@@ -48,10 +49,25 @@ type MembershipLister interface {
 	) ([]serverDomain.JoinedServer, error)
 }
 
+type ReadStateLister interface {
+	ListByUserID(
+		ctx context.Context,
+		userID int64,
+	) ([]readstate.ChannelRead, error)
+
+	ListByChannelID(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		requesterUserID int64,
+	) ([]readstate.ChannelRead, error)
+}
+
 type Handler struct {
 	authenticator Authenticator
 	channelAccess ChannelAccess
 	memberships   MembershipLister
+	readStates    ReadStateLister
 	hub           *realtime.Hub
 }
 
@@ -59,12 +75,14 @@ func NewHandler(
 	authenticator Authenticator,
 	channelAccess ChannelAccess,
 	memberships MembershipLister,
+	readStates ReadStateLister,
 	hub *realtime.Hub,
 ) *Handler {
 	return &Handler{
 		authenticator: authenticator,
 		channelAccess: channelAccess,
 		memberships:   memberships,
+		readStates:    readStates,
 		hub:           hub,
 	}
 }
@@ -231,6 +249,22 @@ func (h *Handler) connect(
 		serverIDs = append(serverIDs, joinedServer.ID)
 	}
 
+	userReads, err := h.readStates.ListByUserID(
+		authContext,
+		userID,
+	)
+	if err != nil {
+		log.Printf(
+			"list websocket user read states: %v",
+			err,
+		)
+		_ = connection.Close(
+			websocket.StatusInternalError,
+			"internal server error",
+		)
+		return
+	}
+
 	client := realtime.NewClient(
 		userID,
 		authentication.Token,
@@ -284,6 +318,22 @@ func (h *Handler) connect(
 	); err != nil {
 		log.Printf(
 			"write websocket ready event: %v",
+			err,
+		)
+		return
+	}
+
+	if err := queueEvent(
+		client,
+		realtime.OutgoingEvent{
+			Type: realtime.EventReadSnapshot,
+			Data: realtime.NewReadSnapshotData(
+				userReads,
+			),
+		},
+	); err != nil {
+		log.Printf(
+			"queue websocket read snapshot: %v",
 			err,
 		)
 		return
@@ -559,12 +609,67 @@ func (h *Handler) subscribeToChannel(
 		return err
 	}
 
-	return queueEvent(
+	channelReads, err := h.readStates.ListByChannelID(
+		ctx,
+		data.ServerID,
+		data.ChannelID,
+		client.UserID(),
+	)
+	sendReadSnapshot := true
+	if err != nil {
+		if errors.Is(err, readstate.ErrTextChannelRequired) {
+			sendReadSnapshot = false
+		} else {
+			h.hub.Unsubscribe(client, data.ChannelID)
+
+			if errors.Is(err, readstate.ErrForbidden) ||
+				errors.Is(err, readstate.ErrChannelNotFound) {
+
+				return queueError(
+					client,
+					event.RequestID,
+					realtime.ErrorForbidden,
+					"not allowed to subscribe to channel",
+				)
+			}
+
+			log.Printf(
+				"list channel read snapshot: %v",
+				err,
+			)
+			return queueError(
+				client,
+				event.RequestID,
+				realtime.ErrorInternal,
+				"internal server error",
+			)
+		}
+	}
+
+	if err := queueEvent(
 		client,
 		realtime.OutgoingEvent{
 			RequestID: event.RequestID,
 			Type:      realtime.EventChannelSubscribed,
 			Data:      data,
+		},
+	); err != nil {
+		return err
+	}
+
+	if !sendReadSnapshot {
+		return nil
+	}
+
+	return queueEvent(
+		client,
+		realtime.OutgoingEvent{
+			Type: realtime.EventChannelReadSnapshot,
+			Data: realtime.NewChannelReadSnapshotData(
+				data.ServerID,
+				data.ChannelID,
+				channelReads,
+			),
 		},
 	)
 }

@@ -13,3 +13,15 @@ type AccessRevoker interface {
 
 	RevokeServer(serverID int64)
 }
+
+type EventPublisher interface {
+	PublishServerMemberJoined(
+		serverID int64,
+		member ServerMember,
+	)
+
+	PublishServerMemberRoleUpdated(
+		serverID int64,
+		member ServerMember,
+	)
+}
