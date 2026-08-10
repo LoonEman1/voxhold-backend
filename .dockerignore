@@ -12,4 +12,6 @@ data/
 *.exe
 *.test
 
+.tmp-*
+
 .sqlfluff
