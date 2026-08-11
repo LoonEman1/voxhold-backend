@@ -33,6 +33,10 @@ func TestManagerRelaysOpusBetweenPeers(t *testing.T) {
 	); err != nil {
 		t.Fatalf("join first peer: %v", err)
 	}
+	if offer := sink.offer(first.connectionID); !strings.Contains(offer, "maxaveragebitrate=128000") {
+
+		t.Fatalf("audio bitrate limit is missing from SDP: %q", offer)
+	}
 
 	first.startAudio(t)
 	waitForPublishedTrack(t, manager, 100)
@@ -66,6 +70,55 @@ func TestManagerRelaysOpusBetweenPeers(t *testing.T) {
 
 		t.Fatalf("left session still accepts answers: %v", err)
 	}
+}
+
+func TestManagerClosesPeerThatExceedsAudioBitrate(t *testing.T) {
+	sink := newTestSignalSink()
+	manager := newTestManagerWithAudioBitrate(t, sink, 16)
+	sink.manager = manager
+
+	peer := newTestPeer(t, manager, "excessive-sender")
+	sink.addPeer(peer)
+
+	if err := manager.Join(
+		peer.connectionID,
+		1,
+		10,
+		100,
+		false,
+		false,
+	); err != nil {
+		t.Fatalf("join peer: %v", err)
+	}
+
+	peer.startAudio(t)
+	waitForPublishedTrack(t, manager, 100)
+	peer.sendAudioBurst(t, 64, 1200)
+
+	select {
+	case closed := <-sink.closed:
+		if closed.connectionID != peer.connectionID ||
+			closed.reason != "audio bitrate limit exceeded" {
+
+			t.Fatalf("unexpected closed session: %+v", closed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("excessive audio bitrate did not close the session")
+	}
+
+	if err := manager.SetState(
+		peer.connectionID,
+		false,
+		false,
+	); !errors.Is(err, ErrSessionNotFound) {
+
+		t.Fatalf("limited session is still active: %v", err)
+	}
+}
+
+type testClosedSession struct {
+	connectionID string
+	reason       string
 }
 
 func TestManagerExcludesLoopbackMuxWhenPublicIPIsConfigured(
@@ -109,11 +162,15 @@ type testSignalSink struct {
 	mu      sync.RWMutex
 	manager *Manager
 	peers   map[string]*testPeer
+	offers  map[string]string
+	closed  chan testClosedSession
 }
 
 func newTestSignalSink() *testSignalSink {
 	return &testSignalSink{
-		peers: make(map[string]*testPeer),
+		peers:  make(map[string]*testPeer),
+		offers: make(map[string]string),
+		closed: make(chan testClosedSession, 16),
 	}
 }
 
@@ -128,7 +185,11 @@ func (s *testSignalSink) SendOffer(
 	connectionID string,
 	sdp string,
 ) bool {
-	peer := s.peer(connectionID)
+	s.mu.Lock()
+	peer := s.peers[connectionID]
+	s.offers[connectionID] = sdp
+	s.mu.Unlock()
+
 	if peer == nil ||
 		!strings.Contains(sdp, "m=audio") ||
 		strings.Contains(sdp, "m=video") {
@@ -137,6 +198,13 @@ func (s *testSignalSink) SendOffer(
 	}
 
 	return peer.acceptOffer(sdp) == nil
+}
+
+func (s *testSignalSink) offer(connectionID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.offers[connectionID]
 }
 
 func (s *testSignalSink) SendICECandidate(
@@ -151,6 +219,13 @@ func (s *testSignalSink) CloseVoice(
 	connectionID string,
 	reason string,
 ) {
+	select {
+	case s.closed <- testClosedSession{
+		connectionID: connectionID,
+		reason:       reason,
+	}:
+	default:
+	}
 }
 
 func (s *testSignalSink) peer(
@@ -366,6 +441,32 @@ func (p *testPeer) startAudio(t *testing.T) {
 	}()
 }
 
+func (p *testPeer) sendAudioBurst(
+	t *testing.T,
+	packetCount int,
+	payloadSize int,
+) {
+	t.Helper()
+
+	payload := make([]byte, payloadSize)
+	for index := 0; index < packetCount; index++ {
+		packet := &rtp.Packet{
+			Header: rtp.Header{
+				Version:        2,
+				PayloadType:    111,
+				SequenceNumber: uint16(1000 + index),
+				Timestamp:      uint32(960 * (1000 + index)),
+				SSRC:           12345,
+			},
+			Payload: payload,
+		}
+
+		if err := p.localTrack.WriteRTP(packet); err != nil {
+			t.Fatalf("write audio burst packet %d: %v", index, err)
+		}
+	}
+}
+
 func (p *testPeer) close() {
 	p.closeOnce.Do(func() {
 		close(p.stopAudio)
@@ -377,14 +478,27 @@ func newTestManager(
 	t *testing.T,
 	sink SignalSink,
 ) *Manager {
+	return newTestManagerWithAudioBitrate(
+		t,
+		sink,
+		DefaultMaxAudioBitrateKbps,
+	)
+}
+
+func newTestManagerWithAudioBitrate(
+	t *testing.T,
+	sink SignalSink,
+	maxAudioBitrateKbps int,
+) *Manager {
 	t.Helper()
 
 	for attempt := 0; attempt < 10; attempt++ {
 		port := unusedUDPPort(t)
 		manager, err := NewManager(
 			Config{
-				UDPPort:         port,
-				MaxParticipants: DefaultMaxParticipants,
+				UDPPort:             port,
+				MaxParticipants:     DefaultMaxParticipants,
+				MaxAudioBitrateKbps: maxAudioBitrateKbps,
 			},
 			sink,
 		)

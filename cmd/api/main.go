@@ -50,6 +50,7 @@ func main() {
 	voiceConfig, err := voice.NewConfig(
 		os.Getenv("WEBRTC_UDP_PORT"),
 		os.Getenv("WEBRTC_MAX_PARTICIPANTS"),
+		os.Getenv("WEBRTC_MAX_AUDIO_BITRATE_KBPS"),
 		os.Getenv("WEBRTC_PUBLIC_IP"),
 		os.Getenv("WEBRTC_ICE_SERVERS"),
 		os.Getenv("WEBRTC_ICE_USERNAME"),
@@ -70,8 +71,9 @@ func main() {
 
 	realtimeHub.SetVoiceSessionCloser(voiceManager)
 	log.Printf(
-		"WebRTC audio is listening on UDP port %d",
+		"WebRTC audio is listening on UDP port %d (max %d Kbit/s per microphone)",
 		voiceConfig.UDPPort,
+		voiceConfig.MaxAudioBitrateKbps,
 	)
 
 	serverEventPublisher :=

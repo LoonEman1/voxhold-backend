@@ -10,6 +10,12 @@ import (
 
 const DefaultUDPPort = 50000
 const DefaultMaxParticipants = 32
+const DefaultMaxAudioBitrateKbps = 128
+
+const (
+	minAudioBitrateKbps = 16
+	maxAudioBitrateKbps = 128
+)
 
 var (
 	ErrUDPPortInvalid  = errors.New("WebRTC UDP port is invalid")
@@ -19,20 +25,25 @@ var (
 	ErrMaxParticipantsInvalid = errors.New(
 		"voice room participant limit is invalid",
 	)
+	ErrMaxAudioBitrateInvalid = errors.New(
+		"voice audio bitrate limit is invalid",
+	)
 )
 
 type Config struct {
-	UDPPort         int
-	MaxParticipants int
-	PublicIP        string
-	ICEServerURLs   []string
-	ICEUsername     string
-	ICECredential   string
+	UDPPort             int
+	MaxParticipants     int
+	MaxAudioBitrateKbps int
+	PublicIP            string
+	ICEServerURLs       []string
+	ICEUsername         string
+	ICECredential       string
 }
 
 func NewConfig(
 	rawUDPPort string,
 	rawMaxParticipants string,
+	rawMaxAudioBitrateKbps string,
 	publicIP string,
 	rawICEServerURLs string,
 	iceUsername string,
@@ -62,18 +73,38 @@ func NewConfig(
 		maxParticipants = parsedLimit
 	}
 
+	maxAudioBitrateKbps := DefaultMaxAudioBitrateKbps
+	rawMaxAudioBitrateKbps = strings.TrimSpace(
+		rawMaxAudioBitrateKbps,
+	)
+
+	if rawMaxAudioBitrateKbps != "" {
+		parsedLimit, err := strconv.Atoi(
+			rawMaxAudioBitrateKbps,
+		)
+		if err != nil ||
+			parsedLimit < minAudioBitrateKbps ||
+			parsedLimit > maxAudioBitrateKbps {
+
+			return Config{}, ErrMaxAudioBitrateInvalid
+		}
+
+		maxAudioBitrateKbps = parsedLimit
+	}
+
 	publicIP = strings.TrimSpace(publicIP)
 	if publicIP != "" && net.ParseIP(publicIP) == nil {
 		return Config{}, ErrPublicIPInvalid
 	}
 
 	config := Config{
-		UDPPort:         udpPort,
-		MaxParticipants: maxParticipants,
-		PublicIP:        publicIP,
-		ICEServerURLs:   splitNonEmpty(rawICEServerURLs),
-		ICEUsername:     strings.TrimSpace(iceUsername),
-		ICECredential:   strings.TrimSpace(iceCredential),
+		UDPPort:             udpPort,
+		MaxParticipants:     maxParticipants,
+		MaxAudioBitrateKbps: maxAudioBitrateKbps,
+		PublicIP:            publicIP,
+		ICEServerURLs:       splitNonEmpty(rawICEServerURLs),
+		ICEUsername:         strings.TrimSpace(iceUsername),
+		ICECredential:       strings.TrimSpace(iceCredential),
 	}
 
 	if (config.ICEUsername == "") !=

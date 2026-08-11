@@ -9,6 +9,7 @@ func TestNewConfig(t *testing.T) {
 	config, err := NewConfig(
 		"51000",
 		"24",
+		"96",
 		"203.0.113.10",
 		"stun:stun.example.com:3478, turn:turn.example.com:3478",
 		"voice-user",
@@ -20,6 +21,7 @@ func TestNewConfig(t *testing.T) {
 
 	if config.UDPPort != 51000 ||
 		config.MaxParticipants != 24 ||
+		config.MaxAudioBitrateKbps != 96 ||
 		config.PublicIP != "203.0.113.10" ||
 		len(config.ICEServerURLs) != 2 {
 
@@ -32,6 +34,7 @@ func TestNewConfigRejectsInvalidValues(t *testing.T) {
 		name            string
 		udpPort         string
 		maxParticipants string
+		maxAudioBitrate string
 		publicIP        string
 		username        string
 		credential      string
@@ -49,6 +52,11 @@ func TestNewConfigRejectsInvalidValues(t *testing.T) {
 			target:          ErrMaxParticipantsInvalid,
 		},
 		{
+			name:            "invalid audio bitrate limit",
+			maxAudioBitrate: "129",
+			target:          ErrMaxAudioBitrateInvalid,
+		},
+		{
 			name:     "invalid public IP",
 			publicIP: "not-an-ip",
 			target:   ErrPublicIPInvalid,
@@ -64,6 +72,7 @@ func TestNewConfigRejectsInvalidValues(t *testing.T) {
 			_, err := NewConfig(
 				test.udpPort,
 				test.maxParticipants,
+				test.maxAudioBitrate,
 				test.publicIP,
 				"",
 				test.username,

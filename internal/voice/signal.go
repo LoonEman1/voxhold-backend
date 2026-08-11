@@ -1,5 +1,13 @@
 package voice
 
+import "errors"
+
+const MaxPendingICECandidates = 64
+
+var ErrTooManyICECandidates = errors.New(
+	"too many pending ICE candidates",
+)
+
 type ICECandidate struct {
 	Candidate        string  `json:"candidate"`
 	SDPMid           *string `json:"sdp_mid,omitempty"`

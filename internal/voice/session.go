@@ -20,9 +20,10 @@ type session struct {
 	serverID     int64
 	channelID    int64
 
-	selfMute atomic.Bool
-	selfDeaf atomic.Bool
-	closed   atomic.Bool
+	selfMute     atomic.Bool
+	selfDeaf     atomic.Bool
+	closed       atomic.Bool
+	audioBitrate *audioBitrateLimiter
 
 	negotiationMu      sync.Mutex
 	negotiationPending bool
@@ -49,6 +50,9 @@ func newSession(
 		userID:       userID,
 		serverID:     serverID,
 		channelID:    channelID,
+		audioBitrate: newAudioBitrateLimiter(
+			manager.maxAudioBitrateKbps,
+		),
 	}
 
 	value.selfMute.Store(selfMute)
@@ -170,6 +174,14 @@ func (s *session) forwardAudio(
 	for {
 		packet, _, err := remote.ReadRTP()
 		if err != nil {
+			return
+		}
+
+		if !s.audioBitrate.allow(len(packet.Payload)) {
+			go s.manager.failSession(
+				s,
+				"audio bitrate limit exceeded",
+			)
 			return
 		}
 
@@ -343,6 +355,10 @@ func (s *session) addICECandidate(
 	}
 
 	if s.peer.RemoteDescription() == nil {
+		if len(s.pendingCandidates) >= MaxPendingICECandidates {
+			return ErrTooManyICECandidates
+		}
+
 		s.pendingCandidates = append(
 			s.pendingCandidates,
 			candidate,

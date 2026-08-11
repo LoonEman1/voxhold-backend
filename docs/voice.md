@@ -101,8 +101,13 @@ The SFU shares one UDP port across all peer connections:
 ```dotenv
 WEBRTC_UDP_PORT=50000
 WEBRTC_MAX_PARTICIPANTS=32
+WEBRTC_MAX_AUDIO_BITRATE_KBPS=128
 WEBRTC_PUBLIC_IP=127.0.0.1
 ```
+
+`WEBRTC_MAX_AUDIO_BITRATE_KBPS` limits each microphone to at most 128
+Kbit/s. The limit is advertised through Opus SDP and enforced against the
+actual incoming Opus payload with a short burst allowance.
 
 Use `127.0.0.1` only when the client runs on the same machine. On a VPS,
 set `WEBRTC_PUBLIC_IP` to its public IP and allow the configured UDP port in

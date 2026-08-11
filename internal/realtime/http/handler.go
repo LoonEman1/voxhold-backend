@@ -880,6 +880,15 @@ func (h *Handler) handleVoiceMediaInputError(
 			"WebRTC voice session is not active",
 		)
 	}
+	if errors.Is(err, voice.ErrTooManyICECandidates) {
+		h.hub.LeaveVoice(client)
+		return queueError(
+			client,
+			requestID,
+			realtime.ErrorInvalidState,
+			"too many pending ICE candidates",
+		)
+	}
 
 	log.Printf("%s: %v", operation, err)
 	return queueError(

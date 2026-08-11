@@ -27,11 +27,12 @@ type Manager struct {
 	sink          SignalSink
 	udpMux        ice.UDPMux
 
-	mu              sync.RWMutex
-	rooms           map[int64]*room
-	sessions        map[string]*session
-	closed          bool
-	maxParticipants int
+	mu                  sync.RWMutex
+	rooms               map[int64]*room
+	sessions            map[string]*session
+	closed              bool
+	maxParticipants     int
+	maxAudioBitrateKbps int
 }
 
 func NewManager(
@@ -47,6 +48,14 @@ func NewManager(
 	}
 	if config.MaxParticipants < 2 || config.MaxParticipants > 100 {
 		return nil, ErrMaxParticipantsInvalid
+	}
+	if config.MaxAudioBitrateKbps == 0 {
+		config.MaxAudioBitrateKbps = DefaultMaxAudioBitrateKbps
+	}
+	if config.MaxAudioBitrateKbps < minAudioBitrateKbps ||
+		config.MaxAudioBitrateKbps > maxAudioBitrateKbps {
+
+		return nil, ErrMaxAudioBitrateInvalid
 	}
 
 	udpMuxOptions := []ice.UDPMuxFromPortOption{
@@ -115,10 +124,13 @@ func NewManager(
 	if err := mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:    webrtc.MimeTypeOpus,
-				ClockRate:   48000,
-				Channels:    2,
-				SDPFmtpLine: "minptime=10;useinbandfec=1",
+				MimeType:  webrtc.MimeTypeOpus,
+				ClockRate: 48000,
+				Channels:  2,
+				SDPFmtpLine: fmt.Sprintf(
+					"minptime=10;useinbandfec=1;maxaveragebitrate=%d",
+					config.MaxAudioBitrateKbps*1000,
+				),
 			},
 			PayloadType: 111,
 		},
@@ -150,13 +162,14 @@ func NewManager(
 	)
 
 	return &Manager{
-		api:             api,
-		configuration:   newWebRTCConfiguration(config),
-		sink:            sink,
-		udpMux:          udpMux,
-		rooms:           make(map[int64]*room),
-		sessions:        make(map[string]*session),
-		maxParticipants: config.MaxParticipants,
+		api:                 api,
+		configuration:       newWebRTCConfiguration(config),
+		sink:                sink,
+		udpMux:              udpMux,
+		rooms:               make(map[int64]*room),
+		sessions:            make(map[string]*session),
+		maxParticipants:     config.MaxParticipants,
+		maxAudioBitrateKbps: config.MaxAudioBitrateKbps,
 	}, nil
 }
 
