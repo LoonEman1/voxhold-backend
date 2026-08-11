@@ -102,6 +102,7 @@ type Handler struct {
 	readStates    ReadStateLister
 	voiceMedia    VoiceMedia
 	hub           *realtime.Hub
+	voiceJoins    userLockSet
 }
 
 func NewHandler(
@@ -650,6 +651,20 @@ func (h *Handler) joinVoice(
 		return err
 	}
 
+	unlockVoiceJoin := h.voiceJoins.lock(client.UserID())
+	defer unlockVoiceJoin()
+
+	allowed, err = h.checkVoiceChannelAccess(
+		ctx,
+		client,
+		event.RequestID,
+		data.ServerID,
+		data.ChannelID,
+	)
+	if err != nil || !allowed {
+		return err
+	}
+
 	joined, ok := h.hub.JoinVoice(
 		client,
 		data.ServerID,
@@ -664,18 +679,6 @@ func (h *Handler) joinVoice(
 			realtime.ErrorForbidden,
 			"not allowed to join voice channel",
 		)
-	}
-
-	allowed, err = h.checkVoiceChannelAccess(
-		ctx,
-		client,
-		event.RequestID,
-		data.ServerID,
-		data.ChannelID,
-	)
-	if err != nil || !allowed {
-		h.hub.LeaveVoice(client)
-		return err
 	}
 
 	if err := queueEvent(

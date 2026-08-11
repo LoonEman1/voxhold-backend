@@ -119,6 +119,89 @@ func TestHubVoiceMoveAndDisconnect(t *testing.T) {
 	)
 }
 
+func TestHubVoiceConnectionTakeover(t *testing.T) {
+	hub := NewHub()
+	closer := &voiceSessionCloserStub{}
+	hub.SetVoiceSessionCloser(closer)
+
+	oldClient := NewClient(1, "old-session", []int64{10})
+	replacement := NewClient(1, "new-session", []int64{10})
+	observer := NewClient(2, "observer", []int64{10})
+
+	hub.Register(oldClient)
+	hub.Register(replacement)
+	hub.Register(observer)
+	drainOutgoingEvents(oldClient)
+	drainOutgoingEvents(replacement)
+	drainOutgoingEvents(observer)
+
+	hub.JoinVoice(oldClient, 10, 100, false, false)
+	drainOutgoingEvents(replacement)
+	drainOutgoingEvents(observer)
+
+	joined, ok := hub.JoinVoice(
+		replacement,
+		10,
+		100,
+		true,
+		false,
+	)
+	if !ok || len(joined.Participants) != 1 {
+		t.Fatalf("unexpected takeover result: %+v", joined)
+	}
+	if joined.Participant.ConnectionID != replacement.ConnectionID() {
+		t.Fatalf("unexpected active connection: %+v", joined.Participant)
+	}
+
+	assertVoiceLeftEvent(t, oldClient, 1, 10, 100)
+	assertVoiceClosedEvent(
+		t,
+		oldClient,
+		VoiceWebRTCClosedReasonReplaced,
+	)
+	assertVoiceParticipantEvent(
+		t,
+		oldClient,
+		EventVoiceParticipantJoined,
+		1,
+		10,
+		100,
+		true,
+		false,
+	)
+
+	assertVoiceLeftEvent(t, observer, 1, 10, 100)
+	assertVoiceParticipantEvent(
+		t,
+		observer,
+		EventVoiceParticipantJoined,
+		1,
+		10,
+		100,
+		true,
+		false,
+	)
+
+	if len(closer.connectionIDs) != 1 ||
+		closer.connectionIDs[0] != oldClient.ConnectionID() {
+
+		t.Fatalf(
+			"replaced media session was not closed: %v",
+			closer.connectionIDs,
+		)
+	}
+
+	if _, ok := hub.LeaveVoice(oldClient); ok {
+		t.Fatal("replaced connection retained voice state")
+	}
+
+	hub.Unregister(oldClient)
+	updated, ok := hub.UpdateVoiceState(replacement, false, true)
+	if !ok || updated.ConnectionID != replacement.ConnectionID() {
+		t.Fatalf("replacement was removed by stale disconnect: %+v", updated)
+	}
+}
+
 func TestHubVoiceSnapshotAndChannelRemoval(t *testing.T) {
 	hub := NewHub()
 	closer := &voiceSessionCloserStub{}
@@ -234,5 +317,26 @@ func assertVoiceLeftEvent(
 		data.ChannelID != channelID {
 
 		t.Fatalf("unexpected voice left data: %+v", data)
+	}
+}
+
+func assertVoiceClosedEvent(
+	t *testing.T,
+	client *Client,
+	reason string,
+) {
+	t.Helper()
+
+	event := nextOutgoingEvent(t, client)
+	if event.Type != EventVoiceWebRTCClosed {
+		t.Fatalf("unexpected event type: %s", event.Type)
+	}
+
+	data, ok := event.Data.(VoiceWebRTCClosedData)
+	if !ok {
+		t.Fatalf("unexpected event data: %T", event.Data)
+	}
+	if data.Reason != reason {
+		t.Fatalf("unexpected close reason: %q", data.Reason)
 	}
 }

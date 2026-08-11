@@ -44,6 +44,19 @@ func (h *Hub) JoinVoice(
 		)
 	}
 
+	if result.replaced != nil {
+		h.closeVoiceSession(result.replaced.ConnectionID())
+		h.SendToConnection(
+			result.replaced.ConnectionID(),
+			OutgoingEvent{
+				Type: EventVoiceWebRTCClosed,
+				Data: VoiceWebRTCClosedData{
+					Reason: VoiceWebRTCClosedReasonReplaced,
+				},
+			},
+		)
+	}
+
 	if result.joined {
 		h.publishToServerExcept(
 			serverID,

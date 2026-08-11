@@ -10,6 +10,7 @@ type voiceJoinResult struct {
 	participant  VoiceParticipantData
 	participants []VoiceParticipantData
 	previous     *VoiceParticipantData
+	replaced     *Client
 	joined       bool
 	updated      bool
 }
@@ -18,6 +19,7 @@ type voiceState struct {
 	mu        sync.RWMutex
 	byChannel map[int64]map[*Client]VoiceParticipantData
 	byClient  map[*Client]VoiceParticipantData
+	byUser    map[int64]*Client
 }
 
 func newVoiceState() *voiceState {
@@ -26,6 +28,7 @@ func newVoiceState() *voiceState {
 			map[int64]map[*Client]VoiceParticipantData,
 		),
 		byClient: make(map[*Client]VoiceParticipantData),
+		byUser:   make(map[int64]*Client),
 	}
 }
 
@@ -74,6 +77,17 @@ func (s *voiceState) join(
 		s.removeLocked(client, previous)
 	}
 
+	if previousClient := s.byUser[client.UserID()]; previousClient != nil && previousClient != client {
+
+		previous, exists = s.byClient[previousClient]
+		if exists {
+			previousCopy := previous
+			result.previous = &previousCopy
+			result.replaced = previousClient
+			s.removeLocked(previousClient, previous)
+		}
+	}
+
 	room := s.byChannel[channelID]
 	if room == nil {
 		room = make(map[*Client]VoiceParticipantData)
@@ -82,6 +96,7 @@ func (s *voiceState) join(
 
 	room[client] = result.participant
 	s.byClient[client] = result.participant
+	s.byUser[client.UserID()] = client
 	result.joined = true
 	result.participants = participantMapSnapshot(room)
 
@@ -162,6 +177,9 @@ func (s *voiceState) removeChannel(
 	for client, participant := range room {
 		participants = append(participants, participant)
 		delete(s.byClient, client)
+		if s.byUser[participant.UserID] == client {
+			delete(s.byUser, participant.UserID)
+		}
 	}
 
 	delete(s.byChannel, channelID)
@@ -218,6 +236,9 @@ func (s *voiceState) removeLocked(
 	participant VoiceParticipantData,
 ) {
 	delete(s.byClient, client)
+	if s.byUser[participant.UserID] == client {
+		delete(s.byUser, participant.UserID)
+	}
 
 	room := s.byChannel[participant.ChannelID]
 	delete(room, client)

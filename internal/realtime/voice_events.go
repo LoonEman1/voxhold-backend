@@ -17,6 +17,8 @@ const (
 	EventVoiceWebRTCClosed      EventType = "voice.webrtc_closed"
 )
 
+const VoiceWebRTCClosedReasonReplaced = "voice session moved to another connection"
+
 type VoiceJoinData struct {
 	ServerID  int64 `json:"server_id"`
 	ChannelID int64 `json:"channel_id"`
