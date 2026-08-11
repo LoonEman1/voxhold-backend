@@ -102,6 +102,8 @@ type Hub struct {
 
 	presenceMu sync.RWMutex
 	presence   map[int64]map[int64]int
+
+	voice *voiceState
 }
 
 func NewHub() *Hub {
@@ -111,6 +113,7 @@ func NewHub() *Hub {
 		clientsByUser:    make(map[int64]map[*Client]struct{}),
 		clientsBySession: make(map[[32]byte]map[*Client]struct{}),
 		presence:         make(map[int64]map[int64]int),
+		voice:            newVoiceState(),
 	}
 }
 
@@ -151,6 +154,7 @@ func (h *Hub) Register(client *Client) bool {
 	h.clientsMu.Unlock()
 
 	h.registerPresence(client)
+	h.sendVoiceSnapshot(client)
 
 	return true
 }
@@ -202,6 +206,7 @@ func (h *Hub) Unregister(client *Client) {
 	}
 
 	client.Close()
+	h.leaveVoice(client)
 
 	for _, channelID := range client.subscriptionIDs() {
 		h.Unsubscribe(client, channelID)
@@ -271,6 +276,7 @@ func (h *Hub) RevokeUserFromServer(
 	)
 
 	for _, client := range userClients {
+		h.leaveVoiceForServer(client, serverID)
 		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
@@ -307,6 +313,8 @@ func (h *Hub) RevokeServer(serverID int64) {
 	h.presenceMu.Lock()
 	delete(h.presence, serverID)
 	h.presenceMu.Unlock()
+
+	h.voice.removeServer(serverID)
 }
 
 func (h *Hub) clientsForServer(
@@ -671,6 +679,7 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	room := h.rooms[channelID]
 	if room == nil {
 		h.roomsMu.Unlock()
+		h.voice.removeChannel(channelID)
 		return
 	}
 	delete(h.rooms, channelID)
@@ -679,6 +688,8 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	for _, client := range room.closeAndSnapshot() {
 		client.removeSubscription(channelID)
 	}
+
+	h.voice.removeChannel(channelID)
 }
 
 func (h *Hub) getRoom(

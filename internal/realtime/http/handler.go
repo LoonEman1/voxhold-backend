@@ -40,6 +40,13 @@ type ChannelAccess interface {
 		channelID int64,
 		userID int64,
 	) error
+
+	CheckVoiceAccess(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		userID int64,
+	) error
 }
 
 type MembershipLister interface {
@@ -541,12 +548,213 @@ func (h *Handler) handleIncomingEvent(
 			event,
 		)
 
+	case realtime.EventVoiceJoin:
+		return h.joinVoice(
+			ctx,
+			client,
+			event,
+		)
+
+	case realtime.EventVoiceStateUpdate:
+		return h.updateVoiceState(
+			client,
+			event,
+		)
+
+	case realtime.EventVoiceLeave:
+		return h.leaveVoice(client, event)
+
 	default:
 		return queueError(
 			client,
 			event.RequestID,
 			realtime.ErrorInvalidEvent,
 			"unsupported event type",
+		)
+	}
+}
+
+func (h *Handler) joinVoice(
+	ctx context.Context,
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	var data realtime.VoiceJoinData
+
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"invalid voice join payload",
+		)
+	}
+
+	if data.ServerID <= 0 || data.ChannelID <= 0 {
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"server_id and channel_id must be positive",
+		)
+	}
+
+	allowed, err := h.checkVoiceChannelAccess(
+		ctx,
+		client,
+		event.RequestID,
+		data.ServerID,
+		data.ChannelID,
+	)
+	if err != nil || !allowed {
+		return err
+	}
+
+	joined, ok := h.hub.JoinVoice(
+		client,
+		data.ServerID,
+		data.ChannelID,
+		data.SelfMute,
+		data.SelfDeaf,
+	)
+	if !ok {
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorForbidden,
+			"not allowed to join voice channel",
+		)
+	}
+
+	allowed, err = h.checkVoiceChannelAccess(
+		ctx,
+		client,
+		event.RequestID,
+		data.ServerID,
+		data.ChannelID,
+	)
+	if err != nil || !allowed {
+		h.hub.LeaveVoice(client)
+		return err
+	}
+
+	return queueEvent(
+		client,
+		realtime.OutgoingEvent{
+			RequestID: event.RequestID,
+			Type:      realtime.EventVoiceJoined,
+			Data:      joined,
+		},
+	)
+}
+
+func (h *Handler) updateVoiceState(
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	var data realtime.VoiceStateUpdateData
+
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"invalid voice state payload",
+		)
+	}
+
+	participant, ok := h.hub.UpdateVoiceState(
+		client,
+		data.SelfMute,
+		data.SelfDeaf,
+	)
+	if !ok {
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidState,
+			"voice channel is not joined",
+		)
+	}
+
+	return queueEvent(
+		client,
+		realtime.OutgoingEvent{
+			RequestID: event.RequestID,
+			Type:      realtime.EventVoiceStateUpdated,
+			Data:      participant,
+		},
+	)
+}
+
+func (h *Handler) leaveVoice(
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	left, ok := h.hub.LeaveVoice(client)
+	if !ok {
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidState,
+			"voice channel is not joined",
+		)
+	}
+
+	return queueEvent(
+		client,
+		realtime.OutgoingEvent{
+			RequestID: event.RequestID,
+			Type:      realtime.EventVoiceLeft,
+			Data:      left,
+		},
+	)
+}
+
+func (h *Handler) checkVoiceChannelAccess(
+	ctx context.Context,
+	client *realtime.Client,
+	requestID string,
+	serverID int64,
+	channelID int64,
+) (bool, error) {
+	err := h.channelAccess.CheckVoiceAccess(
+		ctx,
+		serverID,
+		channelID,
+		client.UserID(),
+	)
+	if err == nil {
+		return true, nil
+	}
+
+	switch {
+	case errors.Is(err, channel.ErrVoiceRequired):
+		return false, queueError(
+			client,
+			requestID,
+			realtime.ErrorInvalidState,
+			"channel is not a voice channel",
+		)
+
+	case errors.Is(err, channel.ErrNotFound),
+		errors.Is(err, channel.ErrForbidden):
+
+		return false, queueError(
+			client,
+			requestID,
+			realtime.ErrorForbidden,
+			"not allowed to join voice channel",
+		)
+
+	default:
+		log.Printf("check voice channel access: %v", err)
+
+		return false, queueError(
+			client,
+			requestID,
+			realtime.ErrorInternal,
+			"internal server error",
 		)
 	}
 }

@@ -179,3 +179,32 @@ func (s *Service) CheckAccess(
 
 	return nil
 }
+
+func (s *Service) CheckVoiceAccess(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) error {
+	if serverID <= 0 || channelID <= 0 {
+		return ErrNotFound
+	}
+
+	if userID <= 0 {
+		return ErrForbidden
+	}
+
+	if err := s.repository.CheckVoiceAccess(
+		ctx,
+		serverID,
+		channelID,
+		userID,
+	); err != nil {
+		return fmt.Errorf(
+			"check voice channel access: %w",
+			err,
+		)
+	}
+
+	return nil
+}

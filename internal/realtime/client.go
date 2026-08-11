@@ -2,15 +2,20 @@ package realtime
 
 import (
 	"crypto/sha256"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 const outgoingBufferSize = 128
 
+var nextConnectionID atomic.Uint64
+
 type Client struct {
-	userID     int64
-	sessionKey [sha256.Size]byte
+	connectionID string
+	userID       int64
+	sessionKey   [sha256.Size]byte
 
 	outgoing    chan OutgoingEvent
 	done        chan struct{}
@@ -31,6 +36,7 @@ func NewClient(
 	serverIDs []int64,
 ) *Client {
 	client := &Client{
+		connectionID:  newConnectionID(),
 		userID:        userID,
 		sessionKey:    newSessionKey(sessionToken),
 		outgoing:      make(chan OutgoingEvent, outgoingBufferSize),
@@ -48,6 +54,13 @@ func NewClient(
 	return client
 }
 
+func newConnectionID() string {
+	return strconv.FormatUint(
+		nextConnectionID.Add(1),
+		36,
+	)
+}
+
 func newSessionKey(token string) [sha256.Size]byte {
 	return sha256.Sum256(
 		[]byte(strings.TrimSpace(token)),
@@ -56,6 +69,10 @@ func newSessionKey(token string) [sha256.Size]byte {
 
 func (c *Client) UserID() int64 {
 	return c.userID
+}
+
+func (c *Client) ConnectionID() string {
+	return c.connectionID
 }
 
 func (c *Client) Outgoing() <-chan OutgoingEvent {

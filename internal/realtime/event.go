@@ -69,6 +69,7 @@ const (
 	ErrorInvalidPayload ErrorCode = "invalid_payload"
 	ErrorUnauthorized   ErrorCode = "unauthorized"
 	ErrorForbidden      ErrorCode = "forbidden"
+	ErrorInvalidState   ErrorCode = "invalid_state"
 	ErrorInternal       ErrorCode = "internal_error"
 )
 

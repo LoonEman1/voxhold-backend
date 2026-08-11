@@ -38,4 +38,11 @@ type Repository interface {
 		channelID int64,
 		userID int64,
 	) error
+
+	CheckVoiceAccess(
+		ctx context.Context,
+		serverID int64,
+		channelID int64,
+		userID int64,
+	) error
 }

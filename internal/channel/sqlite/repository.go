@@ -462,3 +462,58 @@ func (r *Repository) CheckAccess(
 
 	return nil
 }
+
+func (r *Repository) CheckVoiceAccess(
+	ctx context.Context,
+	serverID int64,
+	channelID int64,
+	userID int64,
+) error {
+	const query = `
+	SELECT
+		channels.kind,
+		EXISTS (
+			SELECT 1
+			FROM server_members
+			WHERE server_members.server_id = channels.server_id
+			  AND server_members.user_id = ?
+		)
+	FROM channels
+	WHERE channels.id = ?
+	  AND channels.server_id = ?
+	`
+
+	var kind channel.Kind
+	var userIsMember bool
+
+	err := r.db.QueryRowContext(
+		ctx,
+		query,
+		userID,
+		channelID,
+		serverID,
+	).Scan(
+		&kind,
+		&userIsMember,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return channel.ErrNotFound
+		}
+
+		return fmt.Errorf(
+			"query voice channel access: %w",
+			err,
+		)
+	}
+
+	if !userIsMember {
+		return channel.ErrForbidden
+	}
+
+	if kind != channel.KindVoice {
+		return channel.ErrVoiceRequired
+	}
+
+	return nil
+}
