@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/voice"
 
 	accounthttp "voxhold-backend/internal/account/http"
 	accountSqlite "voxhold-backend/internal/account/sqlite"
@@ -46,6 +47,32 @@ func main() {
 	log.Println("database is ready")
 
 	realtimeHub := realtimeDomain.NewHub()
+	voiceConfig, err := voice.NewConfig(
+		os.Getenv("WEBRTC_UDP_PORT"),
+		os.Getenv("WEBRTC_PUBLIC_IP"),
+		os.Getenv("WEBRTC_ICE_SERVERS"),
+		os.Getenv("WEBRTC_ICE_USERNAME"),
+		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	voiceManager, err := voice.NewManager(
+		voiceConfig,
+		realtimeDomain.NewVoiceSignalSink(realtimeHub),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer voiceManager.Close()
+
+	realtimeHub.SetVoiceSessionCloser(voiceManager)
+	log.Printf(
+		"WebRTC audio is listening on UDP port %d",
+		voiceConfig.UDPPort,
+	)
+
 	serverEventPublisher :=
 		realtimeDomain.NewServerEventPublisher(realtimeHub)
 	channelEventPublisher :=
@@ -121,6 +148,7 @@ func main() {
 		channelService,
 		serverService,
 		readService,
+		voiceManager,
 		realtimeHub,
 	)
 

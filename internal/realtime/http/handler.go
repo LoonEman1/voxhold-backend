@@ -17,6 +17,7 @@ import (
 	"voxhold-backend/internal/readstate"
 	"voxhold-backend/internal/realtime"
 	serverDomain "voxhold-backend/internal/server"
+	"voxhold-backend/internal/voice"
 )
 
 const (
@@ -70,11 +71,36 @@ type ReadStateLister interface {
 	) ([]readstate.ChannelRead, error)
 }
 
+type VoiceMedia interface {
+	Join(
+		connectionID string,
+		userID int64,
+		serverID int64,
+		channelID int64,
+		selfMute bool,
+		selfDeaf bool,
+	) error
+
+	SetState(
+		connectionID string,
+		selfMute bool,
+		selfDeaf bool,
+	) error
+
+	AcceptAnswer(connectionID string, sdp string) error
+
+	AddICECandidate(
+		connectionID string,
+		candidate voice.ICECandidate,
+	) error
+}
+
 type Handler struct {
 	authenticator Authenticator
 	channelAccess ChannelAccess
 	memberships   MembershipLister
 	readStates    ReadStateLister
+	voiceMedia    VoiceMedia
 	hub           *realtime.Hub
 }
 
@@ -83,6 +109,7 @@ func NewHandler(
 	channelAccess ChannelAccess,
 	memberships MembershipLister,
 	readStates ReadStateLister,
+	voiceMedia VoiceMedia,
 	hub *realtime.Hub,
 ) *Handler {
 	return &Handler{
@@ -90,6 +117,7 @@ func NewHandler(
 		channelAccess: channelAccess,
 		memberships:   memberships,
 		readStates:    readStates,
+		voiceMedia:    voiceMedia,
 		hub:           hub,
 	}
 }
@@ -564,6 +592,18 @@ func (h *Handler) handleIncomingEvent(
 	case realtime.EventVoiceLeave:
 		return h.leaveVoice(client, event)
 
+	case realtime.EventVoiceWebRTCAnswer:
+		return h.acceptVoiceWebRTCAnswer(
+			client,
+			event,
+		)
+
+	case realtime.EventVoiceICECandidate:
+		return h.addVoiceICECandidate(
+			client,
+			event,
+		)
+
 	default:
 		return queueError(
 			client,
@@ -638,14 +678,37 @@ func (h *Handler) joinVoice(
 		return err
 	}
 
-	return queueEvent(
+	if err := queueEvent(
 		client,
 		realtime.OutgoingEvent{
 			RequestID: event.RequestID,
 			Type:      realtime.EventVoiceJoined,
 			Data:      joined,
 		},
-	)
+	); err != nil {
+		return err
+	}
+
+	if err := h.voiceMedia.Join(
+		client.ConnectionID(),
+		client.UserID(),
+		data.ServerID,
+		data.ChannelID,
+		data.SelfMute,
+		data.SelfDeaf,
+	); err != nil {
+		h.hub.LeaveVoice(client)
+		log.Printf("start WebRTC voice session: %v", err)
+
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInternal,
+			"failed to start voice media session",
+		)
+	}
+
+	return nil
 }
 
 func (h *Handler) updateVoiceState(
@@ -660,6 +723,30 @@ func (h *Handler) updateVoiceState(
 			event.RequestID,
 			realtime.ErrorInvalidPayload,
 			"invalid voice state payload",
+		)
+	}
+
+	if err := h.voiceMedia.SetState(
+		client.ConnectionID(),
+		data.SelfMute,
+		data.SelfDeaf,
+	); err != nil {
+		if errors.Is(err, voice.ErrSessionNotFound) {
+			h.hub.LeaveVoice(client)
+			return queueError(
+				client,
+				event.RequestID,
+				realtime.ErrorInvalidState,
+				"WebRTC voice session is not active",
+			)
+		}
+
+		log.Printf("update WebRTC voice state: %v", err)
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInternal,
+			"failed to update voice media state",
 		)
 	}
 
@@ -684,6 +771,109 @@ func (h *Handler) updateVoiceState(
 			Type:      realtime.EventVoiceStateUpdated,
 			Data:      participant,
 		},
+	)
+}
+
+func (h *Handler) acceptVoiceWebRTCAnswer(
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	var data realtime.VoiceWebRTCAnswerData
+
+	if err := json.Unmarshal(event.Data, &data); err != nil ||
+		strings.TrimSpace(data.SDP) == "" {
+
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"invalid WebRTC answer payload",
+		)
+	}
+
+	if err := h.voiceMedia.AcceptAnswer(
+		client.ConnectionID(),
+		data.SDP,
+	); err != nil {
+		return h.handleVoiceMediaInputError(
+			client,
+			event.RequestID,
+			"accept WebRTC answer",
+			err,
+		)
+	}
+
+	return queueEvent(
+		client,
+		realtime.OutgoingEvent{
+			RequestID: event.RequestID,
+			Type:      realtime.EventVoiceWebRTCAnswered,
+			Data: realtime.VoiceWebRTCAnsweredData{
+				Accepted: true,
+			},
+		},
+	)
+}
+
+func (h *Handler) addVoiceICECandidate(
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	var data realtime.VoiceICECandidateData
+
+	if err := json.Unmarshal(event.Data, &data); err != nil ||
+		strings.TrimSpace(data.Candidate) == "" {
+
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"invalid ICE candidate payload",
+		)
+	}
+
+	err := h.voiceMedia.AddICECandidate(
+		client.ConnectionID(),
+		voice.ICECandidate{
+			Candidate:        data.Candidate,
+			SDPMid:           data.SDPMid,
+			SDPMLineIndex:    data.SDPMLineIndex,
+			UsernameFragment: data.UsernameFragment,
+		},
+	)
+	if err != nil {
+		return h.handleVoiceMediaInputError(
+			client,
+			event.RequestID,
+			"add WebRTC ICE candidate",
+			err,
+		)
+	}
+
+	return nil
+}
+
+func (h *Handler) handleVoiceMediaInputError(
+	client *realtime.Client,
+	requestID string,
+	operation string,
+	err error,
+) error {
+	if errors.Is(err, voice.ErrSessionNotFound) {
+		return queueError(
+			client,
+			requestID,
+			realtime.ErrorInvalidState,
+			"WebRTC voice session is not active",
+		)
+	}
+
+	log.Printf("%s: %v", operation, err)
+	return queueError(
+		client,
+		requestID,
+		realtime.ErrorInvalidPayload,
+		"invalid WebRTC signaling payload",
 	)
 }
 

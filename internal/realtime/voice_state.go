@@ -146,27 +146,44 @@ func (s *voiceState) leaveServer(
 	return participant, true
 }
 
-func (s *voiceState) removeChannel(channelID int64) {
+func (s *voiceState) removeChannel(
+	channelID int64,
+) []VoiceParticipantData {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	room := s.byChannel[channelID]
-	for client := range room {
+	participants := make(
+		[]VoiceParticipantData,
+		0,
+		len(room),
+	)
+
+	for client, participant := range room {
+		participants = append(participants, participant)
 		delete(s.byClient, client)
 	}
 
 	delete(s.byChannel, channelID)
+	return participants
 }
 
-func (s *voiceState) removeServer(serverID int64) {
+func (s *voiceState) removeServer(
+	serverID int64,
+) []VoiceParticipantData {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	participants := make([]VoiceParticipantData, 0)
+
 	for client, participant := range s.byClient {
 		if participant.ServerID == serverID {
+			participants = append(participants, participant)
 			s.removeLocked(client, participant)
 		}
 	}
+
+	return participants
 }
 
 func (s *voiceState) snapshotForServers(

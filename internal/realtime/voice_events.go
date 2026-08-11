@@ -10,6 +10,11 @@ const (
 	EventVoiceParticipantJoined EventType = "voice.participant_joined"
 	EventVoiceParticipantLeft   EventType = "voice.participant_left"
 	EventVoiceSnapshot          EventType = "voice.snapshot"
+	EventVoiceWebRTCOffer       EventType = "voice.webrtc_offer"
+	EventVoiceWebRTCAnswer      EventType = "voice.webrtc_answer"
+	EventVoiceWebRTCAnswered    EventType = "voice.webrtc_answered"
+	EventVoiceICECandidate      EventType = "voice.ice_candidate"
+	EventVoiceWebRTCClosed      EventType = "voice.webrtc_closed"
 )
 
 type VoiceJoinData struct {
@@ -47,4 +52,27 @@ type VoiceLeftData struct {
 
 type VoiceSnapshotData struct {
 	Participants []VoiceParticipantData `json:"participants"`
+}
+
+type VoiceWebRTCOfferData struct {
+	SDP string `json:"sdp"`
+}
+
+type VoiceWebRTCAnswerData struct {
+	SDP string `json:"sdp"`
+}
+
+type VoiceWebRTCAnsweredData struct {
+	Accepted bool `json:"accepted"`
+}
+
+type VoiceICECandidateData struct {
+	Candidate        string  `json:"candidate"`
+	SDPMid           *string `json:"sdp_mid,omitempty"`
+	SDPMLineIndex    *uint16 `json:"sdp_mline_index,omitempty"`
+	UsernameFragment *string `json:"username_fragment,omitempty"`
+}
+
+type VoiceWebRTCClosedData struct {
+	Reason string `json:"reason"`
 }

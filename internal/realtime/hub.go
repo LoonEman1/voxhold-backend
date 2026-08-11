@@ -95,25 +95,28 @@ type Hub struct {
 	roomsMu sync.RWMutex
 	rooms   map[int64]*room
 
-	clientsMu        sync.RWMutex
-	clients          map[*Client]struct{}
-	clientsByUser    map[int64]map[*Client]struct{}
-	clientsBySession map[[32]byte]map[*Client]struct{}
+	clientsMu           sync.RWMutex
+	clients             map[*Client]struct{}
+	clientsByUser       map[int64]map[*Client]struct{}
+	clientsBySession    map[[32]byte]map[*Client]struct{}
+	clientsByConnection map[string]*Client
 
 	presenceMu sync.RWMutex
 	presence   map[int64]map[int64]int
 
-	voice *voiceState
+	voice         *voiceState
+	voiceSessions VoiceSessionCloser
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		rooms:            make(map[int64]*room),
-		clients:          make(map[*Client]struct{}),
-		clientsByUser:    make(map[int64]map[*Client]struct{}),
-		clientsBySession: make(map[[32]byte]map[*Client]struct{}),
-		presence:         make(map[int64]map[int64]int),
-		voice:            newVoiceState(),
+		rooms:               make(map[int64]*room),
+		clients:             make(map[*Client]struct{}),
+		clientsByUser:       make(map[int64]map[*Client]struct{}),
+		clientsBySession:    make(map[[32]byte]map[*Client]struct{}),
+		clientsByConnection: make(map[string]*Client),
+		presence:            make(map[int64]map[int64]int),
+		voice:               newVoiceState(),
 	}
 }
 
@@ -137,6 +140,7 @@ func (h *Hub) Register(client *Client) bool {
 	}
 
 	h.clients[client] = struct{}{}
+	h.clientsByConnection[client.ConnectionID()] = client
 
 	userClients := h.clientsByUser[client.userID]
 	if userClients == nil {
@@ -214,6 +218,7 @@ func (h *Hub) Unregister(client *Client) {
 
 	h.clientsMu.Lock()
 	delete(h.clients, client)
+	delete(h.clientsByConnection, client.ConnectionID())
 
 	userClients := h.clientsByUser[client.userID]
 	delete(userClients, client)
@@ -314,7 +319,9 @@ func (h *Hub) RevokeServer(serverID int64) {
 	delete(h.presence, serverID)
 	h.presenceMu.Unlock()
 
-	h.voice.removeServer(serverID)
+	for _, participant := range h.voice.removeServer(serverID) {
+		h.closeVoiceSession(participant.ConnectionID)
+	}
 }
 
 func (h *Hub) clientsForServer(
@@ -679,7 +686,9 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	room := h.rooms[channelID]
 	if room == nil {
 		h.roomsMu.Unlock()
-		h.voice.removeChannel(channelID)
+		for _, participant := range h.voice.removeChannel(channelID) {
+			h.closeVoiceSession(participant.ConnectionID)
+		}
 		return
 	}
 	delete(h.rooms, channelID)
@@ -689,7 +698,9 @@ func (h *Hub) RemoveChannel(channelID int64) {
 		client.removeSubscription(channelID)
 	}
 
-	h.voice.removeChannel(channelID)
+	for _, participant := range h.voice.removeChannel(channelID) {
+		h.closeVoiceSession(participant.ConnectionID)
+	}
 }
 
 func (h *Hub) getRoom(

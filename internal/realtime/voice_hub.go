@@ -1,5 +1,15 @@
 package realtime
 
+type VoiceSessionCloser interface {
+	Leave(connectionID string)
+}
+
+func (h *Hub) SetVoiceSessionCloser(
+	closer VoiceSessionCloser,
+) {
+	h.voiceSessions = closer
+}
+
 func (h *Hub) JoinVoice(
 	client *Client,
 	serverID int64,
@@ -116,6 +126,7 @@ func (h *Hub) leaveVoice(
 	}
 
 	h.publishVoiceLeft(participant, client)
+	h.closeVoiceSession(participant.ConnectionID)
 
 	return participant, true
 }
@@ -130,6 +141,13 @@ func (h *Hub) leaveVoiceForServer(
 	)
 	if exists {
 		h.publishVoiceLeft(participant, client)
+		h.closeVoiceSession(participant.ConnectionID)
+	}
+}
+
+func (h *Hub) closeVoiceSession(connectionID string) {
+	if h.voiceSessions != nil {
+		h.voiceSessions.Leave(connectionID)
 	}
 }
 

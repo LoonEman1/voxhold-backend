@@ -121,6 +121,8 @@ func TestHubVoiceMoveAndDisconnect(t *testing.T) {
 
 func TestHubVoiceSnapshotAndChannelRemoval(t *testing.T) {
 	hub := NewHub()
+	closer := &voiceSessionCloserStub{}
+	hub.SetVoiceSessionCloser(closer)
 	participant := NewClient(1, "participant", []int64{10})
 
 	hub.Register(participant)
@@ -157,6 +159,23 @@ func TestHubVoiceSnapshotAndChannelRemoval(t *testing.T) {
 	if _, ok := hub.LeaveVoice(participant); ok {
 		t.Fatal("removed channel retained voice participant")
 	}
+
+	if len(closer.connectionIDs) != 1 ||
+		closer.connectionIDs[0] != participant.ConnectionID() {
+
+		t.Fatalf(
+			"voice media session was not closed: %v",
+			closer.connectionIDs,
+		)
+	}
+}
+
+type voiceSessionCloserStub struct {
+	connectionIDs []string
+}
+
+func (s *voiceSessionCloserStub) Leave(connectionID string) {
+	s.connectionIDs = append(s.connectionIDs, connectionID)
 }
 
 func assertVoiceParticipantEvent(
