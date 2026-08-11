@@ -49,14 +49,30 @@ func NewManager(
 		return nil, ErrMaxParticipantsInvalid
 	}
 
-	udpMux, err := ice.NewMultiUDPMuxFromPort(
-		config.UDPPort,
+	udpMuxOptions := []ice.UDPMuxFromPortOption{
 		ice.UDPMuxFromPortWithNetworks(
 			ice.NetworkTypeUDP4,
 		),
-		ice.UDPMuxFromPortWithLoopback(),
-		ice.UDPMuxFromPortWithReadBufferSize(2*1024*1024),
-		ice.UDPMuxFromPortWithWriteBufferSize(2*1024*1024),
+		ice.UDPMuxFromPortWithReadBufferSize(2 * 1024 * 1024),
+		ice.UDPMuxFromPortWithWriteBufferSize(2 * 1024 * 1024),
+	}
+
+	// Address rewriting maps every matching local candidate to the same
+	// externally reachable address. Including loopback in that case can make
+	// Pion keep the rewritten loopback candidate and its socket while dropping
+	// the equivalent candidate backed by the real network interface. Such a
+	// socket cannot send ICE checks to remote peers. Loopback is only useful
+	// when no external address is being advertised.
+	if config.PublicIP == "" {
+		udpMuxOptions = append(
+			udpMuxOptions,
+			ice.UDPMuxFromPortWithLoopback(),
+		)
+	}
+
+	udpMux, err := ice.NewMultiUDPMuxFromPort(
+		config.UDPPort,
+		udpMuxOptions...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(

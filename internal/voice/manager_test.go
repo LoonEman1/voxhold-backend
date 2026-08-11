@@ -68,6 +68,43 @@ func TestManagerRelaysOpusBetweenPeers(t *testing.T) {
 	}
 }
 
+func TestManagerExcludesLoopbackMuxWhenPublicIPIsConfigured(
+	t *testing.T,
+) {
+	sink := newTestSignalSink()
+
+	for attempt := 0; attempt < 10; attempt++ {
+		manager, err := NewManager(
+			Config{
+				UDPPort:         unusedUDPPort(t),
+				MaxParticipants: DefaultMaxParticipants,
+				PublicIP:        "127.0.0.1",
+			},
+			sink,
+		)
+		if err != nil {
+			continue
+		}
+		defer func() {
+			_ = manager.Close()
+		}()
+
+		for _, address := range manager.udpMux.GetListenAddresses() {
+			udpAddress, ok := address.(*net.UDPAddr)
+			if ok && udpAddress.IP.IsLoopback() {
+				t.Fatalf(
+					"public IP manager listens through loopback mux: %s",
+					address,
+				)
+			}
+		}
+
+		return
+	}
+
+	t.Fatal("could not allocate WebRTC UDP port")
+}
+
 type testSignalSink struct {
 	mu      sync.RWMutex
 	manager *Manager
