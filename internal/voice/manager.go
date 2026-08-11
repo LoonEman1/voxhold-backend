@@ -18,6 +18,7 @@ var (
 	ErrSessionNotFound = errors.New(
 		"WebRTC voice session not found",
 	)
+	ErrRoomFull = errors.New("voice channel is full")
 )
 
 type Manager struct {
@@ -26,10 +27,11 @@ type Manager struct {
 	sink          SignalSink
 	udpMux        ice.UDPMux
 
-	mu       sync.RWMutex
-	rooms    map[int64]*room
-	sessions map[string]*session
-	closed   bool
+	mu              sync.RWMutex
+	rooms           map[int64]*room
+	sessions        map[string]*session
+	closed          bool
+	maxParticipants int
 }
 
 func NewManager(
@@ -38,6 +40,13 @@ func NewManager(
 ) (*Manager, error) {
 	if sink == nil {
 		return nil, errors.New("voice signal sink is required")
+	}
+
+	if config.MaxParticipants == 0 {
+		config.MaxParticipants = DefaultMaxParticipants
+	}
+	if config.MaxParticipants < 2 || config.MaxParticipants > 100 {
+		return nil, ErrMaxParticipantsInvalid
 	}
 
 	udpMux, err := ice.NewMultiUDPMuxFromPort(
@@ -125,12 +134,13 @@ func NewManager(
 	)
 
 	return &Manager{
-		api:           api,
-		configuration: newWebRTCConfiguration(config),
-		sink:          sink,
-		udpMux:        udpMux,
-		rooms:         make(map[int64]*room),
-		sessions:      make(map[string]*session),
+		api:             api,
+		configuration:   newWebRTCConfiguration(config),
+		sink:            sink,
+		udpMux:          udpMux,
+		rooms:           make(map[int64]*room),
+		sessions:        make(map[string]*session),
+		maxParticipants: config.MaxParticipants,
 	}, nil
 }
 
@@ -171,6 +181,31 @@ func (m *Manager) Join(
 
 	m.Leave(connectionID)
 
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return errors.New("voice manager is closed")
+	}
+
+	voiceRoom := m.rooms[channelID]
+	if voiceRoom == nil {
+		voiceRoom = newRoom(channelID)
+		m.rooms[channelID] = voiceRoom
+	}
+	m.mu.Unlock()
+
+	if !voiceRoom.reserve(m.maxParticipants) {
+		return ErrRoomFull
+	}
+
+	reservationActive := true
+	defer func() {
+		if reservationActive {
+			voiceRoom.cancelReservation()
+			m.removeRoomIfEmpty(channelID, voiceRoom)
+		}
+	}()
+
 	peerConnection, err := m.api.NewPeerConnection(
 		m.configuration,
 	)
@@ -198,12 +233,6 @@ func (m *Manager) Join(
 		return errors.New("voice manager is closed")
 	}
 
-	voiceRoom := m.rooms[channelID]
-	if voiceRoom == nil {
-		voiceRoom = newRoom(channelID)
-		m.rooms[channelID] = voiceRoom
-	}
-
 	value := newSession(
 		m,
 		voiceRoom,
@@ -218,6 +247,7 @@ func (m *Manager) Join(
 
 	m.sessions[connectionID] = value
 	voiceRoom.addSession(value)
+	reservationActive = false
 	m.mu.Unlock()
 
 	value.installCallbacks()
@@ -231,6 +261,22 @@ func (m *Manager) Join(
 	}
 
 	return nil
+}
+
+func (m *Manager) removeRoomIfEmpty(
+	channelID int64,
+	voiceRoom *room,
+) {
+	if !voiceRoom.empty() {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if voiceRoom.empty() && m.rooms[channelID] == voiceRoom {
+		delete(m.rooms, channelID)
+	}
 }
 
 func (m *Manager) SetState(

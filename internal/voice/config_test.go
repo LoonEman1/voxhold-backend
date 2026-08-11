@@ -8,6 +8,7 @@ import (
 func TestNewConfig(t *testing.T) {
 	config, err := NewConfig(
 		"51000",
+		"24",
 		"203.0.113.10",
 		"stun:stun.example.com:3478, turn:turn.example.com:3478",
 		"voice-user",
@@ -18,6 +19,7 @@ func TestNewConfig(t *testing.T) {
 	}
 
 	if config.UDPPort != 51000 ||
+		config.MaxParticipants != 24 ||
 		config.PublicIP != "203.0.113.10" ||
 		len(config.ICEServerURLs) != 2 {
 
@@ -27,17 +29,24 @@ func TestNewConfig(t *testing.T) {
 
 func TestNewConfigRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
-		name       string
-		udpPort    string
-		publicIP   string
-		username   string
-		credential string
-		target     error
+		name            string
+		udpPort         string
+		maxParticipants string
+		publicIP        string
+		username        string
+		credential      string
+		target          error
 	}{
 		{
 			name:    "invalid UDP port",
 			udpPort: "70000",
 			target:  ErrUDPPortInvalid,
+		},
+		{
+			name:            "invalid participant limit",
+			udpPort:         "50000",
+			maxParticipants: "1",
+			target:          ErrMaxParticipantsInvalid,
 		},
 		{
 			name:     "invalid public IP",
@@ -54,6 +63,7 @@ func TestNewConfigRejectsInvalidValues(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := NewConfig(
 				test.udpPort,
+				test.maxParticipants,
 				test.publicIP,
 				"",
 				test.username,

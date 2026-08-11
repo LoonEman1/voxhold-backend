@@ -49,6 +49,7 @@ func main() {
 	realtimeHub := realtimeDomain.NewHub()
 	voiceConfig, err := voice.NewConfig(
 		os.Getenv("WEBRTC_UDP_PORT"),
+		os.Getenv("WEBRTC_MAX_PARTICIPANTS"),
 		os.Getenv("WEBRTC_PUBLIC_IP"),
 		os.Getenv("WEBRTC_ICE_SERVERS"),
 		os.Getenv("WEBRTC_ICE_USERNAME"),

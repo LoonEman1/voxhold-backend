@@ -698,6 +698,16 @@ func (h *Handler) joinVoice(
 		data.SelfDeaf,
 	); err != nil {
 		h.hub.LeaveVoice(client)
+
+		if errors.Is(err, voice.ErrRoomFull) {
+			return queueError(
+				client,
+				event.RequestID,
+				realtime.ErrorInvalidState,
+				"voice channel is full",
+			)
+		}
+
 		log.Printf("start WebRTC voice session: %v", err)
 
 		return queueError(

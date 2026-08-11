@@ -28,4 +28,7 @@ COPY --from=builder /out/voxhold /usr/local/bin/voxhold
 COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY migrations /app/migrations
 
+EXPOSE 8080/tcp
+EXPOSE 50000/udp
+
 CMD ["voxhold"]

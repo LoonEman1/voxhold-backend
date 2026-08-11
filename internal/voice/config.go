@@ -9,24 +9,30 @@ import (
 )
 
 const DefaultUDPPort = 50000
+const DefaultMaxParticipants = 32
 
 var (
 	ErrUDPPortInvalid  = errors.New("WebRTC UDP port is invalid")
 	ErrPublicIPInvalid = errors.New(
 		"WebRTC public IP is invalid",
 	)
+	ErrMaxParticipantsInvalid = errors.New(
+		"voice room participant limit is invalid",
+	)
 )
 
 type Config struct {
-	UDPPort       int
-	PublicIP      string
-	ICEServerURLs []string
-	ICEUsername   string
-	ICECredential string
+	UDPPort         int
+	MaxParticipants int
+	PublicIP        string
+	ICEServerURLs   []string
+	ICEUsername     string
+	ICECredential   string
 }
 
 func NewConfig(
 	rawUDPPort string,
+	rawMaxParticipants string,
 	publicIP string,
 	rawICEServerURLs string,
 	iceUsername string,
@@ -44,17 +50,30 @@ func NewConfig(
 		udpPort = parsedPort
 	}
 
+	maxParticipants := DefaultMaxParticipants
+	rawMaxParticipants = strings.TrimSpace(rawMaxParticipants)
+
+	if rawMaxParticipants != "" {
+		parsedLimit, err := strconv.Atoi(rawMaxParticipants)
+		if err != nil || parsedLimit < 2 || parsedLimit > 100 {
+			return Config{}, ErrMaxParticipantsInvalid
+		}
+
+		maxParticipants = parsedLimit
+	}
+
 	publicIP = strings.TrimSpace(publicIP)
 	if publicIP != "" && net.ParseIP(publicIP) == nil {
 		return Config{}, ErrPublicIPInvalid
 	}
 
 	config := Config{
-		UDPPort:       udpPort,
-		PublicIP:      publicIP,
-		ICEServerURLs: splitNonEmpty(rawICEServerURLs),
-		ICEUsername:   strings.TrimSpace(iceUsername),
-		ICECredential: strings.TrimSpace(iceCredential),
+		UDPPort:         udpPort,
+		MaxParticipants: maxParticipants,
+		PublicIP:        publicIP,
+		ICEServerURLs:   splitNonEmpty(rawICEServerURLs),
+		ICEUsername:     strings.TrimSpace(iceUsername),
+		ICECredential:   strings.TrimSpace(iceCredential),
 	}
 
 	if (config.ICEUsername == "") !=

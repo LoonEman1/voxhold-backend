@@ -14,9 +14,10 @@ type roomTrack struct {
 type room struct {
 	id int64
 
-	mu       sync.RWMutex
-	sessions map[string]*session
-	tracks   map[string]roomTrack
+	mu           sync.RWMutex
+	sessions     map[string]*session
+	tracks       map[string]roomTrack
+	reservations int
 }
 
 func newRoom(id int64) *room {
@@ -31,7 +32,31 @@ func (r *room) addSession(value *session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.reservations > 0 {
+		r.reservations--
+	}
 	r.sessions[value.connectionID] = value
+}
+
+func (r *room) reserve(maxParticipants int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.sessions)+r.reservations >= maxParticipants {
+		return false
+	}
+
+	r.reservations++
+	return true
+}
+
+func (r *room) cancelReservation() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.reservations > 0 {
+		r.reservations--
+	}
 }
 
 func (r *room) removeSession(
@@ -117,7 +142,7 @@ func (r *room) empty() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return len(r.sessions) == 0
+	return len(r.sessions) == 0 && r.reservations == 0
 }
 
 func (r *room) synchronizeSessions() {

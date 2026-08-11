@@ -345,7 +345,10 @@ func newTestManager(
 	for attempt := 0; attempt < 10; attempt++ {
 		port := unusedUDPPort(t)
 		manager, err := NewManager(
-			Config{UDPPort: port},
+			Config{
+				UDPPort:         port,
+				MaxParticipants: DefaultMaxParticipants,
+			},
 			sink,
 		)
 		if err == nil {
