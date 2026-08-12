@@ -128,6 +128,17 @@ func NewHub() *Hub {
 	}
 }
 
+func (h *Hub) Close() {
+	h.clientsMu.RLock()
+	clients := clientSetSnapshot(h.clients)
+	h.clientsMu.RUnlock()
+
+	for _, client := range clients {
+		client.CloseWithReason("server is shutting down")
+		h.Unregister(client)
+	}
+}
+
 func (h *Hub) Register(client *Client) bool {
 	if client == nil || client.UserID() <= 0 {
 		return false

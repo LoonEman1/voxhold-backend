@@ -3,6 +3,7 @@ package invite
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,87 @@ type Service struct {
 	memberships  MembershipRegistrar
 	events       EventPublisher
 	memberEvents MemberEventPublisher
+}
+
+func (s *Service) CreateLink(
+	ctx context.Context,
+	serverID int64,
+	creatorUserID int64,
+	input CreateLinkInput,
+) (InviteLink, error) {
+	if serverID <= 0 || creatorUserID <= 0 {
+		return InviteLink{}, ErrForbidden
+	}
+
+	if err := input.Validate(); err != nil {
+		return InviteLink{}, err
+	}
+
+	token, tokenHash, err := generateLinkToken()
+	if err != nil {
+		return InviteLink{}, err
+	}
+
+	createdLink, err := s.repository.CreateLink(
+		ctx,
+		serverID,
+		creatorUserID,
+		tokenHash,
+		time.Now().Add(input.Lifetime).Unix(),
+		input.MaxUses,
+		input.AllowRegistration,
+	)
+	if err != nil {
+		return InviteLink{}, fmt.Errorf("create invite link: %w", err)
+	}
+
+	createdLink.Token = token
+
+	return createdLink, nil
+}
+
+func (s *Service) ResolveLink(
+	ctx context.Context,
+	token string,
+) (LinkPreview, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return LinkPreview{}, ErrLinkInvalid
+	}
+
+	preview, err := s.repository.ResolveLink(ctx, hashLinkToken(token))
+	if err != nil {
+		return LinkPreview{}, fmt.Errorf("resolve invite link: %w", err)
+	}
+
+	return preview, nil
+}
+
+func (s *Service) AcceptLink(
+	ctx context.Context,
+	token string,
+	userID int64,
+) (int64, bool, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || userID <= 0 {
+		return 0, false, ErrLinkInvalid
+	}
+
+	serverID, member, alreadyMember, err := s.repository.AcceptLink(
+		ctx,
+		hashLinkToken(token),
+		userID,
+	)
+	if err != nil {
+		return 0, false, fmt.Errorf("accept invite link: %w", err)
+	}
+
+	if !alreadyMember {
+		s.memberEvents.PublishServerMemberJoined(serverID, member)
+		s.memberships.AddUserToServer(userID, serverID)
+	}
+
+	return serverID, alreadyMember, nil
 }
 
 func NewService(

@@ -20,18 +20,27 @@ var (
 type Service struct {
 	users          UserRepository
 	sessions       SessionRepository
+	registrations  InviteRegistrationRepository
 	sessionRevoker SessionRevoker
+	memberships    MembershipRegistrar
+	memberEvents   MemberEventPublisher
 }
 
 func NewService(
 	users UserRepository,
 	sessions SessionRepository,
+	registrations InviteRegistrationRepository,
 	sessionRevoker SessionRevoker,
+	memberships MembershipRegistrar,
+	memberEvents MemberEventPublisher,
 ) *Service {
 	return &Service{
 		users:          users,
 		sessions:       sessions,
+		registrations:  registrations,
 		sessionRevoker: sessionRevoker,
+		memberships:    memberships,
+		memberEvents:   memberEvents,
 	}
 }
 
@@ -62,6 +71,14 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (LoginResul
 		return LoginResult{}, err
 	}
 
+	inviteTokenHash := hashSessionToken(input.InviteToken)
+	if err := s.registrations.ValidateRegistrationInvite(
+		ctx,
+		inviteTokenHash,
+	); err != nil {
+		return LoginResult{}, fmt.Errorf("validate registration invite: %w", err)
+	}
+
 	passwordHash, err := bcrypt.GenerateFromPassword(
 		[]byte(input.Password),
 		bcrypt.DefaultCost,
@@ -70,15 +87,26 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (LoginResul
 		return LoginResult{}, fmt.Errorf("hash password: %w", err)
 	}
 
-	user, err := s.users.Create(ctx, input.Username, string(passwordHash))
-	if err != nil {
-		return LoginResult{}, fmt.Errorf("create user: %w", err)
-	}
-
-	token, expiresAt, err := s.generateSession(ctx, user)
+	token, tokenHash, err := generateSessionToken()
 	if err != nil {
 		return LoginResult{}, err
 	}
+
+	expiresAt := time.Now().Add(sessionLifetime).Unix()
+	user, serverID, member, err := s.registrations.RegisterWithInvite(
+		ctx,
+		input.Username,
+		string(passwordHash),
+		inviteTokenHash,
+		tokenHash,
+		expiresAt,
+	)
+	if err != nil {
+		return LoginResult{}, fmt.Errorf("register with invite: %w", err)
+	}
+
+	s.memberEvents.PublishServerMemberJoined(serverID, member)
+	s.memberships.AddUserToServer(user.ID, serverID)
 
 	return LoginResult{
 		User: UserInfo{

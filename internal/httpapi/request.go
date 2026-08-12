@@ -1,13 +1,67 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
 
 	"voxhold-backend/internal/account"
 )
+
+const MaxJSONBodyBytes int64 = 64 * 1024
+
+func DecodeJSON(
+	w http.ResponseWriter,
+	r *http.Request,
+	destination any,
+) bool {
+	r.Body = http.MaxBytesReader(
+		w,
+		r.Body,
+		MaxJSONBodyBytes,
+	)
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(destination); err != nil {
+		writeJSONDecodeError(w, err)
+		return false
+	}
+
+	var trailingValue any
+	if err := decoder.Decode(&trailingValue); !errors.Is(err, io.EOF) {
+		writeJSONDecodeError(w, err)
+		return false
+	}
+
+	return true
+}
+
+func writeJSONDecodeError(
+	w http.ResponseWriter,
+	err error,
+) {
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		WriteError(
+			w,
+			http.StatusRequestEntityTooLarge,
+			"JSON body must not exceed 64 KiB",
+		)
+		return
+	}
+
+	WriteError(
+		w,
+		http.StatusBadRequest,
+		"invalid JSON body",
+	)
+}
 
 func AuthenticatedUserID(
 	w http.ResponseWriter,

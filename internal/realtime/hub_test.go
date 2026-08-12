@@ -2,6 +2,35 @@ package realtime
 
 import "testing"
 
+func TestHubCloseDisconnectsAllClients(t *testing.T) {
+	hub := NewHub()
+	first := NewClient(1, "first-session", []int64{10})
+	second := NewClient(2, "second-session", []int64{10})
+
+	if !hub.Register(first) || !hub.Register(second) {
+		t.Fatal("register clients")
+	}
+
+	hub.Subscribe(first, 10, 100)
+	hub.Subscribe(second, 10, 100)
+	hub.Close()
+
+	for _, client := range []*Client{first, second} {
+		select {
+		case <-client.Done():
+		default:
+			t.Fatal("client remained connected after hub shutdown")
+		}
+	}
+
+	if delivered := hub.Publish(
+		100,
+		OutgoingEvent{Type: EventMessageCreated},
+	); delivered != 0 {
+		t.Fatalf("event delivered after hub shutdown: %d", delivered)
+	}
+}
+
 func TestHubRevokeSession(t *testing.T) {
 	hub := NewHub()
 	client := NewClient(1, "session-token", []int64{10})

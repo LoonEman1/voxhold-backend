@@ -2,7 +2,6 @@ package accounthttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -58,6 +57,7 @@ type registerRequest struct {
 	Username        string `json:"username"`
 	Password        string `json:"password"`
 	PasswordConfirm string `json:"password_confirm"`
+	InviteToken     string `json:"invite_token"`
 }
 
 type loginRequest struct {
@@ -98,15 +98,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	var request registerRequest
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&request); err != nil {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid JSON body",
-		)
+	if !httpapi.DecodeJSON(w, r, &request) {
 		return
 	}
 
@@ -116,6 +108,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 			Username:        request.Username,
 			Password:        request.Password,
 			PasswordConfirm: request.PasswordConfirm,
+			InviteToken:     request.InviteToken,
 		},
 	)
 	if err != nil {
@@ -129,6 +122,20 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 				w,
 				http.StatusBadRequest,
 				err.Error(),
+			)
+
+		case errors.Is(err, account.ErrRegistrationInviteInvalid):
+			httpapi.WriteError(
+				w,
+				http.StatusForbidden,
+				"a valid registration invite is required",
+			)
+
+		case errors.Is(err, account.ErrUsernameTaken):
+			httpapi.WriteError(
+				w,
+				http.StatusConflict,
+				"username is already taken",
 			)
 
 		default:
@@ -180,15 +187,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var request loginRequest
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&request); err != nil {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid JSON body",
-		)
+	if !httpapi.DecodeJSON(w, r, &request) {
 		return
 	}
 

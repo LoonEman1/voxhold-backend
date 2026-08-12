@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/voice"
@@ -36,6 +40,15 @@ import (
 	realtimehttp "voxhold-backend/internal/realtime/http"
 
 	realtimeDomain "voxhold-backend/internal/realtime"
+)
+
+const (
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 15 * time.Second
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 2 * time.Minute
+	shutdownTimeout   = 10 * time.Second
+	maxHeaderBytes    = 32 * 1024
 )
 
 func main() {
@@ -121,11 +134,16 @@ func main() {
 
 	userRepository := accountSqlite.NewUserRepository(db)
 	sessionRepository := accountSqlite.NewSessionRepository(db)
+	inviteRegistrationRepository :=
+		accountSqlite.NewInviteRegistrationRepository(db)
 
 	accountService := account.NewService(
 		userRepository,
 		sessionRepository,
+		inviteRegistrationRepository,
 		realtimeHub,
+		realtimeHub,
+		serverEventPublisher,
 	)
 	accountHandler := accounthttp.NewHandler(accountService)
 
@@ -233,12 +251,53 @@ func main() {
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 
 	log.Printf("server started on: %s", server.Addr)
 
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	signalContext, stopSignals := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stopSignals()
+
+	select {
+	case err := <-serverErrors:
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+		return
+
+	case <-signalContext.Done():
+		log.Println("shutdown signal received")
 	}
+
+	shutdownContext, cancelShutdown := context.WithTimeout(
+		context.Background(),
+		shutdownTimeout,
+	)
+	defer cancelShutdown()
+
+	if err := server.Shutdown(shutdownContext); err != nil {
+		log.Printf("graceful HTTP shutdown: %v", err)
+
+		if closeErr := server.Close(); closeErr != nil {
+			log.Printf("force HTTP shutdown: %v", closeErr)
+		}
+	}
+
+	realtimeHub.Close()
+
+	log.Println("server stopped")
 }
