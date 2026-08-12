@@ -19,12 +19,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/voxhold \
     ./cmd/api
 
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -o /out/voxhold-bootstrap \
+    ./cmd/bootstrap
+
 
 FROM alpine:3.22
 
 WORKDIR /app
 
 COPY --from=builder /out/voxhold /usr/local/bin/voxhold
+COPY --from=builder /out/voxhold-bootstrap /usr/local/bin/voxhold-bootstrap
 COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY migrations /app/migrations
 

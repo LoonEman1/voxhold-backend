@@ -52,6 +52,25 @@ services:
       - "${WEBRTC_STREAM_UDP_PORT:-50001}:${WEBRTC_STREAM_UDP_PORT:-50001}/udp"
 
     depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+    volumes:
+      - voxhold_data:/app/data
+
+  bootstrap:
+    build:
+      context: .
+      args:
+        GO_VERSION: ${GO_VERSION}
+
+    env_file:
+      - .env
+
+    entrypoint:
+      - voxhold-bootstrap
+
+    depends_on:
       migrate:
         condition: service_completed_successfully
 

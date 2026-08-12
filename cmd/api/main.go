@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/voice"
 
 	accounthttp "voxhold-backend/internal/account/http"
@@ -57,6 +58,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	if err := instancebootstrap.Validate(context.Background(), db); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Println("database is ready")
 
