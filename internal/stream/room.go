@@ -9,10 +9,12 @@ import (
 type roomTrack struct {
 	kind  webrtc.RTPCodecType
 	track *webrtc.TrackLocalStaticRTP
+	codec webrtc.RTPCodecCapability
 }
 
 type room struct {
-	id int64
+	id    int64
+	codec Codec
 
 	mu           sync.RWMutex
 	publisher    *session
@@ -21,9 +23,10 @@ type room struct {
 	reservations int
 }
 
-func newRoom(id int64) *room {
+func newRoom(id int64, codec Codec) *room {
 	return &room{
 		id:      id,
+		codec:   codec,
 		viewers: make(map[string]*session),
 		tracks:  make(map[webrtc.RTPCodecType]roomTrack),
 	}
@@ -128,12 +131,6 @@ func (r *room) viewerSnapshot() []*session {
 		result = append(result, value)
 	}
 	return result
-}
-
-func (r *room) hasViewers() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.viewers) > 0
 }
 
 func (r *room) requestKeyFrame() {

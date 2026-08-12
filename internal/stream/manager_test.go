@@ -47,24 +47,67 @@ func TestManagerCreatesPublisherAndViewerOffers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
-	if err := manager.Start("publisher", 1, 10, 100, true); err != nil {
-		t.Fatalf("start publisher: %v", err)
+	tests := []struct {
+		codec  Codec
+		rtpmap string
+	}{
+		{codec: CodecVP8, rtpmap: "VP8/90000"},
+		{codec: CodecVP9, rtpmap: "VP9/90000"},
+		{codec: CodecH264, rtpmap: "H264/90000"},
+		{codec: CodecAV1, rtpmap: "AV1/90000"},
 	}
-	if err := manager.Watch("viewer", 2, 10, 100); err != nil {
-		t.Fatalf("start viewer before tracks arrive: %v", err)
-	}
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	publisherOffer := sink.offers["publisher"]
-	if publisherOffer == "" {
-		t.Fatalf("missing publisher WebRTC offer: %+v", sink.offers)
-	}
-	if !strings.Contains(publisherOffer, "m=video") ||
-		!strings.Contains(publisherOffer, "a=ice-ufrag:") {
 
-		t.Fatalf("publisher offer has no usable media/ICE section: %q", publisherOffer)
-	}
-	if sink.offers["viewer"] != "" {
-		t.Fatal("viewer must not receive an empty offer before publisher tracks arrive")
+	for index, test := range tests {
+		publisherID := "publisher-" + string(rune('0'+index))
+		viewerID := "viewer-" + string(rune('0'+index))
+		channelID := int64(100 + index)
+
+		if err := manager.Start(
+			publisherID, int64(index+1), 10, channelID, test.codec, true,
+		); err != nil {
+			t.Fatalf("start %s publisher: %v", test.codec, err)
+		}
+		if err := manager.Watch(
+			viewerID, int64(index+10), 10, channelID,
+		); err != nil {
+			t.Fatalf("start %s viewer before tracks arrive: %v", test.codec, err)
+		}
+
+		sink.mu.Lock()
+		publisherOffer := sink.offers[publisherID]
+		viewerOffer := sink.offers[viewerID]
+		sink.mu.Unlock()
+
+		if publisherOffer == "" {
+			t.Fatalf("missing %s publisher WebRTC offer", test.codec)
+		}
+		if !strings.Contains(publisherOffer, "m=video") ||
+			!strings.Contains(publisherOffer, "a=ice-ufrag:") ||
+			!strings.Contains(publisherOffer, test.rtpmap) {
+
+			t.Fatalf("%s publisher offer has no selected codec: %q", test.codec, publisherOffer)
+		}
+		for _, other := range tests {
+			if other.codec != test.codec && strings.Contains(publisherOffer, other.rtpmap) {
+				t.Fatalf("%s publisher offer unexpectedly contains %s", test.codec, other.codec)
+			}
+		}
+		for _, feedback := range []string{
+			" nack\r\n",
+			" nack pli\r\n",
+			" transport-cc\r\n",
+			"transport-wide-cc-extensions",
+		} {
+			if !strings.Contains(publisherOffer, feedback) {
+				t.Fatalf(
+					"%s publisher offer is missing WebRTC loss feedback %q",
+					test.codec,
+					feedback,
+				)
+			}
+		}
+		if viewerOffer != "" {
+			t.Fatalf("%s viewer received an empty-track offer", test.codec)
+		}
 	}
 }

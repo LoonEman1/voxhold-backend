@@ -18,7 +18,8 @@ func (h *Handler) startStream(
 	if err := json.Unmarshal(event.Data, &data); err != nil ||
 		data.ServerID <= 0 || data.ChannelID <= 0 ||
 		(data.Mode != realtime.StreamModeServer &&
-			data.Mode != realtime.StreamModeP2P) {
+			data.Mode != realtime.StreamModeP2P) ||
+		!validStreamCodec(data.Codec) {
 
 		return queueError(
 			client,
@@ -33,6 +34,7 @@ func (h *Handler) startStream(
 		data.ServerID,
 		data.ChannelID,
 		data.Mode,
+		data.Codec,
 		data.HasAudio,
 	)
 	if err != nil {
@@ -45,6 +47,7 @@ func (h *Handler) startStream(
 			client.UserID(),
 			data.ServerID,
 			data.ChannelID,
+			stream.Codec(data.Codec),
 			data.HasAudio,
 		)
 		if err != nil {
@@ -70,6 +73,16 @@ func (h *Handler) startStream(
 			Data:      streamData,
 		},
 	)
+}
+
+func validStreamCodec(codec realtime.StreamCodec) bool {
+	switch codec {
+	case realtime.StreamCodecVP8, realtime.StreamCodecVP9,
+		realtime.StreamCodecH264, realtime.StreamCodecAV1:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) watchStream(

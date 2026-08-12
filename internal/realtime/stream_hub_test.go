@@ -10,14 +10,14 @@ func TestStreamRequiresSameVoiceChannel(t *testing.T) {
 	hub.Register(viewer)
 
 	if _, err := hub.StartStream(
-		publisher, 10, 100, StreamModeServer, true,
+		publisher, 10, 100, StreamModeServer, StreamCodecVP9, true,
 	); err != ErrStreamVoiceRequired {
 
 		t.Fatalf("stream without voice unexpectedly accepted: %v", err)
 	}
 	hub.JoinVoice(publisher, 10, 100, false, false)
 	streamData, err := hub.StartStream(
-		publisher, 10, 100, StreamModeServer, true,
+		publisher, 10, 100, StreamModeServer, StreamCodecVP9, true,
 	)
 	if err != nil || streamData.ChannelID != 100 {
 		t.Fatalf("start stream in voice room: %+v, %v", streamData, err)
@@ -48,7 +48,7 @@ func TestP2PStreamSignalingOnlyAllowsPublisherViewerPair(t *testing.T) {
 		hub.Register(client)
 		hub.JoinVoice(client, 10, 100, false, false)
 	}
-	if _, err := hub.StartStream(publisher, 10, 100, StreamModeP2P, false); err != nil {
+	if _, err := hub.StartStream(publisher, 10, 100, StreamModeP2P, StreamCodecVP8, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := hub.WatchStream(viewer, 10, 100); err != nil {

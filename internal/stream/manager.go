@@ -3,6 +3,7 @@ package stream
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,18 +100,11 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 	}
 
 	media := &webrtc.MediaEngine{}
-	if err := media.RegisterCodec(
-		webrtc.RTPCodecParameters{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  webrtc.MimeTypeVP8,
-				ClockRate: 90000,
-			},
-			PayloadType: 96,
-		},
-		webrtc.RTPCodecTypeVideo,
-	); err != nil {
-		_ = udpMux.Close()
-		return nil, fmt.Errorf("register VP8 codec: %w", err)
+	for _, codec := range streamVideoCodecs() {
+		if err := media.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
+			_ = udpMux.Close()
+			return nil, fmt.Errorf("register stream video codec %s: %w", codec.MimeType, err)
+		}
 	}
 	if err := media.RegisterCodec(
 		webrtc.RTPCodecParameters{
@@ -180,10 +174,11 @@ func (m *Manager) Start(
 	userID int64,
 	serverID int64,
 	channelID int64,
+	codec Codec,
 	hasAudio bool,
 ) error {
 	if connectionID == "" || userID <= 0 ||
-		serverID <= 0 || channelID <= 0 {
+		serverID <= 0 || channelID <= 0 || !validCodec(codec) {
 
 		return errors.New("invalid stream identifiers")
 	}
@@ -198,7 +193,7 @@ func (m *Manager) Start(
 		m.mu.Unlock()
 		return ErrStreamExists
 	}
-	streamRoom := newRoom(channelID)
+	streamRoom := newRoom(channelID, codec)
 	m.rooms[channelID] = streamRoom
 	m.mu.Unlock()
 
@@ -211,15 +206,21 @@ func (m *Manager) Start(
 		)
 	}
 
-	if _, err = peer.AddTransceiverFromKind(
+	videoTransceiver, err := peer.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
 		webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		},
-	); err != nil {
+	)
+	if err != nil {
 		_ = peer.Close()
 		m.removeRoom(channelID, streamRoom)
 		return fmt.Errorf("add incoming video transceiver: %w", err)
+	}
+	if err = videoTransceiver.SetCodecPreferences(codecParameters(codec)); err != nil {
+		_ = peer.Close()
+		m.removeRoom(channelID, streamRoom)
+		return fmt.Errorf("prefer incoming %s stream codec: %w", codec, err)
 	}
 	if hasAudio {
 		if _, err = peer.AddTransceiverFromKind(
@@ -269,6 +270,54 @@ func (m *Manager) Start(
 		return err
 	}
 	return nil
+}
+
+func validCodec(codec Codec) bool {
+	switch codec {
+	case CodecVP8, CodecVP9, CodecH264, CodecAV1:
+		return true
+	default:
+		return false
+	}
+}
+
+func streamVideoCodecs() []webrtc.RTPCodecParameters {
+	feedback := []webrtc.RTCPFeedback{
+		{Type: "goog-remb"},
+		{Type: "ccm", Parameter: "fir"},
+		{Type: "nack"},
+		{Type: "nack", Parameter: "pli"},
+	}
+	return []webrtc.RTPCodecParameters{
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: feedback}, PayloadType: 96},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000, SDPFmtpLine: "profile-id=0", RTCPFeedback: feedback}, PayloadType: 98},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", RTCPFeedback: feedback}, PayloadType: 102},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeAV1, ClockRate: 90000, RTCPFeedback: feedback}, PayloadType: 45},
+	}
+}
+
+func codecParameters(codec Codec) []webrtc.RTPCodecParameters {
+	for _, candidate := range streamVideoCodecs() {
+		if codecForMimeType(candidate.MimeType) == codec {
+			return []webrtc.RTPCodecParameters{candidate}
+		}
+	}
+	return nil
+}
+
+func codecForMimeType(mimeType string) Codec {
+	switch strings.ToLower(mimeType) {
+	case strings.ToLower(webrtc.MimeTypeVP8):
+		return CodecVP8
+	case strings.ToLower(webrtc.MimeTypeVP9):
+		return CodecVP9
+	case strings.ToLower(webrtc.MimeTypeH264):
+		return CodecH264
+	case strings.ToLower(webrtc.MimeTypeAV1):
+		return CodecAV1
+	default:
+		return ""
+	}
 }
 
 func (m *Manager) Watch(

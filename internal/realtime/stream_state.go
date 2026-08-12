@@ -10,6 +10,7 @@ type activeStream struct {
 	serverID  int64
 	channelID int64
 	mode      StreamMode
+	codec     StreamCodec
 	hasAudio  bool
 	publisher *Client
 	viewers   map[*Client]struct{}
@@ -37,6 +38,7 @@ func (s *streamState) start(
 	client *Client,
 	participant VoiceParticipantData,
 	mode StreamMode,
+	codec StreamCodec,
 	hasAudio bool,
 ) (StreamData, bool) {
 	s.mu.Lock()
@@ -51,6 +53,7 @@ func (s *streamState) start(
 		serverID:  participant.ServerID,
 		channelID: participant.ChannelID,
 		mode:      mode,
+		codec:     codec,
 		hasAudio:  hasAudio,
 		publisher: client,
 		viewers:   make(map[*Client]struct{}),
@@ -191,6 +194,7 @@ func streamData(value *activeStream) StreamData {
 		PublisherUserID:       value.publisher.UserID(),
 		PublisherConnectionID: value.publisher.ConnectionID(),
 		Mode:                  value.mode,
+		Codec:                 value.codec,
 		HasAudio:              value.hasAudio,
 		ViewerCount:           len(value.viewers),
 	}

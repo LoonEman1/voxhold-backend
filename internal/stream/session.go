@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -131,6 +130,12 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
 
 		return
 	}
+	if remote.Kind() == webrtc.RTPCodecTypeVideo &&
+		codecForMimeType(remote.Codec().MimeType) != s.room.codec {
+
+		s.manager.failSession(s, "publisher negotiated an unexpected stream codec")
+		return
+	}
 
 	trackName := "screen-video"
 	if remote.Kind() == webrtc.RTPCodecTypeAudio {
@@ -152,6 +157,7 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
 	if !s.room.addTrack(roomTrack{
 		kind:  remote.Kind(),
 		track: local,
+		codec: remote.Codec().RTPCodecCapability,
 	}) {
 		s.manager.failSession(
 			s,
@@ -159,16 +165,15 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
 		)
 		return
 	}
-	var stopKeyFrames chan struct{}
 	if remote.Kind() == webrtc.RTPCodecTypeVideo {
 		s.videoSSRC.Store(uint32(remote.SSRC()))
-		stopKeyFrames = make(chan struct{})
-		go s.requestKeyFramesWhileActive(stopKeyFrames)
+		// Ask for the first key frame once. Further key frames are requested
+		// when a viewer connects or explicitly reports picture loss.
+		s.requestKeyFrame()
 	}
 	s.room.synchronizeViewers()
 	defer func() {
-		if stopKeyFrames != nil {
-			close(stopKeyFrames)
+		if remote.Kind() == webrtc.RTPCodecTypeVideo {
 			s.videoSSRC.Store(0)
 		}
 		if s.room.removeTrack(remote.Kind(), local) {
@@ -267,6 +272,19 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 			)
 		}
 		changed = true
+		if value.kind == webrtc.RTPCodecTypeVideo {
+			transceiver := transceiverForSender(s.peer, sender)
+			if transceiver == nil {
+				s.negotiationMu.Unlock()
+				return errors.New("outgoing stream video transceiver is missing")
+			}
+			if err := transceiver.SetCodecPreferences([]webrtc.RTPCodecParameters{{
+				RTPCodecCapability: value.codec,
+			}}); err != nil {
+				s.negotiationMu.Unlock()
+				return fmt.Errorf("prefer outgoing %s stream codec: %w", s.room.codec, err)
+			}
+		}
 		go drainViewerRTCP(sender, s.room)
 	}
 
@@ -283,6 +301,15 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 	err := s.createOfferLocked()
 	s.negotiationMu.Unlock()
 	return err
+}
+
+func transceiverForSender(peer *webrtc.PeerConnection, sender *webrtc.RTPSender) *webrtc.RTPTransceiver {
+	for _, transceiver := range peer.GetTransceivers() {
+		if transceiver.Sender() == sender {
+			return transceiver
+		}
+	}
+	return nil
 }
 
 func (s *session) createOfferLocked() error {
@@ -390,24 +417,6 @@ func (s *session) requestKeyFrame() {
 	_ = s.peer.WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: ssrc},
 	})
-}
-
-func (s *session) requestKeyFramesWhileActive(stop <-chan struct{}) {
-	// Some browsers do not emit a PLI immediately, and a viewer joining after
-	// the publisher's first key frame would otherwise see a black picture.
-	s.requestKeyFrame()
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if s.room.hasViewers() {
-				s.requestKeyFrame()
-			}
-		case <-stop:
-			return
-		}
-	}
 }
 
 func drainViewerRTCP(sender *webrtc.RTPSender, room *room) {

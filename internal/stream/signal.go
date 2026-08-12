@@ -4,6 +4,15 @@ import "errors"
 
 const MaxPendingICECandidates = 64
 
+type Codec string
+
+const (
+	CodecVP8  Codec = "vp8"
+	CodecVP9  Codec = "vp9"
+	CodecH264 Codec = "h264"
+	CodecAV1  Codec = "av1"
+)
+
 var (
 	ErrSessionNotFound      = errors.New("stream WebRTC session not found")
 	ErrStreamExists         = errors.New("channel already has an active stream")

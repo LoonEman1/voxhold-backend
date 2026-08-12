@@ -11,7 +11,7 @@ const (
 	DefaultUDPPort             = 50001
 	DefaultMaxViewers          = 32
 	DefaultMaxP2PViewers       = 8
-	DefaultMaxVideoBitrateKbps = 12000
+	DefaultMaxVideoBitrateKbps = 16000
 	DefaultMaxAudioBitrateKbps = 320
 )
 

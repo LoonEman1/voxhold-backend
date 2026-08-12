@@ -24,17 +24,24 @@ const (
 )
 
 type StreamMode string
+type StreamCodec string
 
 const (
 	StreamModeServer StreamMode = "server"
 	StreamModeP2P    StreamMode = "p2p"
+
+	StreamCodecVP8  StreamCodec = "vp8"
+	StreamCodecVP9  StreamCodec = "vp9"
+	StreamCodecH264 StreamCodec = "h264"
+	StreamCodecAV1  StreamCodec = "av1"
 )
 
 type StreamStartData struct {
-	ServerID  int64      `json:"server_id"`
-	ChannelID int64      `json:"channel_id"`
-	Mode      StreamMode `json:"mode"`
-	HasAudio  bool       `json:"has_audio"`
+	ServerID  int64       `json:"server_id"`
+	ChannelID int64       `json:"channel_id"`
+	Mode      StreamMode  `json:"mode"`
+	Codec     StreamCodec `json:"codec"`
+	HasAudio  bool        `json:"has_audio"`
 }
 
 type StreamWatchData struct {
@@ -43,13 +50,14 @@ type StreamWatchData struct {
 }
 
 type StreamData struct {
-	ServerID              int64      `json:"server_id"`
-	ChannelID             int64      `json:"channel_id"`
-	PublisherUserID       int64      `json:"publisher_user_id"`
-	PublisherConnectionID string     `json:"publisher_connection_id"`
-	Mode                  StreamMode `json:"mode"`
-	HasAudio              bool       `json:"has_audio"`
-	ViewerCount           int        `json:"viewer_count"`
+	ServerID              int64       `json:"server_id"`
+	ChannelID             int64       `json:"channel_id"`
+	PublisherUserID       int64       `json:"publisher_user_id"`
+	PublisherConnectionID string      `json:"publisher_connection_id"`
+	Mode                  StreamMode  `json:"mode"`
+	Codec                 StreamCodec `json:"codec"`
+	HasAudio              bool        `json:"has_audio"`
+	ViewerCount           int         `json:"viewer_count"`
 }
 
 type StreamWatchingData struct {

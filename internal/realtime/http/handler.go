@@ -102,6 +102,7 @@ type StreamMedia interface {
 		userID int64,
 		serverID int64,
 		channelID int64,
+		codec stream.Codec,
 		hasAudio bool,
 	) error
 

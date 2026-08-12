@@ -43,10 +43,11 @@ func (h *Hub) StartStream(
 	serverID int64,
 	channelID int64,
 	mode StreamMode,
+	codec StreamCodec,
 	hasAudio bool,
 ) (StreamData, error) {
 	if client == nil || (mode != StreamModeServer &&
-		mode != StreamModeP2P) {
+		mode != StreamModeP2P) || !validStreamCodec(codec) {
 
 		return StreamData{}, ErrStreamUnavailable
 	}
@@ -61,6 +62,7 @@ func (h *Hub) StartStream(
 		client,
 		participant,
 		mode,
+		codec,
 		hasAudio,
 	)
 	if !started {
@@ -84,6 +86,16 @@ func (h *Hub) StartStream(
 		},
 	)
 	return data, nil
+}
+
+func validStreamCodec(codec StreamCodec) bool {
+	switch codec {
+	case StreamCodecVP8, StreamCodecVP9,
+		StreamCodecH264, StreamCodecAV1:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Hub) WatchStream(
