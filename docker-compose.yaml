@@ -49,6 +49,7 @@ services:
     ports:
       - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
       - "${WEBRTC_UDP_PORT:-50000}:${WEBRTC_UDP_PORT:-50000}/udp"
+      - "${WEBRTC_STREAM_UDP_PORT:-50001}:${WEBRTC_STREAM_UDP_PORT:-50001}/udp"
 
     depends_on:
       migrate:

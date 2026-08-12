@@ -30,5 +30,6 @@ COPY migrations /app/migrations
 
 EXPOSE 8080/tcp
 EXPOSE 50000/udp
+EXPOSE 50001/udp
 
 CMD ["voxhold"]
