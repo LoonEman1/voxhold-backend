@@ -2,7 +2,6 @@ package messagehttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -185,15 +184,7 @@ func (h *Handler) create(
 
 	var request createRequest
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&request); err != nil {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid JSON body",
-		)
+	if !httpapi.DecodeJSON(w, r, &request) {
 		return
 	}
 
@@ -381,15 +372,7 @@ func (h *Handler) update(
 	}
 
 	var request updateRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&request); err != nil {
-		httpapi.WriteError(
-			w,
-			http.StatusBadRequest,
-			"invalid JSON body",
-		)
+	if !httpapi.DecodeJSON(w, r, &request) {
 		return
 	}
 
