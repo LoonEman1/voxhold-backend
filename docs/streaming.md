@@ -51,6 +51,14 @@ Pion's default NACK and transport-wide congestion-control interceptors are
 enabled. The SFU asks for a key frame when video starts, when a viewer joins,
 or when a viewer sends PLI/FIR; it does not force periodic key frames.
 
+Temporary media-path failures do not immediately remove a publisher or viewer.
+Server-mode streams and voice sessions wait briefly for ICE to recover, then
+renegotiate fresh ICE credentials with bounded retries and a final grace period.
+P2P viewers request the publisher to perform the restart; the backend only
+relays this request for an existing publisher-viewer pair. Trickle candidates
+from an older ICE generation are discarded on both sides instead of terminating
+the current session.
+
 Only one stream can be active in a voice channel. A publisher may send one
 video track in the declared codec and at most one Opus audio track. Pending ICE
 candidates are capped at 64 per server-side media session. The common WebSocket

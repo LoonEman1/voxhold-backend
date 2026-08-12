@@ -291,6 +291,32 @@ func (h *Hub) RelayStreamP2PICECandidate(
 	return nil
 }
 
+func (h *Hub) RequestStreamP2PRestart(
+	client *Client,
+	targetConnectionID string,
+) error {
+	target, senderIsPublisher, ok := h.streams.relationship(
+		client,
+		targetConnectionID,
+	)
+	if !ok || senderIsPublisher {
+		return ErrStreamP2PRelation
+	}
+	if !target.enqueue(
+		OutgoingEvent{
+			Type: EventStreamP2PRestart,
+			Data: StreamViewerData{
+				ConnectionID: client.ConnectionID(),
+				UserID:       client.UserID(),
+			},
+		},
+	) {
+		h.Unregister(target)
+		return ErrStreamUnavailable
+	}
+	return nil
+}
+
 func (h *Hub) sendStreamSnapshot(client *Client) {
 	if !client.enqueue(
 		OutgoingEvent{

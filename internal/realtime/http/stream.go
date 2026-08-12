@@ -338,6 +338,30 @@ func (h *Handler) relayStreamP2PICECandidate(
 	return nil
 }
 
+func (h *Handler) requestStreamP2PRestart(
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	var data realtime.StreamP2PRestartData
+	if err := json.Unmarshal(event.Data, &data); err != nil ||
+		strings.TrimSpace(data.TargetConnectionID) == "" {
+
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"invalid P2P stream restart payload",
+		)
+	}
+	if err := h.hub.RequestStreamP2PRestart(
+		client,
+		data.TargetConnectionID,
+	); err != nil {
+		return queueStreamStateError(client, event.RequestID, err)
+	}
+	return nil
+}
+
 func queueStreamStateError(
 	client *realtime.Client,
 	requestID string,

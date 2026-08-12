@@ -72,6 +72,58 @@ func TestManagerRelaysOpusBetweenPeers(t *testing.T) {
 	}
 }
 
+func TestManagerRestartsVoiceICEWithoutReplacingSession(t *testing.T) {
+	sink := newTestSignalSink()
+	manager := newTestManager(t, sink)
+	sink.manager = manager
+
+	peer := newTestPeer(t, manager, "recovering-voice")
+	sink.addPeer(peer)
+	if err := manager.Join(
+		peer.connectionID, 1, 10, 100, false, false,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	initialUfrag := testICEUfrag(sink.offer(peer.connectionID))
+	value := manager.session(peer.connectionID)
+	if value == nil {
+		t.Fatal("voice session is missing")
+	}
+	if err := value.restartICE(); err != nil {
+		t.Fatalf("restart voice ICE: %v", err)
+	}
+	restartedUfrag := testICEUfrag(sink.offer(peer.connectionID))
+	if initialUfrag == "" || restartedUfrag == "" ||
+		initialUfrag == restartedUfrag {
+
+		t.Fatalf(
+			"ICE restart did not change credentials: before=%q after=%q",
+			initialUfrag,
+			restartedUfrag,
+		)
+	}
+	if manager.session(peer.connectionID) != value {
+		t.Fatal("ICE restart replaced or removed the voice session")
+	}
+	if err := manager.SetState(peer.connectionID, true, false); err != nil {
+		t.Fatalf("recovered voice session cannot update state: %v", err)
+	}
+}
+
+func testICEUfrag(sdp string) string {
+	const prefix = "a=ice-ufrag:"
+	start := strings.Index(sdp, prefix)
+	if start < 0 {
+		return ""
+	}
+	value := sdp[start+len(prefix):]
+	if end := strings.IndexAny(value, "\r\n"); end >= 0 {
+		value = value[:end]
+	}
+	return value
+}
+
 func TestManagerClosesPeerThatExceedsAudioBitrate(t *testing.T) {
 	sink := newTestSignalSink()
 	manager := newTestManagerWithAudioBitrate(t, sink, 16)

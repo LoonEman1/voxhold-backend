@@ -4,8 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"voxhold-backend/internal/webrtcrecovery"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -27,8 +31,10 @@ type session struct {
 
 	negotiationMu      sync.Mutex
 	negotiationPending bool
+	iceRestartPending  bool
 	pendingCandidates  []ICECandidate
 	closeOnce          sync.Once
+	recovery           *webrtcrecovery.Controller
 }
 
 func newSession(
@@ -52,6 +58,13 @@ func newSession(
 		channelID:    channelID,
 		audioBitrate: newAudioBitrateLimiter(
 			manager.maxAudioBitrateKbps,
+		),
+		recovery: webrtcrecovery.New(
+			webrtcrecovery.Policy{
+				InitialDelay: 2 * time.Second,
+				RetryDelay:   8 * time.Second,
+				MaxAttempts:  4,
+			},
 		),
 	}
 
@@ -86,23 +99,7 @@ func (s *session) installCallbacks() {
 
 	s.peer.OnConnectionStateChange(
 		func(state webrtc.PeerConnectionState) {
-			switch state {
-			case webrtc.PeerConnectionStateFailed:
-				go s.manager.failSession(
-					s,
-					"WebRTC connection failed",
-				)
-
-			case webrtc.PeerConnectionStateClosed:
-				if !s.closed.Load() {
-					go s.manager.failSession(
-						s,
-						"WebRTC connection closed",
-					)
-				}
-
-			default:
-			}
+			s.handleConnectionState(state)
 		},
 	)
 
@@ -270,29 +267,42 @@ func (s *session) synchronizeTracks(forceOffer bool) error {
 		return nil
 	}
 
-	offer, err := s.peer.CreateOffer(nil)
+	sdp, err := s.createOfferLocked(false)
+	s.negotiationMu.Unlock()
+	if err != nil {
+		return err
+	}
+	s.sendOffer(sdp)
+	return nil
+}
+
+func (s *session) createOfferLocked(restartICE bool) (string, error) {
+	var options *webrtc.OfferOptions
+	if restartICE {
+		options = &webrtc.OfferOptions{ICERestart: true}
+	}
+	offer, err := s.peer.CreateOffer(options)
 	if err == nil {
 		err = s.peer.SetLocalDescription(offer)
 	}
 	if err != nil {
-		s.negotiationMu.Unlock()
-		return fmt.Errorf("create WebRTC offer: %w", err)
+		return "", fmt.Errorf("create WebRTC offer: %w", err)
 	}
 
 	s.negotiationPending = false
-	s.negotiationMu.Unlock()
+	return offer.SDP, nil
+}
 
+func (s *session) sendOffer(sdp string) {
 	if !s.manager.sink.SendOffer(
 		s.connectionID,
-		offer.SDP,
+		sdp,
 	) {
 		go s.manager.failSession(
 			s,
 			"WebRTC signaling connection was lost",
 		)
 	}
-
-	return nil
 }
 
 func (s *session) acceptAnswer(sdp string) error {
@@ -313,12 +323,14 @@ func (s *session) acceptAnswer(sdp string) error {
 		},
 	)
 	pending := s.negotiationPending
+	restartPending := s.iceRestartPending
 	candidates := append(
 		[]ICECandidate(nil),
 		s.pendingCandidates...,
 	)
 	if err == nil {
 		s.negotiationPending = false
+		s.iceRestartPending = false
 		s.pendingCandidates = nil
 	}
 	s.negotiationMu.Unlock()
@@ -333,6 +345,9 @@ func (s *session) acceptAnswer(sdp string) error {
 		}
 	}
 
+	if restartPending {
+		return s.restartICE()
+	}
 	if pending {
 		return s.synchronizeTracks(false)
 	}
@@ -354,7 +369,8 @@ func (s *session) addICECandidate(
 		return ErrSessionNotFound
 	}
 
-	if s.peer.RemoteDescription() == nil {
+	if s.peer.RemoteDescription() == nil ||
+		s.peer.SignalingState() != webrtc.SignalingStateStable {
 		if len(s.pendingCandidates) >= MaxPendingICECandidates {
 			return ErrTooManyICECandidates
 		}
@@ -365,8 +381,34 @@ func (s *session) addICECandidate(
 		)
 		return nil
 	}
+	if !candidateMatchesRemoteDescription(
+		s.peer.RemoteDescription().SDP,
+		candidate.UsernameFragment,
+	) {
+		return nil
+	}
 
 	return s.addICECandidateLocked(candidate)
+}
+
+func candidateMatchesRemoteDescription(
+	sdp string,
+	usernameFragment *string,
+) bool {
+	if usernameFragment == nil || strings.TrimSpace(*usernameFragment) == "" {
+		return true
+	}
+	const prefix = "a=ice-ufrag:"
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) &&
+			strings.TrimSpace(strings.TrimPrefix(line, prefix)) ==
+				strings.TrimSpace(*usernameFragment) {
+
+			return true
+		}
+	}
+	return false
 }
 
 func (s *session) addICECandidateLocked(
@@ -385,8 +427,75 @@ func (s *session) addICECandidateLocked(
 func (s *session) close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
+		s.recovery.Stop()
 		_ = s.peer.Close()
 	})
+}
+
+func (s *session) handleConnectionState(
+	state webrtc.PeerConnectionState,
+) {
+	switch state {
+	case webrtc.PeerConnectionStateConnected:
+		s.recovery.Stop()
+
+	case webrtc.PeerConnectionStateDisconnected:
+		s.startRecovery(false)
+
+	case webrtc.PeerConnectionStateFailed:
+		s.startRecovery(true)
+
+	case webrtc.PeerConnectionStateClosed:
+		if !s.closed.Load() {
+			go s.manager.failSession(
+				s,
+				"WebRTC connection closed",
+			)
+		}
+
+	default:
+	}
+}
+
+func (s *session) startRecovery(immediate bool) {
+	if s.closed.Load() {
+		return
+	}
+	s.recovery.Start(
+		immediate,
+		s.restartICE,
+		func() {
+			if s.closed.Load() ||
+				s.peer.ConnectionState() == webrtc.PeerConnectionStateConnected {
+
+				return
+			}
+			s.manager.failSession(
+				s,
+				"WebRTC recovery exhausted",
+			)
+		},
+	)
+}
+
+func (s *session) restartICE() error {
+	s.negotiationMu.Lock()
+	if s.closed.Load() {
+		s.negotiationMu.Unlock()
+		return ErrSessionNotFound
+	}
+	if s.peer.SignalingState() != webrtc.SignalingStateStable {
+		s.iceRestartPending = true
+		s.negotiationMu.Unlock()
+		return nil
+	}
+	sdp, err := s.createOfferLocked(true)
+	s.negotiationMu.Unlock()
+	if err != nil {
+		return err
+	}
+	s.sendOffer(sdp)
+	return nil
 }
 
 func drainRTCP(sender *webrtc.RTPSender) {

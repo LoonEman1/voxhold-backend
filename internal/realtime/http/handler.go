@@ -659,6 +659,9 @@ func (h *Handler) handleIncomingEvent(
 	case realtime.EventStreamP2PICECandidate:
 		return h.relayStreamP2PICECandidate(client, event)
 
+	case realtime.EventStreamP2PRestart:
+		return h.requestStreamP2PRestart(client, event)
+
 	default:
 		return queueError(
 			client,

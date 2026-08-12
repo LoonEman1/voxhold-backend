@@ -13,5 +13,6 @@ data/
 *.test
 
 .tmp-*
+.gocache/
 
 .sqlfluff

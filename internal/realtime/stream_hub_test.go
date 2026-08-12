@@ -1,6 +1,9 @@
 package realtime
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestStreamRequiresSameVoiceChannel(t *testing.T) {
 	hub := NewHub()
@@ -69,5 +72,46 @@ func TestP2PStreamSignalingOnlyAllowsPublisherViewerPair(t *testing.T) {
 		EventStreamP2POffer,
 	); err != ErrStreamP2PRelation {
 		t.Fatalf("outsider signaling unexpectedly accepted: %v", err)
+	}
+	drainTestEvents(publisher.Outgoing())
+	if err := hub.RequestStreamP2PRestart(
+		viewer,
+		publisher.ConnectionID(),
+	); err != nil {
+		t.Fatalf("viewer restart request rejected: %v", err)
+	}
+	select {
+	case event := <-publisher.Outgoing():
+		viewerData, ok := event.Data.(StreamViewerData)
+		if event.Type != EventStreamP2PRestart || !ok ||
+			viewerData.ConnectionID != viewer.ConnectionID() ||
+			viewerData.UserID != viewer.UserID() {
+
+			t.Fatalf("unexpected P2P restart event: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("publisher did not receive P2P restart request")
+	}
+	if err := hub.RequestStreamP2PRestart(
+		publisher,
+		viewer.ConnectionID(),
+	); err != ErrStreamP2PRelation {
+		t.Fatalf("publisher restart request unexpectedly accepted: %v", err)
+	}
+	if err := hub.RequestStreamP2PRestart(
+		outsider,
+		publisher.ConnectionID(),
+	); err != ErrStreamP2PRelation {
+		t.Fatalf("outsider restart request unexpectedly accepted: %v", err)
+	}
+}
+
+func drainTestEvents(events <-chan OutgoingEvent) {
+	for {
+		select {
+		case <-events:
+		default:
+			return
+		}
 	}
 }

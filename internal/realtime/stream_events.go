@@ -21,6 +21,7 @@ const (
 	EventStreamP2POffer        EventType = "stream.p2p_offer"
 	EventStreamP2PAnswer       EventType = "stream.p2p_answer"
 	EventStreamP2PICECandidate EventType = "stream.p2p_ice_candidate"
+	EventStreamP2PRestart      EventType = "stream.p2p_restart"
 )
 
 type StreamMode string
@@ -116,4 +117,8 @@ type StreamP2PICECandidateData struct {
 	SDPMid             *string `json:"sdp_mid,omitempty"`
 	SDPMLineIndex      *uint16 `json:"sdp_mline_index,omitempty"`
 	UsernameFragment   *string `json:"username_fragment,omitempty"`
+}
+
+type StreamP2PRestartData struct {
+	TargetConnectionID string `json:"target_connection_id"`
 }

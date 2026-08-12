@@ -2,7 +2,7 @@ package realtime
 
 import "encoding/json"
 
-const ProtocolVersion = 4
+const ProtocolVersion = 5
 
 type EventType string
 
