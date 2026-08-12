@@ -18,11 +18,11 @@ var (
 	ErrCannotChangeOwnRole = errors.New(
 		"cannot change your own role",
 	)
-	ErrOwnerCannotBeKicked = errors.New(
-		"server owner cannot be kicked",
+	ErrOwnerCannotBeBanned = errors.New(
+		"instance owner cannot be banned",
 	)
-	ErrCannotKickSelf = errors.New(
-		"cannot kick yourself",
+	ErrCannotBanSelf = errors.New(
+		"cannot ban yourself",
 	)
 )
 

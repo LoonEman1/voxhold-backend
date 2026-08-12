@@ -47,8 +47,14 @@ func (r *UserRepository) FindByUsername(
 ) (account.User, error) {
 	const query = `
 	SELECT id, username, created_at, password_hash
-	FROM USERS
+	FROM users
 	WHERE username = ?
+	  AND deleted_at IS NULL
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM user_bans
+		WHERE user_bans.user_id = users.id
+	  )
 	`
 
 	var user account.User

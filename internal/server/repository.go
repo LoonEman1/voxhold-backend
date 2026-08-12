@@ -3,6 +3,8 @@ package server
 import "context"
 
 type Repository interface {
+	GetInstance(ctx context.Context) (Instance, error)
+
 	Create(
 		ctx context.Context,
 		name string,
@@ -20,11 +22,10 @@ type Repository interface {
 		userID int64,
 	) error
 
-	Leave(
+	DeleteAccount(
 		ctx context.Context,
-		serverID int64,
 		userID int64,
-	) error
+	) (int64, error)
 
 	ListByUserID(
 		ctx context.Context,
@@ -45,7 +46,7 @@ type Repository interface {
 		role Role,
 	) (ServerMember, bool, error)
 
-	KickMember(
+	BanMember(
 		ctx context.Context,
 		serverID int64,
 		requesterUserID int64,

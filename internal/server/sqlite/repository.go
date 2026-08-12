@@ -16,6 +16,37 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) GetInstance(
+	ctx context.Context,
+) (server.Instance, error) {
+	const query = `
+	SELECT
+		instance_settings.instance_id,
+		COALESCE(servers.name, ''),
+		servers.id IS NOT NULL,
+		instance_settings.created_at
+	FROM instance_settings
+	LEFT JOIN servers
+		ON servers.id = (
+			SELECT MIN(id)
+			FROM servers
+		)
+	WHERE instance_settings.id = 1
+	`
+
+	var instance server.Instance
+	if err := r.db.QueryRowContext(ctx, query).Scan(
+		&instance.ID,
+		&instance.Name,
+		&instance.Initialized,
+		&instance.CreatedAt,
+	); err != nil {
+		return server.Instance{}, fmt.Errorf("select instance settings: %w", err)
+	}
+
+	return instance, nil
+}
+
 func (r *Repository) Create(
 	ctx context.Context,
 	name string,
@@ -38,7 +69,11 @@ func (r *Repository) Create(
 		name,
 		created_by
 	)
-	VALUES (?, ?)
+	SELECT ?, ?
+	WHERE NOT EXISTS (
+		SELECT 1
+		FROM servers
+	)
 	RETURNING
 		id,
 		name,
@@ -61,6 +96,10 @@ func (r *Repository) Create(
 	)
 
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return server.Server{}, server.ErrAlreadyExists
+		}
+
 		return server.Server{}, fmt.Errorf(
 			"insert server: %w",
 			err,
@@ -160,6 +199,7 @@ func (r *Repository) Delete(
 	const query = `
 	DELETE FROM servers
 	WHERE id = ?
+		AND (SELECT COUNT(*) FROM servers) > 1
 		AND EXISTS (
 		SELECT 1
 		FROM server_members
@@ -191,21 +231,48 @@ func (r *Repository) Delete(
 	}
 
 	if affectedRows == 0 {
+		const stateQuery = `
+		SELECT
+			EXISTS (
+				SELECT 1
+				FROM server_members
+				WHERE server_id = ?
+				  AND user_id = ?
+				  AND role = ?
+			),
+			(SELECT COUNT(*) FROM servers)
+		`
+
+		var owner bool
+		var serverCount int
+		if err := r.db.QueryRowContext(
+			ctx,
+			stateQuery,
+			serverID,
+			userID,
+			server.RoleOwner,
+		).Scan(&owner, &serverCount); err != nil {
+			return fmt.Errorf("get server deletion state: %w", err)
+		}
+
+		if owner && serverCount <= 1 {
+			return server.ErrLastServerDelete
+		}
+
 		return server.ErrNotFound
 	}
 
 	return nil
 }
 
-func (r *Repository) Leave(
+func (r *Repository) DeleteAccount(
 	ctx context.Context,
-	serverID int64,
 	userID int64,
-) error {
+) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf(
-			"begin leave server transaction: %w",
+		return 0, fmt.Errorf(
+			"begin delete account transaction: %w",
 			err,
 		)
 	}
@@ -215,33 +282,32 @@ func (r *Repository) Leave(
 	}()
 
 	const roleQuery = `
-	SELECT role
+	SELECT server_id, role
 	FROM server_members
-	WHERE server_id = ?
-	  AND user_id = ?
+	WHERE user_id = ?
 	`
 
+	var serverID int64
 	var role server.Role
 
 	err = tx.QueryRowContext(
 		ctx,
 		roleQuery,
-		serverID,
 		userID,
-	).Scan(&role)
+	).Scan(&serverID, &role)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return server.ErrMembershipNotFound
+			return 0, server.ErrMembershipNotFound
 		}
 
-		return fmt.Errorf(
-			"find server membership: %w",
+		return 0, fmt.Errorf(
+			"find account membership: %w",
 			err,
 		)
 	}
 
 	if role == server.RoleOwner {
-		return server.ErrOwnerCannotLeave
+		return 0, server.ErrOwnerCannotLeave
 	}
 
 	const deleteReadsQuery = `
@@ -260,53 +326,79 @@ func (r *Repository) Leave(
 		userID,
 		serverID,
 	); err != nil {
-		return fmt.Errorf(
-			"delete leaving member read states: %w",
+		return 0, fmt.Errorf(
+			"delete account read states: %w",
 			err,
 		)
 	}
 
-	const deleteMembershipQuery = `
+	const deleteOwnedDataQuery = `
+	DELETE FROM server_invite_links
+	WHERE created_by = ?;
+
+	DELETE FROM server_invites
+	WHERE inviter_user_id = ?
+	   OR invitee_user_id = ?;
+
+	DELETE FROM user_profiles
+	WHERE user_id = ?;
+
+	DELETE FROM sessions
+	WHERE user_id = ?;
+
 	DELETE FROM server_members
-	WHERE server_id = ?
-	  AND user_id = ?
-	  AND role <> ?
+	WHERE user_id = ?;
 	`
 
-	result, err := tx.ExecContext(
+	if _, err := tx.ExecContext(
 		ctx,
-		deleteMembershipQuery,
-		serverID,
+		deleteOwnedDataQuery,
 		userID,
-		server.RoleOwner,
-	)
-	if err != nil {
-		return fmt.Errorf(
-			"delete server membership: %w",
+		userID,
+		userID,
+		userID,
+		userID,
+		userID,
+	); err != nil {
+		return 0, fmt.Errorf(
+			"delete account-owned data: %w",
 			err,
 		)
 	}
 
-	affectedRows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf(
-			"get deleted membership count: %w",
-			err,
-		)
-	}
+	const anonymizeQuery = `
+	UPDATE users
+	SET username = printf(
+		'Удалённый #%d',
+		id
+	),
+		password_hash = '',
+		deleted_at = unixepoch()
+	WHERE id = ?
+	  AND deleted_at IS NULL
+	RETURNING id
+	`
 
-	if affectedRows == 0 {
-		return server.ErrMembershipNotFound
+	var deletedUserID int64
+	if err := tx.QueryRowContext(
+		ctx,
+		anonymizeQuery,
+		userID,
+	).Scan(&deletedUserID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, server.ErrMembershipNotFound
+		}
+		return 0, fmt.Errorf("anonymize deleted account: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf(
-			"commit leave server transaction: %w",
+		return 0, fmt.Errorf(
+			"commit delete account transaction: %w",
 			err,
 		)
 	}
 
-	return nil
+	return serverID, nil
 }
 
 func (r *Repository) ListByUserID(

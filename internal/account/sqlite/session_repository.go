@@ -68,9 +68,18 @@ func (r *SessionRepository) FindActiveUserIDByTokenHash(
 	tokenHash []byte,
 ) (int64, error) {
 	const query = `
-	SELECT user_id FROM sessions
-	WHERE token_hash = ?
-		AND expires_at > unixepoch()
+	SELECT sessions.user_id
+	FROM sessions
+	JOIN users
+	  ON users.id = sessions.user_id
+	WHERE sessions.token_hash = ?
+	  AND sessions.expires_at > unixepoch()
+	  AND users.deleted_at IS NULL
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM user_bans
+		WHERE user_bans.user_id = users.id
+	  )
 	`
 
 	var userID int64
@@ -97,6 +106,17 @@ func (r *SessionRepository) Rotate(
 		created_at = unixepoch()
 	WHERE token_hash = ?
 	  AND expires_at > unixepoch()
+	  AND EXISTS (
+		SELECT 1
+		FROM users
+		WHERE users.id = sessions.user_id
+		  AND users.deleted_at IS NULL
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_bans
+			WHERE user_bans.user_id = users.id
+		  )
+	  )
 	RETURNING id
 	`
 

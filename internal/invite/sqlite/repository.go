@@ -85,6 +85,12 @@ func (r *Repository) CreateDirect(
 	SELECT id
 	FROM users
 	WHERE username = ?
+	  AND deleted_at IS NULL
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM user_bans
+		WHERE user_bans.user_id = users.id
+	  )
 	`
 
 	var inviteeUserID int64

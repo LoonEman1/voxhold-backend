@@ -11,6 +11,8 @@ import (
 )
 
 type Service interface {
+	GetInstance(ctx context.Context) (server.Instance, error)
+
 	Create(
 		ctx context.Context,
 		createdBy int64,
@@ -30,9 +32,8 @@ type Service interface {
 		userID int64,
 	) error
 
-	Leave(
+	DeleteAccount(
 		ctx context.Context,
-		serverID int64,
 		userID int64,
 	) error
 
@@ -55,7 +56,7 @@ type Service interface {
 		input server.UpdateMemberRoleInput,
 	) (server.ServerMember, error)
 
-	KickMember(
+	BanMember(
 		ctx context.Context,
 		serverID int64,
 		requesterUserID int64,
@@ -77,9 +78,9 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
-	mux.Handle(
-		"POST /api/v1/servers",
-		requireAuth(http.HandlerFunc(h.create)),
+	mux.HandleFunc(
+		"GET /api/v1/instance",
+		h.getInstance,
 	)
 
 	mux.Handle(
@@ -88,13 +89,8 @@ func (h *Handler) RegisterRoutes(
 	)
 
 	mux.Handle(
-		"DELETE /api/v1/servers/{serverID}",
-		requireAuth(http.HandlerFunc(h.deleteServer)),
-	)
-
-	mux.Handle(
-		"DELETE /api/v1/servers/{serverID}/members/me",
-		requireAuth(http.HandlerFunc(h.leave)),
+		"DELETE /api/v1/account",
+		requireAuth(http.HandlerFunc(h.deleteAccount)),
 	)
 
 	mux.Handle(
@@ -113,9 +109,39 @@ func (h *Handler) RegisterRoutes(
 	)
 
 	mux.Handle(
-		"DELETE /api/v1/servers/{serverID}/members/{userID}",
-		requireAuth(http.HandlerFunc(h.kickMember)),
+		"POST /api/v1/servers/{serverID}/bans/{userID}",
+		requireAuth(http.HandlerFunc(h.banMember)),
 	)
+}
+
+type instanceResponse struct {
+	InstanceID      string `json:"instance_id"`
+	Name            string `json:"name"`
+	Initialized     bool   `json:"initialized"`
+	Registration    string `json:"registration"`
+	ProtocolVersion int    `json:"protocol_version"`
+	CreatedAt       int64  `json:"created_at"`
+}
+
+func (h *Handler) getInstance(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	instance, err := h.service.GetInstance(r.Context())
+	if err != nil {
+		log.Printf("get instance metadata: %v", err)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	httpapi.WriteJSON(w, http.StatusOK, instanceResponse{
+		InstanceID:      instance.ID,
+		Name:            instance.Name,
+		Initialized:     instance.Initialized,
+		Registration:    "invite_only",
+		ProtocolVersion: server.ProtocolVersion,
+		CreatedAt:       instance.CreatedAt,
+	})
 }
 
 type createRequest struct {
@@ -160,6 +186,13 @@ func (h *Handler) create(
 				w,
 				http.StatusBadRequest,
 				err.Error(),
+			)
+
+		case errors.Is(err, server.ErrAlreadyExists):
+			httpapi.WriteError(
+				w,
+				http.StatusConflict,
+				"this Voxhold instance already has a server",
 			)
 
 		default:
@@ -272,29 +305,37 @@ func (h *Handler) deleteServer(
 	err := h.service.Delete(r.Context(), serverID, userID)
 
 	if err != nil {
-		if errors.Is(err, server.ErrNotFound) {
+		switch {
+		case errors.Is(err, server.ErrNotFound):
 			httpapi.WriteError(
 				w,
 				http.StatusNotFound,
 				"server not found",
 			)
-			return
+
+		case errors.Is(err, server.ErrLastServerDelete):
+			httpapi.WriteError(
+				w,
+				http.StatusConflict,
+				"the instance server cannot be deleted through the API",
+			)
+
+		default:
+			log.Printf("delete server: %v", err)
+
+			httpapi.WriteError(
+				w,
+				http.StatusInternalServerError,
+				"internal server error",
+			)
 		}
-
-		log.Printf("delete server: %v", err)
-
-		httpapi.WriteError(
-			w,
-			http.StatusInternalServerError,
-			"internal server error",
-		)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) leave(
+func (h *Handler) deleteAccount(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -303,19 +344,8 @@ func (h *Handler) leave(
 		return
 	}
 
-	serverID, ok := httpapi.PositiveInt64PathValue(
-		w,
-		r,
-		"serverID",
-		"server",
-	)
-	if !ok {
-		return
-	}
-
-	if err := h.service.Leave(
+	if err := h.service.DeleteAccount(
 		r.Context(),
-		serverID,
 		userID,
 	); err != nil {
 		switch {
@@ -323,18 +353,18 @@ func (h *Handler) leave(
 			httpapi.WriteError(
 				w,
 				http.StatusNotFound,
-				"server membership not found",
+				"active instance account not found",
 			)
 
 		case errors.Is(err, server.ErrOwnerCannotLeave):
 			httpapi.WriteError(
 				w,
 				http.StatusConflict,
-				"server owner cannot leave the server",
+				"instance owner cannot delete their account",
 			)
 
 		default:
-			log.Printf("leave server: %v", err)
+			log.Printf("delete instance account: %v", err)
 
 			httpapi.WriteError(
 				w,
@@ -490,7 +520,7 @@ func (h *Handler) updateMemberRole(
 	)
 }
 
-func (h *Handler) kickMember(
+func (h *Handler) banMember(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -513,14 +543,14 @@ func (h *Handler) kickMember(
 		return
 	}
 
-	if err := h.service.KickMember(
+	if err := h.service.BanMember(
 		r.Context(),
 		serverID,
 		requesterUserID,
 		targetUserID,
 	); err != nil {
 		writeManageMemberError(
-			w, "kick member", serverID, err,
+			w, "ban member", serverID, err,
 		)
 		return
 	}
@@ -552,8 +582,8 @@ func writeManageMemberError(
 
 	case errors.Is(err, server.ErrOwnerRoleImmutable),
 		errors.Is(err, server.ErrCannotChangeOwnRole),
-		errors.Is(err, server.ErrOwnerCannotBeKicked),
-		errors.Is(err, server.ErrCannotKickSelf):
+		errors.Is(err, server.ErrOwnerCannotBeBanned),
+		errors.Is(err, server.ErrCannotBanSelf):
 
 		httpapi.WriteError(
 			w, http.StatusConflict, err.Error(),

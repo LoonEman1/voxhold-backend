@@ -23,11 +23,24 @@ func NewService(
 	}
 }
 
+func (s *Service) GetInstance(ctx context.Context) (Instance, error) {
+	instance, err := s.repository.GetInstance(ctx)
+	if err != nil {
+		return Instance{}, fmt.Errorf("get Voxhold instance: %w", err)
+	}
+
+	return instance, nil
+}
+
 func (s *Service) Create(
 	ctx context.Context,
 	createdBy int64,
 	input CreateInput,
 ) (Server, error) {
+	if createdBy <= 0 {
+		return Server{}, ErrNotFound
+	}
+
 	input = input.Normalize()
 
 	if err := input.Validate(); err != nil {
@@ -111,22 +124,21 @@ func (s *Service) Delete(
 	return nil
 }
 
-func (s *Service) Leave(
+func (s *Service) DeleteAccount(
 	ctx context.Context,
-	serverID int64,
 	userID int64,
 ) error {
-	if serverID <= 0 || userID <= 0 {
+	if userID <= 0 {
 		return ErrMembershipNotFound
 	}
 
-	if err := s.repository.Leave(
+	serverID, err := s.repository.DeleteAccount(
 		ctx,
-		serverID,
 		userID,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf(
-			"leave server: %w",
+			"delete instance account: %w",
 			err,
 		)
 	}
@@ -224,7 +236,7 @@ func (s *Service) UpdateMemberRole(
 	return member, nil
 }
 
-func (s *Service) KickMember(
+func (s *Service) BanMember(
 	ctx context.Context,
 	serverID int64,
 	requesterUserID int64,
@@ -238,14 +250,14 @@ func (s *Service) KickMember(
 		return ErrMemberNotFound
 	}
 
-	if err := s.repository.KickMember(
+	if err := s.repository.BanMember(
 		ctx,
 		serverID,
 		requesterUserID,
 		targetUserID,
 	); err != nil {
 		return fmt.Errorf(
-			"kick server member: %w",
+			"ban instance member: %w",
 			err,
 		)
 	}

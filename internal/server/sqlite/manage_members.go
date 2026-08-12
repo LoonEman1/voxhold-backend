@@ -129,7 +129,7 @@ func (r *Repository) UpdateMemberRole(
 	return member, true, nil
 }
 
-func (r *Repository) KickMember(
+func (r *Repository) BanMember(
 	ctx context.Context,
 	serverID int64,
 	requesterUserID int64,
@@ -138,7 +138,7 @@ func (r *Repository) KickMember(
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf(
-			"begin kick member transaction: %w",
+			"begin ban member transaction: %w",
 			err,
 		)
 	}
@@ -156,7 +156,7 @@ func (r *Repository) KickMember(
 	}
 
 	if requesterUserID == targetUserID {
-		return server.ErrCannotKickSelf
+		return server.ErrCannotBanSelf
 	}
 
 	targetRole, err := findMemberRole(
@@ -167,7 +167,7 @@ func (r *Repository) KickMember(
 	}
 
 	if targetRole == server.RoleOwner {
-		return server.ErrOwnerCannotBeKicked
+		return server.ErrOwnerCannotBeBanned
 	}
 
 	allowed := requesterRole == server.RoleOwner ||
@@ -194,46 +194,58 @@ func (r *Repository) KickMember(
 		serverID,
 	); err != nil {
 		return fmt.Errorf(
-			"delete kicked member read states: %w",
+			"delete banned member read states: %w",
 			err,
 		)
 	}
 
-	const deleteQuery = `
-	DELETE FROM server_members
-	WHERE server_id = ?
-	  AND user_id = ?
-	  AND role = ?
+	const banQuery = `
+	INSERT INTO user_bans (user_id, banned_by_user_id)
+	VALUES (?, ?)
 	`
 
-	result, err := tx.ExecContext(
+	if _, err := tx.ExecContext(
 		ctx,
-		deleteQuery,
-		serverID,
+		banQuery,
 		targetUserID,
-		targetRole,
-	)
-	if err != nil {
+		requesterUserID,
+	); err != nil {
 		return fmt.Errorf(
-			"delete kicked member row: %w",
+			"create instance ban: %w",
 			err,
 		)
 	}
 
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf(
-			"count kicked members: %w",
-			err,
-		)
-	}
-	if affected != 1 {
-		return server.ErrMemberNotFound
+	const revokeQuery = `
+	DELETE FROM sessions
+	WHERE user_id = ?;
+
+	DELETE FROM server_invites
+	WHERE inviter_user_id = ?
+	   OR invitee_user_id = ?;
+
+	DELETE FROM server_invite_links
+	WHERE created_by = ?;
+
+	DELETE FROM server_members
+	WHERE user_id = ?;
+	`
+
+	if _, err := tx.ExecContext(
+		ctx,
+		revokeQuery,
+		targetUserID,
+		targetUserID,
+		targetUserID,
+		targetUserID,
+		targetUserID,
+	); err != nil {
+		return fmt.Errorf("revoke banned account access: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf(
-			"commit kick member transaction: %w",
+			"commit ban member transaction: %w",
 			err,
 		)
 	}
