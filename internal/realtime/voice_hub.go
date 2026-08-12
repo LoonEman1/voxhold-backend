@@ -29,6 +29,13 @@ func (h *Hub) JoinVoice(
 	default:
 	}
 
+	if current, exists := h.voice.current(client); exists &&
+		(current.ServerID != serverID ||
+			current.ChannelID != channelID) {
+
+		h.leaveStream(client, "voice channel changed")
+	}
+
 	result := h.voice.join(
 		client,
 		serverID,
@@ -45,6 +52,10 @@ func (h *Hub) JoinVoice(
 	}
 
 	if result.replaced != nil {
+		h.leaveStream(
+			result.replaced,
+			"voice session moved to another connection",
+		)
 		h.closeVoiceSession(result.replaced.ConnectionID())
 		h.SendToConnection(
 			result.replaced.ConnectionID(),
@@ -133,6 +144,8 @@ func (h *Hub) leaveVoice(
 		return VoiceParticipantData{}, false
 	}
 
+	h.leaveStream(client, "left voice channel")
+
 	participant, exists := h.voice.leave(client)
 	if !exists {
 		return VoiceParticipantData{}, false
@@ -148,6 +161,11 @@ func (h *Hub) leaveVoiceForServer(
 	client *Client,
 	serverID int64,
 ) {
+	if current, exists := h.voice.current(client); exists &&
+		current.ServerID == serverID {
+
+		h.leaveStream(client, "server access was revoked")
+	}
 	participant, exists := h.voice.leaveServer(
 		client,
 		serverID,

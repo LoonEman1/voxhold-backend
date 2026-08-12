@@ -106,6 +106,11 @@ type Hub struct {
 
 	voice         *voiceState
 	voiceSessions VoiceSessionCloser
+
+	streams             *streamState
+	streamSessions      StreamSessionCloser
+	maxStreamViewers    int
+	maxP2PStreamViewers int
 }
 
 func NewHub() *Hub {
@@ -117,6 +122,9 @@ func NewHub() *Hub {
 		clientsByConnection: make(map[string]*Client),
 		presence:            make(map[int64]map[int64]int),
 		voice:               newVoiceState(),
+		streams:             newStreamState(),
+		maxStreamViewers:    32,
+		maxP2PStreamViewers: 8,
 	}
 }
 
@@ -159,6 +167,7 @@ func (h *Hub) Register(client *Client) bool {
 
 	h.registerPresence(client)
 	h.sendVoiceSnapshot(client)
+	h.sendStreamSnapshot(client)
 
 	return true
 }
@@ -320,6 +329,10 @@ func (h *Hub) RevokeServer(serverID int64) {
 	h.presenceMu.Unlock()
 
 	for _, participant := range h.voice.removeServer(serverID) {
+		h.stopStreamForChannel(
+			participant.ChannelID,
+			"server was deleted",
+		)
 		h.closeVoiceSession(participant.ConnectionID)
 	}
 }
@@ -686,6 +699,10 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	room := h.rooms[channelID]
 	if room == nil {
 		h.roomsMu.Unlock()
+		h.stopStreamForChannel(
+			channelID,
+			"voice channel was deleted",
+		)
 		for _, participant := range h.voice.removeChannel(channelID) {
 			h.closeVoiceSession(participant.ConnectionID)
 		}
@@ -697,6 +714,11 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	for _, client := range room.closeAndSnapshot() {
 		client.removeSubscription(channelID)
 	}
+
+	h.stopStreamForChannel(
+		channelID,
+		"voice channel was deleted",
+	)
 
 	for _, participant := range h.voice.removeChannel(channelID) {
 		h.closeVoiceSession(participant.ConnectionID)

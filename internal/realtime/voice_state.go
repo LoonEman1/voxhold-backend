@@ -128,6 +128,16 @@ func (s *voiceState) update(
 	return participant, changed, true
 }
 
+func (s *voiceState) current(
+	client *Client,
+) (VoiceParticipantData, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	participant, exists := s.byClient[client]
+	return participant, exists
+}
+
 func (s *voiceState) leave(
 	client *Client,
 ) (VoiceParticipantData, bool) {

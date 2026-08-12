@@ -14,6 +14,7 @@ import (
 	serverhttp "voxhold-backend/internal/server/http"
 	serverSqlite "voxhold-backend/internal/server/sqlite"
 	"voxhold-backend/internal/storage"
+	"voxhold-backend/internal/stream"
 
 	channelDomain "voxhold-backend/internal/channel"
 	channelhttp "voxhold-backend/internal/channel/http"
@@ -74,6 +75,41 @@ func main() {
 		"WebRTC audio is listening on UDP port %d (max %d Kbit/s per microphone)",
 		voiceConfig.UDPPort,
 		voiceConfig.MaxAudioBitrateKbps,
+	)
+
+	streamConfig, err := stream.NewConfig(
+		os.Getenv("WEBRTC_STREAM_UDP_PORT"),
+		os.Getenv("WEBRTC_STREAM_MAX_VIEWERS"),
+		os.Getenv("WEBRTC_STREAM_MAX_P2P_VIEWERS"),
+		os.Getenv("WEBRTC_STREAM_MAX_VIDEO_BITRATE_KBPS"),
+		os.Getenv("WEBRTC_STREAM_MAX_AUDIO_BITRATE_KBPS"),
+		os.Getenv("WEBRTC_PUBLIC_IP"),
+		os.Getenv("WEBRTC_ICE_SERVERS"),
+		os.Getenv("WEBRTC_ICE_USERNAME"),
+		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	streamManager, err := stream.NewManager(
+		streamConfig,
+		realtimeDomain.NewStreamSignalSink(realtimeHub),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer streamManager.Close()
+	realtimeHub.SetStreamSessionCloser(
+		streamManager,
+		streamConfig.MaxViewers,
+		streamConfig.MaxP2PViewers,
+	)
+	log.Printf(
+		"WebRTC streams are listening on UDP port %d (max %d viewers, %d Kbit/s video, %d Kbit/s stream audio)",
+		streamConfig.UDPPort,
+		streamConfig.MaxViewers,
+		streamConfig.MaxVideoBitrateKbps,
+		streamConfig.MaxAudioBitrateKbps,
 	)
 
 	serverEventPublisher :=
@@ -152,6 +188,7 @@ func main() {
 		serverService,
 		readService,
 		voiceManager,
+		streamManager,
 		realtimeHub,
 	)
 

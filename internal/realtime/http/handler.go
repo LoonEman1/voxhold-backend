@@ -17,6 +17,7 @@ import (
 	"voxhold-backend/internal/readstate"
 	"voxhold-backend/internal/realtime"
 	serverDomain "voxhold-backend/internal/server"
+	"voxhold-backend/internal/stream"
 	"voxhold-backend/internal/voice"
 )
 
@@ -95,12 +96,37 @@ type VoiceMedia interface {
 	) error
 }
 
+type StreamMedia interface {
+	Start(
+		connectionID string,
+		userID int64,
+		serverID int64,
+		channelID int64,
+		hasAudio bool,
+	) error
+
+	Watch(
+		connectionID string,
+		userID int64,
+		serverID int64,
+		channelID int64,
+	) error
+
+	AcceptAnswer(connectionID string, sdp string) error
+
+	AddICECandidate(
+		connectionID string,
+		candidate stream.ICECandidate,
+	) error
+}
+
 type Handler struct {
 	authenticator Authenticator
 	channelAccess ChannelAccess
 	memberships   MembershipLister
 	readStates    ReadStateLister
 	voiceMedia    VoiceMedia
+	streamMedia   StreamMedia
 	hub           *realtime.Hub
 	voiceJoins    userLockSet
 }
@@ -111,6 +137,7 @@ func NewHandler(
 	memberships MembershipLister,
 	readStates ReadStateLister,
 	voiceMedia VoiceMedia,
+	streamMedia StreamMedia,
 	hub *realtime.Hub,
 ) *Handler {
 	return &Handler{
@@ -119,6 +146,7 @@ func NewHandler(
 		memberships:   memberships,
 		readStates:    readStates,
 		voiceMedia:    voiceMedia,
+		streamMedia:   streamMedia,
 		hub:           hub,
 	}
 }
@@ -604,6 +632,31 @@ func (h *Handler) handleIncomingEvent(
 			client,
 			event,
 		)
+
+	case realtime.EventStreamStart:
+		return h.startStream(client, event)
+
+	case realtime.EventStreamWatch:
+		return h.watchStream(client, event)
+
+	case realtime.EventStreamStop,
+		realtime.EventStreamLeave:
+
+		return h.leaveStream(client, event)
+
+	case realtime.EventStreamWebRTCAnswer:
+		return h.acceptStreamWebRTCAnswer(client, event)
+
+	case realtime.EventStreamICECandidate:
+		return h.addStreamICECandidate(client, event)
+
+	case realtime.EventStreamP2POffer,
+		realtime.EventStreamP2PAnswer:
+
+		return h.relayStreamP2PSession(client, event)
+
+	case realtime.EventStreamP2PICECandidate:
+		return h.relayStreamP2PICECandidate(client, event)
 
 	default:
 		return queueError(
