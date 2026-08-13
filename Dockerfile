@@ -29,10 +29,17 @@ FROM alpine:3.22
 
 WORKDIR /app
 
+RUN addgroup -S -g 10001 voxhold && \
+    adduser -S -D -H -u 10001 -G voxhold voxhold && \
+    mkdir -p /app/data && \
+    chown -R voxhold:voxhold /app
+
 COPY --from=builder /out/voxhold /usr/local/bin/voxhold
 COPY --from=builder /out/voxhold-bootstrap /usr/local/bin/voxhold-bootstrap
 COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY migrations /app/migrations
+
+USER 10001:10001
 
 EXPOSE 8080/tcp
 EXPOSE 50000/udp

@@ -11,6 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const dummyPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+
 const sessionLifetime = 30 * 24 * time.Hour
 
 var (
@@ -149,6 +151,10 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, err
 	user, err := s.users.FindByUsername(ctx, input.Username)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			_ = bcrypt.CompareHashAndPassword(
+				[]byte(dummyPasswordHash),
+				[]byte(input.Password),
+			)
 			return LoginResult{}, ErrInvalidCredentials
 		}
 		return LoginResult{}, fmt.Errorf("find user: %w", err)

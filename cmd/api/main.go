@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/antiabuse"
 	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/voice"
 
@@ -53,6 +55,12 @@ const (
 )
 
 func main() {
+	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	antiAbuseGuard := antiabuse.New(antiAbuseConfig)
+
 	db, err := storage.Open()
 	if err != nil {
 		log.Fatal(err)
@@ -149,7 +157,10 @@ func main() {
 		realtimeHub,
 		serverEventPublisher,
 	)
-	accountHandler := accounthttp.NewHandler(accountService)
+	accountHandler := accounthttp.NewHandler(
+		accountService,
+		antiAbuseGuard,
+	)
 
 	serverRepository := serverSqlite.NewRepository(db)
 	serverService := serverDomain.NewService(
@@ -212,6 +223,7 @@ func main() {
 		voiceManager,
 		streamManager,
 		realtimeHub,
+		antiAbuseGuard,
 	)
 
 	mux := http.NewServeMux()
@@ -246,15 +258,22 @@ func main() {
 	)
 
 	webSocketHandler.RegisterRoutes(mux)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	port := os.Getenv("HTTP_PORT")
 	if port == "" {
 		port = "8080"
 	}
+	listenAddress := os.Getenv("HTTP_LISTEN_ADDRESS")
+	if listenAddress == "" {
+		listenAddress = "0.0.0.0"
+	}
 
 	server := &http.Server{
-		Addr:              ":" + port,
-		Handler:           mux,
+		Addr:              net.JoinHostPort(listenAddress, port),
+		Handler:           antiAbuseGuard.ProtectHTTP(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/httpapi"
 )
@@ -66,11 +68,29 @@ type loginRequest struct {
 }
 
 type Handler struct {
-	service Service
+	service        Service
+	loginProtector LoginProtector
 }
 
-func NewHandler(service Service) *Handler {
-	return &Handler{service: service}
+type LoginProtector interface {
+	AllowLogin(
+		r *http.Request,
+		username string,
+	) (bool, time.Duration)
+	RecordLoginFailure(r *http.Request, username string)
+	RecordLoginSuccess(r *http.Request, username string)
+}
+
+func NewHandler(
+	service Service,
+	protectors ...LoginProtector,
+) *Handler {
+	handler := &Handler{service: service}
+	if len(protectors) > 0 {
+		handler.loginProtector = protectors[0]
+	}
+
+	return handler
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -191,6 +211,29 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.loginProtector != nil {
+		allowed, retryAfter := h.loginProtector.AllowLogin(
+			r,
+			request.Username,
+		)
+		if !allowed {
+			seconds := max(
+				1,
+				int(retryAfter.Round(time.Second)/time.Second),
+			)
+			w.Header().Set(
+				"Retry-After",
+				strconv.Itoa(seconds),
+			)
+			httpapi.WriteError(
+				w,
+				http.StatusTooManyRequests,
+				"too many failed login attempts; try again later",
+			)
+			return
+		}
+	}
+
 	result, err := h.service.Login(
 		r.Context(),
 		account.LoginInput{
@@ -199,6 +242,15 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 	if err != nil {
+		if h.loginProtector != nil &&
+			errors.Is(err, account.ErrInvalidCredentials) {
+
+			h.loginProtector.RecordLoginFailure(
+				r,
+				request.Username,
+			)
+		}
+
 		switch {
 		case errors.Is(err, account.ErrLoginUsernameRequired),
 			errors.Is(err, account.ErrLoginPasswordRequired):
@@ -227,6 +279,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		}
 
 		return
+	}
+
+	if h.loginProtector != nil {
+		h.loginProtector.RecordLoginSuccess(
+			r,
+			request.Username,
+		)
 	}
 
 	httpapi.WriteJSON(

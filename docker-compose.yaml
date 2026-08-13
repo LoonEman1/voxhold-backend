@@ -37,6 +37,17 @@ services:
     volumes:
       - voxhold_data:/app/data
 
+    networks:
+      - backend
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   app:
     build:
       context: .
@@ -47,7 +58,7 @@ services:
       - .env
 
     ports:
-      - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
+      - "${HTTP_BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
       - "${WEBRTC_UDP_PORT:-50000}:${WEBRTC_UDP_PORT:-50000}/udp"
       - "${WEBRTC_STREAM_UDP_PORT:-50001}:${WEBRTC_STREAM_UDP_PORT:-50001}/udp"
 
@@ -57,6 +68,25 @@ services:
 
     volumes:
       - voxhold_data:/app/data
+
+    networks:
+      - backend
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:${HTTP_PORT:-8080}/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   bootstrap:
     build:
@@ -77,5 +107,20 @@ services:
     volumes:
       - voxhold_data:/app/data
 
+    networks:
+      - backend
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   voxhold_data:
+
+networks:
+  backend:
+    internal: true
