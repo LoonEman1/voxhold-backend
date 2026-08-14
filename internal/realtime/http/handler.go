@@ -195,7 +195,15 @@ func (h *Handler) connect(
 	connection, err := websocket.Accept(
 		w,
 		r,
-		nil,
+		&websocket.AcceptOptions{
+			// The packaged Wails client is served from this fixed local origin.
+			// Keep the allow-list narrow: authentication still happens in the
+			// first WebSocket event and arbitrary web origins remain rejected.
+			OriginPatterns: []string{
+				"http://wails.localhost",
+				"https://wails.localhost",
+			},
+		},
 	)
 	if err != nil {
 		log.Printf(
