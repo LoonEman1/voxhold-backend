@@ -38,4 +38,4 @@ EXPOSE 8080/tcp
 EXPOSE 50000/udp
 EXPOSE 50001/udp
 
-CMD ["voxhold"]
+CMD ["sh", "-c", "mkdir -p /app/data && migrate -path /app/migrations -database sqlite:///app/data/voxhold.db up && voxhold-bootstrap && exec voxhold"]
