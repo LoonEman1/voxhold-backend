@@ -83,11 +83,11 @@ configurations use a read-only root filesystem, drop Linux capabilities and
 set `no-new-privileges`; only the SQLite data volume and explicit temporary
 filesystems are writable.
 
-Keep Docker Engine, the Linux kernel and reverse proxy updated. Prefer a
-commit-specific `sha-...` image tag or, for an immutable reference, an OCI
-digest over `latest`. Review release changes and keep regular off-host SQLite
-backups. Official CI publishes SBOM and provenance attestations with the
-multi-platform image.
+Keep Docker Engine, the Linux kernel and reverse proxy updated. Prefer an exact
+SemVer release tag such as `0.1.0`, or an OCI digest for an immutable reference,
+over the moving `0.1` and `latest` tags. Review release changes and keep regular
+off-host SQLite backups. Official CI publishes SBOM and provenance attestations
+with the multi-platform image.
 
 Do not run untrusted replacement frontend images on the same Docker host or
 network. A container image is executable code, not merely static website

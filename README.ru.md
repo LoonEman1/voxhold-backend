@@ -64,24 +64,31 @@ Compose-файл этого репозитория предназначен дл
 автообновлением и заменяемым сайтом используйте
 [`LoonEman1/voxhold-deploy`](https://github.com/LoonEman1/voxhold-deploy).
 
-## Опубликованный образ
+## Опубликованный образ и релизы
 
-После успешного push в `main` публикуются образы для `linux/amd64` и
-`linux/arm64`:
+Pull request и push в `main` проверяют backend и собирают контейнер без
+публикации. Git-тег формата `v<major>.<minor>.<patch>` публикует проверенный
+мультиплатформенный релиз для `linux/amd64` и `linux/arm64`.
+
+Например, релиз `v0.1.0` публикует три тега, указывающих на один образ:
 
 ```bash
+docker pull ghcr.io/looneman1/voxhold-backend:0.1.0
+docker pull ghcr.io/looneman1/voxhold-backend:0.1
 docker pull ghcr.io/looneman1/voxhold-backend:latest
 ```
 
-Каждая сборка также получает отдельный тег коммита:
+После слияния нужного коммита в `main` создайте релиз:
 
-```text
-ghcr.io/looneman1/voxhold-backend:sha-<полный-sha-коммита>
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-Для стабильной ссылки используйте тег коммита, а для неизменяемой production-
-ссылки — OCI digest. Образ содержит SBOM и provenance attestations, созданные
-GitHub Actions.
+Для обычного production-развёртывания используйте точный тег `0.1.0`. Теги
+`0.1` и `latest` переходят на новые совместимые и стабильные релизы
+соответственно; OCI digest остаётся неизменяемой ссылкой. Каждый релиз содержит
+SBOM и provenance attestations, созданные GitHub Actions.
 
 ## Обзор API
 
@@ -135,9 +142,9 @@ go build ./cmd/api
 go build ./cmd/bootstrap
 ```
 
-Для pull request и push в `main` выполняются тесты и `go vet`. Сборка контейнера
-начинается только после успешных проверок: в pull request образ только
-собирается, а после push в `main` публикуется в GHCR.
+Для pull request, push в `main` и релизных тегов выполняются тесты и `go vet`.
+Сборка контейнера начинается только после успешных проверок. Pull request и
+`main` собираются без публикации; в GHCR публикуются только SemVer-релизы.
 
 ## Документация
 

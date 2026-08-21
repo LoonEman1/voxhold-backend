@@ -9,8 +9,8 @@ Voxhold backend does not currently maintain multiple release branches.
 | Current `main` and the newest published container image | Supported |
 | Older commits, images and forks | Not supported |
 
-When reporting an issue, include the exact Git commit, `sha-...` image tag or
-OCI digest. The mutable `latest` tag alone is not enough to identify a build.
+When reporting an issue, include the exact Git commit, SemVer image tag or OCI
+digest. The mutable `latest` tag alone is not enough to identify a build.
 
 ## Reporting a vulnerability
 
