@@ -39,6 +39,14 @@ required check is pending, failing or cancelled.
 Recommended branch prefixes are `feat/`, `fix/`, `docs/`, `refactor/`,
 `test/`, `chore/` and `security/`.
 
+CI is intentionally split by event:
+
+- a pull request runs Go checks and validates `linux/amd64` without publishing,
+  SBOM or provenance;
+- a merge push to `main` runs only the Go checks and does not rebuild the image;
+- a SemVer tag runs Go checks, publishes `linux/amd64` and `linux/arm64` with
+  SBOM and provenance, and creates the GitHub Release.
+
 ## Pull request checklist
 
 - the change has a clear purpose and contains no unrelated edits;

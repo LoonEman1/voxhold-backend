@@ -40,6 +40,15 @@ issue или задача → отдельная ветка → pull request →
 Рекомендуемые префиксы веток: `feat/`, `fix/`, `docs/`, `refactor/`, `test/`,
 `chore/` и `security/`.
 
+CI намеренно разделён по типам событий:
+
+- pull request запускает Go-проверки и валидирует `linux/amd64` без публикации,
+  SBOM и provenance;
+- push результата merge в `main` запускает только Go-проверки и не пересобирает
+  образ;
+- SemVer-тег запускает Go-проверки, публикует `linux/amd64` и `linux/arm64` с
+  SBOM и provenance, а затем создаёт GitHub Release.
+
 ## Checklist для pull request
 
 - изменение имеет понятную цель и не содержит посторонних правок;
