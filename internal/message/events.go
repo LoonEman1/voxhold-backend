@@ -13,7 +13,7 @@ type EventPublisher interface {
 		value Message,
 	)
 
-	PublishMessagePinned(value Pin)
+	PublishMessagePinned(value PinnedMessage)
 
 	PublishMessageUnpinned(
 		channelID int64,

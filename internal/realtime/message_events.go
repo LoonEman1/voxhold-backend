@@ -66,15 +66,16 @@ func (p *MessageEventPublisher) PublishMessageDeleted(
 }
 
 func (p *MessageEventPublisher) PublishMessagePinned(
-	value message.Pin,
+	value message.PinnedMessage,
 ) {
 	p.hub.Publish(
-		value.ChannelID,
+		value.Message.ChannelID,
 		OutgoingEvent{
 			Type: EventMessagePinned,
 			Data: MessagePinnedData{
-				ChannelID: value.ChannelID,
-				MessageID: value.MessageID,
+				ChannelID: value.Message.ChannelID,
+				MessageID: value.Message.ID,
+				Message:   newMessageData(value.Message),
 				PinnedBy: MessageAuthorData{
 					UserID:   value.PinnedBy.UserID,
 					Username: value.PinnedBy.Username,
