@@ -66,9 +66,10 @@ replaceable website, use
 
 ## Published image and releases
 
-Pull requests and pushes to `main` test the backend and build its container
-without publishing it. A Git tag matching `v<major>.<minor>.<patch>` publishes
-the tested multi-platform `linux/amd64` and `linux/arm64` release.
+Pull requests test the backend and validate a fast `linux/amd64` container build
+without publishing, SBOM or provenance. Pushes to `main` run only Go tests and
+`go vet`. A Git tag matching `v<major>.<minor>.<patch>` publishes the tested
+multi-platform `linux/amd64` and `linux/arm64` release.
 
 For example, release `v0.1.0` publishes three tags pointing to the same image:
 
@@ -145,9 +146,11 @@ go build ./cmd/api
 go build ./cmd/bootstrap
 ```
 
-Pull requests, pushes to `main` and release tags run tests and `go vet`. The
-container job runs only after those checks succeed. Pull requests and `main`
-build without publishing; only SemVer release tags publish to GHCR.
+Pull requests, pushes to `main` and release tags run tests and `go vet`. A pull
+request additionally validates a fast `linux/amd64` image without publishing or
+attestations. A merge push to `main` does not repeat the image build. Only
+SemVer release tags build both supported platforms, publish to GHCR, generate
+SBOM and provenance, and create a GitHub Release.
 
 ## Documentation
 
