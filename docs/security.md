@@ -1,37 +1,111 @@
-# Deployment security
+# Operational security
 
-The API has an in-process anti-abuse guard. It limits requests by client IP,
-applies stricter limits to authentication and invite-link endpoints, limits
-WebSocket connections and events, and temporarily blocks repeated invalid
-login attempts. The limits are configured through the `HTTP_*`, `AUTH_*`,
-`INVITE_*`, `LOGIN_*`, and `WS_*` variables in `.env`.
+For confidential vulnerability reports, follow the repository
+[security policy](../SECURITY.md). This document covers deployment hardening;
+it is not a substitute for host, Docker or reverse-proxy security.
 
-`TRUST_PROXY_HEADERS` is disabled by default. Enable it only when the API is
-reachable exclusively through a trusted reverse proxy that overwrites
-`X-Real-IP`; otherwise a client can spoof its address and bypass IP limits.
+## Recommended production topology
 
-The runtime image runs as UID/GID 10001, drops Linux capabilities, enables
-`no-new-privileges`, uses a read-only root filesystem, and keeps only the
-SQLite volume writable. The three services share an internal Docker network.
+Use the separate
+[`voxhold-deploy`](https://github.com/LoonEman1/voxhold-deploy) project for a
+public instance. It runs migrations and bootstrap as one-shot jobs, keeps the
+backend HTTP port inside the Compose network and exposes only Caddy on TCP
+80/443. The configured WebRTC UDP ports remain public because media clients
+must reach them directly.
 
-For a VPS, put Caddy or Nginx in front of the API and terminate TLS there:
+The application itself intentionally does not manage TLS certificates, host
+firewall rules, operating-system updates, SSH access or Docker daemon security.
 
-1. Set `HTTP_BIND_ADDRESS=127.0.0.1` so the HTTP port is not public.
-2. Keep `HTTP_LISTEN_ADDRESS=0.0.0.0` because it is the address inside the
-   container.
-3. Proxy both HTTP and WebSocket traffic to `http://127.0.0.1:8080`.
-4. Expose only TCP 80/443 and the configured WebRTC UDP ports in the VPS
-   firewall. Do not expose the SQLite volume or Docker daemon.
-5. Keep `RESET_DATABASE=false` and use a strong, private bootstrap password.
+For the standalone Compose file in this repository:
 
-If an existing named volume was created by an older root container, it may
-need a one-time ownership fix before enabling the non-root image:
+1. set `HTTP_BIND_ADDRESS=127.0.0.1` when a reverse proxy runs on the host;
+2. keep `HTTP_LISTEN_ADDRESS=0.0.0.0`, which is the address inside the
+   container;
+3. proxy HTTP and WebSocket traffic to `http://127.0.0.1:8080`;
+4. do not expose port 8080 directly to the Internet;
+5. use the production deployment project instead when the reverse proxy also
+   runs in Docker.
 
-```sh
-docker run --rm -v voxhold-backend_voxhold_data:/app/data alpine \
-  chown -R 10001:10001 /app/data
+## Forwarded client addresses
+
+The in-process abuse guard limits HTTP requests, authentication, invitations,
+WebSocket connections and WebSocket events. Repeated invalid logins are
+temporarily blocked. Limits are configured through `HTTP_*`, `AUTH_*`,
+`INVITE_*`, `LOGIN_*` and `WS_*` variables.
+
+`TRUST_PROXY_HEADERS=false` is the safe default when clients can reach the API
+directly. Set it to `true` only when every request passes through a trusted
+reverse proxy that overwrites client-supplied forwarding headers. Otherwise an
+attacker can spoof an address and weaken IP-based limits.
+
+The limiter is in-process. Multiple backend replicas need a shared limiter or
+rate-limiting reverse proxy/WAF. These controls reduce abuse but do not replace
+provider-level denial-of-service protection.
+
+## Network and media
+
+Allow only the ports required by the selected deployment:
+
+- `80/tcp` and `443/tcp` for Caddy;
+- `50000/udp` by default for voice;
+- `50001/udp` by default for screen streaming;
+- a restricted administrative SSH source range where possible.
+
+Set `WEBRTC_PUBLIC_IP` to the server's reachable public address. Optional
+STUN/TURN credentials belong in `.env`, never in the repository. TURN services
+must have their own authentication, quotas and update policy.
+
+WebRTC uses DTLS-SRTP on the network. Server-relayed voice and streaming media
+is decrypted inside the SFU so it can be forwarded; it is not end-to-end
+encrypted against the server. P2P streaming avoids the SFU media path but can
+expose peer IP addresses and increases publisher upload usage. See
+[voice.md](voice.md) and [streaming.md](streaming.md).
+
+## Secrets and first bootstrap
+
+- Keep `.env` readable only by the deployment administrator.
+- Use a strong unique `BOOTSTRAP_PASSWORD`, or immediately save the generated
+  password from the one-shot bootstrap logs.
+- Treat Docker access and container logs as privileged: bootstrap logs may
+  contain the generated owner password.
+- Keep `RESET_DATABASE=false` outside an intentional local reset.
+- Never commit bearer tokens, invite tokens, TURN credentials, databases or
+  backups.
+- Do not mount the Docker socket into Voxhold containers.
+
+Registration is invite-only, but invite links are credentials. Transmit them
+over HTTPS and choose the shortest practical expiration and use limit.
+
+## Container and host hardening
+
+The official runtime image executes as UID/GID `10001`. The provided Compose
+configurations use a read-only root filesystem, drop Linux capabilities and
+set `no-new-privileges`; only the SQLite data volume and explicit temporary
+filesystems are writable.
+
+Keep Docker Engine, the Linux kernel and reverse proxy updated. Prefer a
+commit-specific `sha-...` image tag or, for an immutable reference, an OCI
+digest over `latest`. Review release changes and keep regular off-host SQLite
+backups. Official CI publishes SBOM and provenance attestations with the
+multi-platform image.
+
+Do not run untrusted replacement frontend images on the same Docker host or
+network. A container image is executable code, not merely static website
+content.
+
+## SQLite data
+
+Protect the named volume and backups as production secrets. A backup should be
+made while database writes are stopped or through the deployment backup script
+so the database and its WAL state remain consistent. Test restoration
+periodically.
+
+If a volume was created by an older root container, repair its ownership once
+before running the non-root image:
+
+```bash
+docker run --rm --user 0 \
+  -v voxhold-backend_voxhold_data:/app/data \
+  alpine:3.22 \
+  sh -c 'chown -R 10001:10001 /app/data && chmod 770 /app/data'
 ```
-
-The application is intentionally not responsible for TLS, host firewalling,
-SSH hardening, or distributed rate limiting. On multiple API replicas, put a
-rate-limiting reverse proxy/WAF in front or use a shared limiter.

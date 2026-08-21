@@ -29,6 +29,9 @@ FROM alpine:3.22
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/LoonEman1/voxhold-backend"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
+
 RUN addgroup -S -g 10001 voxhold && \
     adduser -S -D -H -u 10001 -G voxhold voxhold && \
     mkdir -p /app/data && \
@@ -38,6 +41,7 @@ COPY --from=builder /out/voxhold /usr/local/bin/voxhold
 COPY --from=builder /out/voxhold-bootstrap /usr/local/bin/voxhold-bootstrap
 COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY migrations /app/migrations
+COPY LICENSE /usr/share/licenses/voxhold-backend/LICENSE
 
 USER 10001:10001
 
