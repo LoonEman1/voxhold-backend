@@ -167,7 +167,9 @@ func (h *Handler) connect(
 	connection, err := websocket.Accept(
 		w,
 		r,
-		nil,
+		&websocket.AcceptOptions{
+			OriginPatterns: []string{"*"}, 
+		},
 	)
 	if err != nil {
 		log.Printf(
