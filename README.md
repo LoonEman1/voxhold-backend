@@ -85,6 +85,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+After tests and the GHCR publication succeed, CI creates the corresponding
+GitHub Release with generated notes. Tags containing a suffix such as
+`v0.2.0-rc.1` are marked as pre-releases automatically.
+
 Use the exact `0.1.0` tag for normal production deployments. The `0.1` and
 `latest` tags move to newer compatible and stable releases respectively; an
 OCI digest is the immutable reference. Each release contains SBOM and
@@ -147,6 +151,7 @@ build without publishing; only SemVer release tags publish to GHCR.
 
 ## Documentation
 
+- [Contributing and release workflow](CONTRIBUTING.md)
 - [Operational security](docs/security.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 - [Voice protocol](docs/voice.md)
