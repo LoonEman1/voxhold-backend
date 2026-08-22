@@ -156,18 +156,23 @@ func (r *Repository) ListByServerID(
 
 	const channelsQuery = `
 	SELECT
-		id,
-		server_id,
-		name,
-		kind,
-		position,
-		created_by,
-		created_at
+		channels.id,
+		channels.server_id,
+		channels.name,
+		channels.kind,
+		channels.position,
+		channels.created_by,
+		channels.created_at,
+		COALESCE((
+			SELECT MAX(messages.id)
+			FROM messages
+			WHERE messages.channel_id = channels.id
+		), 0) AS last_message_id
 	FROM channels
-	WHERE server_id = ?
+	WHERE channels.server_id = ?
 	ORDER BY
-		position ASC,
-		id ASC
+		channels.position ASC,
+		channels.id ASC
 	`
 
 	rows, err := tx.QueryContext(
@@ -196,6 +201,7 @@ func (r *Repository) ListByServerID(
 			&value.Position,
 			&value.CreatedBy,
 			&value.CreatedAt,
+			&value.LastMessageID,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scan server channel: %w",
