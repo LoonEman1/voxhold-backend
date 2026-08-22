@@ -119,6 +119,11 @@ The repository does not currently publish an OpenAPI document. The route
 handlers under `internal/*/http` are the source of truth for request and
 response fields.
 
+Authenticated clients submit bounded operational telemetry to
+`POST /api/v1/diagnostics/client-events`. The instance owner can export the
+last 24 hours with `GET` on the same route. See
+[Client diagnostics](docs/client-diagnostics.md) for privacy and size limits.
+
 ## Configuration
 
 Copy [`.env.example`](.env.example) and review every value before deployment.
@@ -163,6 +168,7 @@ SBOM and provenance, and create a GitHub Release.
 - [Security policy and vulnerability reporting](SECURITY.md)
 - [Voice protocol](docs/voice.md)
 - [Screen streaming](docs/streaming.md)
+- [Client diagnostics](docs/client-diagnostics.md)
 - [Production deployment](https://github.com/LoonEman1/voxhold-deploy)
 
 ## Security

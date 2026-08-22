@@ -12,6 +12,7 @@ import (
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/antiabuse"
+	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/voice"
 
@@ -27,6 +28,8 @@ import (
 	channelhttp "voxhold-backend/internal/channel/http"
 	channelSqlite "voxhold-backend/internal/channel/sqlite"
 
+	diagnosticshttp "voxhold-backend/internal/diagnostics/http"
+	diagnosticsSqlite "voxhold-backend/internal/diagnostics/sqlite"
 	inviteDomain "voxhold-backend/internal/invite"
 	invitehttp "voxhold-backend/internal/invite/http"
 	inviteSqlite "voxhold-backend/internal/invite/sqlite"
@@ -215,6 +218,10 @@ func main() {
 	)
 	readHandler := readstatehttp.NewHandler(readService)
 
+	diagnosticsRepository := diagnosticsSqlite.NewRepository(db)
+	diagnosticsService := diagnostics.NewService(diagnosticsRepository)
+	diagnosticsHandler := diagnosticshttp.NewHandler(diagnosticsService)
+
 	webSocketHandler := realtimehttp.NewHandler(
 		accountService,
 		channelService,
@@ -253,6 +260,10 @@ func main() {
 	)
 
 	readHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
+	diagnosticsHandler.RegisterRoutes(
 		mux,
 		accountHandler.RequireAuth,
 	)
