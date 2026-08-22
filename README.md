@@ -107,6 +107,10 @@ The public API prefix is `/api/v1`.
 - `/api/v1/servers/*/messages/search` — full-text message search;
 - `/api/v1/ws` — authenticated realtime, voice and streaming signaling.
 
+`GET /api/v1/servers/{serverID}/channels` includes `last_message_id` for every
+channel, allowing clients to compare it with their read state without fetching
+each channel's message history. The value is `0` when a channel has no messages.
+
 Protected HTTP endpoints use `Authorization: Bearer <token>`. Registration is
 invite-only. WebSocket clients authenticate after connecting and receive the
 current membership, read, presence, voice and stream state.
