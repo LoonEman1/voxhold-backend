@@ -412,88 +412,103 @@ func (r *Repository) Pin(
 	channelID int64,
 	messageID int64,
 	userID int64,
-) (message.Pin, bool, error) {
+) (message.PinnedMessage, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return message.Pin{}, false, fmt.Errorf(
+		return message.PinnedMessage{}, false, fmt.Errorf(
 			"begin pin message transaction: %w",
 			err,
 		)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	username, role, err := requireServerMemberWithRole(
+	_, role, err := requireServerMemberWithRole(
 		ctx, tx, serverID, userID,
 	)
 	if err != nil {
-		return message.Pin{}, false, err
+		return message.PinnedMessage{}, false, err
 	}
 
 	if role != serverDomain.RoleOwner &&
 		role != serverDomain.RoleAdmin {
-		return message.Pin{}, false, message.ErrPinForbidden
+		return message.PinnedMessage{}, false, message.ErrPinForbidden
 	}
 
 	if err := requireTextChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
-		return message.Pin{}, false, err
+		return message.PinnedMessage{}, false, err
 	}
 
-	if _, err := findMessage(
+	value, err := findMessage(
 		ctx, tx, channelID, messageID,
-	); err != nil {
-		return message.Pin{}, false, err
+	)
+	if err != nil {
+		return message.PinnedMessage{}, false, err
 	}
 
-	const query = `
+	const insertQuery = `
 	INSERT INTO message_pins (
 		message_id,
 		pinned_by_user_id
 	)
 	VALUES (?, ?)
 	ON CONFLICT(message_id) DO NOTHING
-	RETURNING pinned_at
 	`
 
-	pin := message.Pin{
-		MessageID: messageID,
-		ChannelID: channelID,
-		PinnedBy: message.Author{
-			UserID:   userID,
-			Username: username,
-		},
-	}
-
-	err = tx.QueryRowContext(
-		ctx, query, messageID, userID,
-	).Scan(&pin.PinnedAt)
+	result, err := tx.ExecContext(
+		ctx, insertQuery, messageID, userID,
+	)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			if err := tx.Commit(); err != nil {
-				return message.Pin{}, false, fmt.Errorf(
-					"commit unchanged pin transaction: %w",
-					err,
-				)
-			}
-
-			return message.Pin{}, false, nil
-		}
-
-		return message.Pin{}, false, fmt.Errorf(
+		return message.PinnedMessage{}, false, fmt.Errorf(
 			"insert message pin: %w",
 			err,
 		)
 	}
 
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return message.PinnedMessage{}, false, fmt.Errorf(
+			"count inserted message pins: %w",
+			err,
+		)
+	}
+	created := affected == 1
+
+	pinnedMessage := message.PinnedMessage{Message: value}
+	const selectQuery = `
+	SELECT
+		message_pins.pinned_by_user_id,
+		users.username,
+		message_pins.pinned_at
+	FROM message_pins
+	JOIN users
+		ON users.id = message_pins.pinned_by_user_id
+	WHERE message_pins.message_id = ?
+	`
+
+	err = tx.QueryRowContext(
+		ctx, selectQuery, messageID,
+	).Scan(
+		&pinnedMessage.PinnedBy.UserID,
+		&pinnedMessage.PinnedBy.Username,
+		&pinnedMessage.PinnedAt,
+	)
+	if err != nil {
+		return message.PinnedMessage{}, false, fmt.Errorf(
+			"select message pin: %w",
+			err,
+		)
+	}
+
 	if err := tx.Commit(); err != nil {
-		return message.Pin{}, false, fmt.Errorf(
+		return message.PinnedMessage{}, false, fmt.Errorf(
 			"commit pin message transaction: %w",
 			err,
 		)
 	}
 
-	return pin, true, nil
+	return pinnedMessage, created, nil
 }
 
 func (r *Repository) Unpin(

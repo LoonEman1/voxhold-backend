@@ -14,6 +14,7 @@ import (
 
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/channel"
+	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/readstate"
 	"voxhold-backend/internal/realtime"
 	serverDomain "voxhold-backend/internal/server"
@@ -121,6 +122,12 @@ type StreamMedia interface {
 	) error
 }
 
+type RealtimeProtector interface {
+	AcquireWebSocketIP(r *http.Request) (func(), bool)
+	AcquireWebSocketUser(userID int64) (func(), bool)
+	NewWebSocketEventLimiter() func() bool
+}
+
 type Handler struct {
 	authenticator Authenticator
 	channelAccess ChannelAccess
@@ -130,6 +137,7 @@ type Handler struct {
 	streamMedia   StreamMedia
 	hub           *realtime.Hub
 	voiceJoins    userLockSet
+	protector     RealtimeProtector
 }
 
 func NewHandler(
@@ -140,8 +148,9 @@ func NewHandler(
 	voiceMedia VoiceMedia,
 	streamMedia StreamMedia,
 	hub *realtime.Hub,
+	protectors ...RealtimeProtector,
 ) *Handler {
-	return &Handler{
+	handler := &Handler{
 		authenticator: authenticator,
 		channelAccess: channelAccess,
 		memberships:   memberships,
@@ -150,6 +159,11 @@ func NewHandler(
 		streamMedia:   streamMedia,
 		hub:           hub,
 	}
+	if len(protectors) > 0 {
+		handler.protector = protectors[0]
+	}
+
+	return handler
 }
 func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
@@ -164,11 +178,31 @@ func (h *Handler) connect(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	if h.protector != nil {
+		releaseIP, ok := h.protector.AcquireWebSocketIP(r)
+		if !ok {
+			w.Header().Set("Retry-After", "30")
+			httpapi.WriteError(
+				w,
+				http.StatusTooManyRequests,
+				"too many WebSocket connections",
+			)
+			return
+		}
+		defer releaseIP()
+	}
+
 	connection, err := websocket.Accept(
 		w,
 		r,
 		&websocket.AcceptOptions{
-			OriginPatterns: []string{"*"}, 
+			// The packaged Wails client is served from this fixed local origin.
+			// Keep the allow-list narrow: authentication still happens in the
+			// first WebSocket event and arbitrary web origins remain rejected.
+			OriginPatterns: []string{
+				"http://wails.localhost",
+				"https://wails.localhost",
+			},
 		},
 	)
 	if err != nil {
@@ -293,6 +327,24 @@ func (h *Handler) connect(
 			"internal server error",
 		)
 		return
+	}
+
+	if h.protector != nil {
+		releaseUser, ok := h.protector.AcquireWebSocketUser(userID)
+		if !ok {
+			h.writeError(
+				connection,
+				event.RequestID,
+				realtime.ErrorInvalidState,
+				"too many active connections for this account",
+			)
+			_ = connection.Close(
+				websocket.StatusTryAgainLater,
+				"too many active connections",
+			)
+			return
+		}
+		defer releaseUser()
 	}
 
 	joinedServers, err := h.memberships.ListByUserID(
@@ -485,6 +537,11 @@ func (h *Handler) readLoop(
 	connection *websocket.Conn,
 	client *realtime.Client,
 ) error {
+	allowEvent := func() bool { return true }
+	if h.protector != nil {
+		allowEvent = h.protector.NewWebSocketEventLimiter()
+	}
+
 	for {
 		var event realtime.IncomingEvent
 
@@ -494,6 +551,14 @@ func (h *Handler) readLoop(
 			&event,
 		); err != nil {
 			return err
+		}
+
+		if !allowEvent() {
+			_ = connection.Close(
+				websocket.StatusPolicyViolation,
+				"event rate limit exceeded",
+			)
+			return errors.New("WebSocket event rate limit exceeded")
 		}
 
 		if err := h.handleIncomingEvent(

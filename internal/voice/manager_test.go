@@ -72,6 +72,51 @@ func TestManagerRelaysOpusBetweenPeers(t *testing.T) {
 	}
 }
 
+func TestManagerRelaysEveryParticipantToThreePeers(t *testing.T) {
+	sink := newTestSignalSink()
+	manager := newTestManager(t, sink)
+	sink.manager = manager
+
+	peers := []*testPeer{
+		newTestPeer(t, manager, "first"),
+		newTestPeer(t, manager, "second"),
+		newTestPeer(t, manager, "third"),
+	}
+	for index, peer := range peers {
+		sink.addPeer(peer)
+		if err := manager.Join(
+			peer.connectionID,
+			int64(index+1),
+			10,
+			100,
+			false,
+			false,
+		); err != nil {
+			t.Fatalf("join %s peer: %v", peer.connectionID, err)
+		}
+		peer.startAudio(t)
+		waitForRoomTrackCount(t, manager, 100, index+1)
+	}
+
+	for _, peer := range peers {
+		ssrcs := make(map[uint32]struct{})
+		deadline := time.After(10 * time.Second)
+		for len(ssrcs) < len(peers)-1 {
+			select {
+			case packet := <-peer.incomingRTP:
+				ssrcs[packet.SSRC] = struct{}{}
+			case <-deadline:
+				t.Fatalf(
+					"%s received %d of %d remote audio tracks",
+					peer.connectionID,
+					len(ssrcs),
+					len(peers)-1,
+				)
+			}
+		}
+	}
+}
+
 func TestManagerRestartsVoiceICEWithoutReplacingSession(t *testing.T) {
 	sink := newTestSignalSink()
 	manager := newTestManager(t, sink)
@@ -604,4 +649,28 @@ func waitForPublishedTrack(
 	}
 
 	t.Fatal("server did not receive the first Opus track")
+}
+
+func waitForRoomTrackCount(
+	t *testing.T,
+	manager *Manager,
+	channelID int64,
+	want int,
+) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		manager.mu.RLock()
+		voiceRoom := manager.rooms[channelID]
+		manager.mu.RUnlock()
+
+		if voiceRoom != nil && len(voiceRoom.trackSnapshot()) == want {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("voice room did not publish %d tracks", want)
 }

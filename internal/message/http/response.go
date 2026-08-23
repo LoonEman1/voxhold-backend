@@ -48,6 +48,19 @@ type pinnedMessageResponse struct {
 	PinnedAt int64           `json:"pinned_at"`
 }
 
+func newPinnedMessageResponse(
+	value message.PinnedMessage,
+) pinnedMessageResponse {
+	return pinnedMessageResponse{
+		Message: newMessageResponse(value.Message),
+		PinnedBy: authorResponse{
+			UserID:   value.PinnedBy.UserID,
+			Username: value.PinnedBy.Username,
+		},
+		PinnedAt: value.PinnedAt,
+	}
+}
+
 func newPinnedMessagesResponse(
 	values []message.PinnedMessage,
 ) []pinnedMessageResponse {
@@ -60,14 +73,7 @@ func newPinnedMessagesResponse(
 	for _, value := range values {
 		response = append(
 			response,
-			pinnedMessageResponse{
-				Message: newMessageResponse(value.Message),
-				PinnedBy: authorResponse{
-					UserID:   value.PinnedBy.UserID,
-					Username: value.PinnedBy.Username,
-				},
-				PinnedAt: value.PinnedAt,
-			},
+			newPinnedMessageResponse(value),
 		)
 	}
 

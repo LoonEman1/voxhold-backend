@@ -51,7 +51,7 @@ type Service interface {
 		channelID int64,
 		messageID int64,
 		userID int64,
-	) error
+	) (message.PinnedMessage, error)
 
 	Unpin(
 		ctx context.Context,
@@ -433,20 +433,41 @@ func (h *Handler) pin(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	h.changePin(w, r, true)
+	userID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+
+	serverID, channelID, messageID, ok :=
+		messagePathValues(w, r)
+	if !ok {
+		return
+	}
+
+	pinnedMessage, err := h.service.Pin(
+		r.Context(),
+		serverID,
+		channelID,
+		messageID,
+		userID,
+	)
+	if err != nil {
+		writeMessageOperationError(
+			w, "pin message", channelID, err,
+		)
+		return
+	}
+
+	httpapi.WriteJSON(
+		w,
+		http.StatusOK,
+		newPinnedMessageResponse(pinnedMessage),
+	)
 }
 
 func (h *Handler) unpin(
 	w http.ResponseWriter,
 	r *http.Request,
-) {
-	h.changePin(w, r, false)
-}
-
-func (h *Handler) changePin(
-	w http.ResponseWriter,
-	r *http.Request,
-	pinned bool,
 ) {
 	userID, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
@@ -459,31 +480,15 @@ func (h *Handler) changePin(
 		return
 	}
 
-	operation := "pin message"
-	var err error
-
-	if pinned {
-		err = h.service.Pin(
-			r.Context(),
-			serverID,
-			channelID,
-			messageID,
-			userID,
-		)
-	} else {
-		operation = "unpin message"
-		err = h.service.Unpin(
-			r.Context(),
-			serverID,
-			channelID,
-			messageID,
-			userID,
-		)
-	}
-
-	if err != nil {
+	if err := h.service.Unpin(
+		r.Context(),
+		serverID,
+		channelID,
+		messageID,
+		userID,
+	); err != nil {
 		writeMessageOperationError(
-			w, operation, channelID, err,
+			w, "unpin message", channelID, err,
 		)
 		return
 	}

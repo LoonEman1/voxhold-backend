@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/antiabuse"
+	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/voice"
 
@@ -25,6 +28,8 @@ import (
 	channelhttp "voxhold-backend/internal/channel/http"
 	channelSqlite "voxhold-backend/internal/channel/sqlite"
 
+	diagnosticshttp "voxhold-backend/internal/diagnostics/http"
+	diagnosticsSqlite "voxhold-backend/internal/diagnostics/sqlite"
 	inviteDomain "voxhold-backend/internal/invite"
 	invitehttp "voxhold-backend/internal/invite/http"
 	inviteSqlite "voxhold-backend/internal/invite/sqlite"
@@ -53,6 +58,12 @@ const (
 )
 
 func main() {
+	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	antiAbuseGuard := antiabuse.New(antiAbuseConfig)
+
 	db, err := storage.Open()
 	if err != nil {
 		log.Fatal(err)
@@ -149,7 +160,10 @@ func main() {
 		realtimeHub,
 		serverEventPublisher,
 	)
-	accountHandler := accounthttp.NewHandler(accountService)
+	accountHandler := accounthttp.NewHandler(
+		accountService,
+		antiAbuseGuard,
+	)
 
 	serverRepository := serverSqlite.NewRepository(db)
 	serverService := serverDomain.NewService(
@@ -204,6 +218,10 @@ func main() {
 	)
 	readHandler := readstatehttp.NewHandler(readService)
 
+	diagnosticsRepository := diagnosticsSqlite.NewRepository(db)
+	diagnosticsService := diagnostics.NewService(diagnosticsRepository)
+	diagnosticsHandler := diagnosticshttp.NewHandler(diagnosticsService)
+
 	webSocketHandler := realtimehttp.NewHandler(
 		accountService,
 		channelService,
@@ -212,6 +230,7 @@ func main() {
 		voiceManager,
 		streamManager,
 		realtimeHub,
+		antiAbuseGuard,
 	)
 
 	mux := http.NewServeMux()
@@ -244,17 +263,28 @@ func main() {
 		mux,
 		accountHandler.RequireAuth,
 	)
+	diagnosticsHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
 
 	webSocketHandler.RegisterRoutes(mux)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	port := os.Getenv("HTTP_PORT")
 	if port == "" {
 		port = "8080"
 	}
+	listenAddress := os.Getenv("HTTP_LISTEN_ADDRESS")
+	if listenAddress == "" {
+		listenAddress = "0.0.0.0"
+	}
 
 	server := &http.Server{
-		Addr:              ":" + port,
-		Handler:           corsMiddleware(mux),
+		Addr:              net.JoinHostPort(listenAddress, port),
+		Handler:           antiAbuseGuard.ProtectHTTP(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

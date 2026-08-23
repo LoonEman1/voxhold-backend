@@ -203,12 +203,12 @@ func (s *Service) Pin(
 	channelID int64,
 	messageID int64,
 	userID int64,
-) error {
+) (PinnedMessage, error) {
 	if serverID <= 0 || channelID <= 0 || messageID <= 0 {
-		return ErrMessageNotFound
+		return PinnedMessage{}, ErrMessageNotFound
 	}
 
-	pin, created, err := s.repository.Pin(
+	pinnedMessage, created, err := s.repository.Pin(
 		ctx,
 		serverID,
 		channelID,
@@ -216,14 +216,14 @@ func (s *Service) Pin(
 		userID,
 	)
 	if err != nil {
-		return fmt.Errorf("pin message: %w", err)
+		return PinnedMessage{}, fmt.Errorf("pin message: %w", err)
 	}
 
 	if created {
-		s.events.PublishMessagePinned(pin)
+		s.events.PublishMessagePinned(pinnedMessage)
 	}
 
-	return nil
+	return pinnedMessage, nil
 }
 
 func (s *Service) Unpin(

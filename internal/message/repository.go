@@ -43,7 +43,7 @@ type Repository interface {
 		channelID int64,
 		messageID int64,
 		userID int64,
-	) (Pin, bool, error)
+	) (PinnedMessage, bool, error)
 
 	Unpin(
 		ctx context.Context,

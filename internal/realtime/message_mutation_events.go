@@ -11,10 +11,11 @@ type MessageDeletedData struct {
 }
 
 type MessagePinnedData struct {
-	ChannelID int64             `json:"channel_id"`
-	MessageID int64             `json:"message_id"`
-	PinnedBy  MessageAuthorData `json:"pinned_by"`
-	PinnedAt  int64             `json:"pinned_at"`
+	ChannelID int64              `json:"channel_id"`
+	MessageID int64              `json:"message_id"`
+	Message   MessageCreatedData `json:"message"`
+	PinnedBy  MessageAuthorData  `json:"pinned_by"`
+	PinnedAt  int64              `json:"pinned_at"`
 }
 
 type MessageUnpinnedData struct {
