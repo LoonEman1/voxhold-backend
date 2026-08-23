@@ -316,10 +316,10 @@ func (r *Repository) Accept(
 	ctx context.Context,
 	inviteID int64,
 	inviteeUserID int64,
-) (int64, server.ServerMember, error) {
+) (server.JoinedServer, server.ServerMember, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, server.ServerMember{}, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 			"begin accept invitation transaction: %w",
 			err,
 		)
@@ -353,7 +353,7 @@ func (r *Repository) Accept(
 	).Scan(&serverID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return 0, server.ServerMember{}, fmt.Errorf(
+			return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 				"accept invitation: %w",
 				err,
 			)
@@ -382,23 +382,23 @@ func (r *Repository) Accept(
 		)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return 0, server.ServerMember{},
+				return server.JoinedServer{}, server.ServerMember{},
 					invite.ErrInviteNotFound
 			}
 
-			return 0, server.ServerMember{}, fmt.Errorf(
+			return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 				"get invitation state: %w",
 				err,
 			)
 		}
 
 		if status == invite.StatusExpired {
-			return 0, server.ServerMember{},
+			return server.JoinedServer{}, server.ServerMember{},
 				invite.ErrInviteExpired
 		}
 
 		if status != invite.StatusPending {
-			return 0, server.ServerMember{},
+			return server.JoinedServer{}, server.ServerMember{},
 				invite.ErrInviteNotPending
 		}
 
@@ -418,24 +418,24 @@ func (r *Repository) Accept(
 				invite.StatusPending,
 			)
 			if err != nil {
-				return 0, server.ServerMember{}, fmt.Errorf(
+				return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 					"expire invitation: %w",
 					err,
 				)
 			}
 
 			if err := tx.Commit(); err != nil {
-				return 0, server.ServerMember{}, fmt.Errorf(
+				return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 					"commit expired invitation: %w",
 					err,
 				)
 			}
 
-			return 0, server.ServerMember{},
+			return server.JoinedServer{}, server.ServerMember{},
 				invite.ErrInviteExpired
 		}
 
-		return 0, server.ServerMember{},
+		return server.JoinedServer{}, server.ServerMember{},
 			invite.ErrInviteNotPending
 	}
 
@@ -457,7 +457,7 @@ func (r *Repository) Accept(
 		server.RoleMember,
 	)
 	if err != nil {
-		return 0, server.ServerMember{}, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 			"add invited server member: %w",
 			err,
 		)
@@ -470,17 +470,69 @@ func (r *Repository) Accept(
 		inviteeUserID,
 	)
 	if err != nil {
-		return 0, server.ServerMember{}, err
+		return server.JoinedServer{}, server.ServerMember{}, err
+	}
+
+	acceptedServer, err := selectJoinedServer(
+		ctx,
+		tx,
+		serverID,
+		inviteeUserID,
+	)
+	if err != nil {
+		return server.JoinedServer{}, server.ServerMember{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, server.ServerMember{}, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, fmt.Errorf(
 			"commit accept invitation transaction: %w",
 			err,
 		)
 	}
 
-	return serverID, acceptedMember, nil
+	return acceptedServer, acceptedMember, nil
+}
+
+func selectJoinedServer(
+	ctx context.Context,
+	tx *sql.Tx,
+	serverID int64,
+	userID int64,
+) (server.JoinedServer, error) {
+	const query = `
+	SELECT
+		servers.id,
+		servers.name,
+		servers.created_by,
+		servers.created_at,
+		server_members.role,
+		server_members.joined_at
+	FROM servers
+	JOIN server_members
+		ON server_members.server_id = servers.id
+		AND server_members.user_id = ?
+	WHERE servers.id = ?
+	`
+
+	var joinedServer server.JoinedServer
+
+	if err := tx.QueryRowContext(
+		ctx, query, userID, serverID,
+	).Scan(
+		&joinedServer.ID,
+		&joinedServer.Name,
+		&joinedServer.CreatedBy,
+		&joinedServer.CreatedAt,
+		&joinedServer.Role,
+		&joinedServer.JoinedAt,
+	); err != nil {
+		return server.JoinedServer{}, fmt.Errorf(
+			"select accepted server: %w",
+			err,
+		)
+	}
+
+	return joinedServer, nil
 }
 
 func selectAcceptedMember(

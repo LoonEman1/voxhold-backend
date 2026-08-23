@@ -24,7 +24,7 @@ type Repository interface {
 		ctx context.Context,
 		inviteID int64,
 		inviteeUserID int64,
-	) (int64, server.ServerMember, error)
+	) (server.JoinedServer, server.ServerMember, error)
 
 	Decline(
 		ctx context.Context,
@@ -51,5 +51,5 @@ type Repository interface {
 		ctx context.Context,
 		tokenHash []byte,
 		userID int64,
-	) (int64, server.ServerMember, bool, error)
+	) (server.JoinedServer, server.ServerMember, bool, error)
 }
