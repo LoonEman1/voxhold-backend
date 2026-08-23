@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"voxhold-backend/internal/server"
 )
 
 const directInviteLifetime = 7 * 24 * time.Hour
@@ -74,27 +76,27 @@ func (s *Service) AcceptLink(
 	ctx context.Context,
 	token string,
 	userID int64,
-) (int64, bool, error) {
+) (server.JoinedServer, bool, error) {
 	token = strings.TrimSpace(token)
 	if token == "" || userID <= 0 {
-		return 0, false, ErrLinkInvalid
+		return server.JoinedServer{}, false, ErrLinkInvalid
 	}
 
-	serverID, member, alreadyMember, err := s.repository.AcceptLink(
+	joinedServer, member, alreadyMember, err := s.repository.AcceptLink(
 		ctx,
 		hashLinkToken(token),
 		userID,
 	)
 	if err != nil {
-		return 0, false, fmt.Errorf("accept invite link: %w", err)
+		return server.JoinedServer{}, false, fmt.Errorf("accept invite link: %w", err)
 	}
 
 	if !alreadyMember {
-		s.memberEvents.PublishServerMemberJoined(serverID, member)
-		s.memberships.AddUserToServer(userID, serverID)
+		s.memberEvents.PublishServerMemberJoined(joinedServer.ID, member)
+		s.memberships.AddUserToServer(userID, joinedServer.ID)
 	}
 
-	return serverID, alreadyMember, nil
+	return joinedServer, alreadyMember, nil
 }
 
 func NewService(
@@ -169,34 +171,34 @@ func (s *Service) Accept(
 	ctx context.Context,
 	inviteID int64,
 	inviteeUserID int64,
-) error {
+) (server.JoinedServer, error) {
 	if inviteID <= 0 || inviteeUserID <= 0 {
-		return ErrInviteNotFound
+		return server.JoinedServer{}, ErrInviteNotFound
 	}
 
-	serverID, member, err := s.repository.Accept(
+	joinedServer, member, err := s.repository.Accept(
 		ctx,
 		inviteID,
 		inviteeUserID,
 	)
 	if err != nil {
-		return fmt.Errorf(
+		return server.JoinedServer{}, fmt.Errorf(
 			"accept invitation: %w",
 			err,
 		)
 	}
 
 	s.memberEvents.PublishServerMemberJoined(
-		serverID,
+		joinedServer.ID,
 		member,
 	)
 
 	s.memberships.AddUserToServer(
 		inviteeUserID,
-		serverID,
+		joinedServer.ID,
 	)
 
-	return nil
+	return joinedServer, nil
 }
 
 func (s *Service) Decline(

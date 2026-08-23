@@ -9,6 +9,7 @@ import (
 
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/invite"
+	"voxhold-backend/internal/server"
 )
 
 type Service interface {
@@ -28,7 +29,7 @@ type Service interface {
 		ctx context.Context,
 		inviteID int64,
 		inviteeUserID int64,
-	) error
+	) (server.JoinedServer, error)
 
 	Decline(
 		ctx context.Context,
@@ -52,7 +53,7 @@ type Service interface {
 		ctx context.Context,
 		token string,
 		userID int64,
-	) (int64, bool, error)
+	) (server.JoinedServer, bool, error)
 }
 
 type Handler struct {
@@ -138,9 +139,24 @@ type linkPreviewResponse struct {
 	AllowRegistration bool   `json:"allow_registration"`
 }
 
-type linkAcceptanceResponse struct {
-	ServerID      int64 `json:"server_id"`
-	AlreadyMember bool  `json:"already_member"`
+type joinedServerResponse struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	CreatedBy int64  `json:"created_by"`
+	CreatedAt int64  `json:"created_at"`
+	Role      string `json:"role"`
+	JoinedAt  int64  `json:"joined_at"`
+}
+
+func newJoinedServerResponse(value server.JoinedServer) joinedServerResponse {
+	return joinedServerResponse{
+		ID:        value.ID,
+		Name:      value.Name,
+		CreatedBy: value.CreatedBy,
+		CreatedAt: value.CreatedAt,
+		Role:      string(value.Role),
+		JoinedAt:  value.JoinedAt,
+	}
 }
 
 func (h *Handler) createLink(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +260,7 @@ func (h *Handler) acceptLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverID, alreadyMember, err := h.service.AcceptLink(
+	joinedServer, _, err := h.service.AcceptLink(
 		r.Context(),
 		request.Token,
 		userID,
@@ -260,10 +276,7 @@ func (h *Handler) acceptLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpapi.WriteJSON(w, http.StatusOK, linkAcceptanceResponse{
-		ServerID:      serverID,
-		AlreadyMember: alreadyMember,
-	})
+	httpapi.WriteJSON(w, http.StatusOK, newJoinedServerResponse(joinedServer))
 }
 
 type createDirectRequest struct {
@@ -451,7 +464,7 @@ func (h *Handler) accept(
 		return
 	}
 
-	err := h.service.Accept(
+	joinedServer, err := h.service.Accept(
 		r.Context(),
 		inviteID,
 		userID,
@@ -461,7 +474,7 @@ func (h *Handler) accept(
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	httpapi.WriteJSON(w, http.StatusOK, newJoinedServerResponse(joinedServer))
 }
 
 func (h *Handler) decline(

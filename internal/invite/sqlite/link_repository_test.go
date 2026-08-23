@@ -153,12 +153,12 @@ func TestExistingUserAcceptsRegisteredOnlyLink(t *testing.T) {
 		t.Fatalf("registered-only link allowed registration: %v", err)
 	}
 
-	serverID, member, alreadyMember, err := linkRepository.AcceptLink(ctx, tokenHash[:], 2)
+	joinedServer, member, alreadyMember, err := linkRepository.AcceptLink(ctx, tokenHash[:], 2)
 	if err != nil {
 		t.Fatalf("accept registered-only link: %v", err)
 	}
-	if serverID != 1 || member.UserID != 2 || alreadyMember {
-		t.Fatalf("unexpected acceptance: server=%d member=%#v already=%v", serverID, member, alreadyMember)
+	if joinedServer.ID != 1 || member.UserID != 2 || alreadyMember {
+		t.Fatalf("unexpected acceptance: server=%d member=%#v already=%v", joinedServer.ID, member, alreadyMember)
 	}
 	assertCount(t, db, "SELECT use_count FROM server_invite_links WHERE id = ?", createdLink.ID, 1)
 

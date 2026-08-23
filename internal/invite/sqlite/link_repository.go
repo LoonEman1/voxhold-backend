@@ -135,10 +135,10 @@ func (r *Repository) AcceptLink(
 	ctx context.Context,
 	tokenHash []byte,
 	userID int64,
-) (int64, server.ServerMember, bool, error) {
+) (server.JoinedServer, server.ServerMember, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, server.ServerMember{}, false, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, false, fmt.Errorf(
 			"begin accept invite link transaction: %w",
 			err,
 		)
@@ -186,10 +186,10 @@ func (r *Repository) AcceptLink(
 				tokenHash,
 			).Scan(&serverID); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
-					return 0, server.ServerMember{}, false, invite.ErrLinkInvalid
+					return server.JoinedServer{}, server.ServerMember{}, false, invite.ErrLinkInvalid
 				}
 
-				return 0, server.ServerMember{}, false, fmt.Errorf(
+				return server.JoinedServer{}, server.ServerMember{}, false, fmt.Errorf(
 					"select existing invite link member: %w",
 					err,
 				)
@@ -197,20 +197,25 @@ func (r *Repository) AcceptLink(
 
 			member, err := selectAcceptedMember(ctx, tx, serverID, userID)
 			if err != nil {
-				return 0, server.ServerMember{}, false, err
+				return server.JoinedServer{}, server.ServerMember{}, false, err
+			}
+
+			joinedServer, err := selectJoinedServer(ctx, tx, serverID, userID)
+			if err != nil {
+				return server.JoinedServer{}, server.ServerMember{}, false, err
 			}
 
 			if err := tx.Commit(); err != nil {
-				return 0, server.ServerMember{}, false, fmt.Errorf(
+				return server.JoinedServer{}, server.ServerMember{}, false, fmt.Errorf(
 					"commit existing invite link membership: %w",
 					err,
 				)
 			}
 
-			return serverID, member, true, nil
+			return joinedServer, member, true, nil
 		}
 
-		return 0, server.ServerMember{}, false, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, false, fmt.Errorf(
 			"consume invite link: %w",
 			err,
 		)
@@ -229,7 +234,7 @@ func (r *Repository) AcceptLink(
 		userID,
 		server.RoleMember,
 	); err != nil {
-		return 0, server.ServerMember{}, false, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, false, fmt.Errorf(
 			"add invite link server member: %w",
 			err,
 		)
@@ -237,15 +242,20 @@ func (r *Repository) AcceptLink(
 
 	member, err := selectAcceptedMember(ctx, tx, consumedServerID, userID)
 	if err != nil {
-		return 0, server.ServerMember{}, false, err
+		return server.JoinedServer{}, server.ServerMember{}, false, err
+	}
+
+	joinedServer, err := selectJoinedServer(ctx, tx, consumedServerID, userID)
+	if err != nil {
+		return server.JoinedServer{}, server.ServerMember{}, false, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, server.ServerMember{}, false, fmt.Errorf(
+		return server.JoinedServer{}, server.ServerMember{}, false, fmt.Errorf(
 			"commit accept invite link transaction: %w",
 			err,
 		)
 	}
 
-	return consumedServerID, member, false, nil
+	return joinedServer, member, false, nil
 }
