@@ -18,6 +18,8 @@ type Manager struct {
 	sink          SignalSink
 	udpMux        ice.UDPMux
 
+	videoCodecDescriptors []videoCodecDescriptor
+
 	mu                        sync.RWMutex
 	rooms                     map[int64]*room
 	sessions                  map[string]*session
@@ -100,11 +102,10 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 	}
 
 	media := &webrtc.MediaEngine{}
-	for _, codec := range streamVideoCodecs() {
-		if err := media.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
-			_ = udpMux.Close()
-			return nil, fmt.Errorf("register stream video codec %s: %w", codec.MimeType, err)
-		}
+	descriptors, err := registerStreamCodecs(media)
+	if err != nil {
+		_ = udpMux.Close()
+		return nil, err
 	}
 	if err := media.RegisterCodec(
 		webrtc.RTPCodecParameters{
@@ -146,6 +147,7 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 		configuration:             newWebRTCConfiguration(config),
 		sink:                      sink,
 		udpMux:                    udpMux,
+		videoCodecDescriptors:     descriptors,
 		rooms:                     make(map[int64]*room),
 		sessions:                  make(map[string]*session),
 		maxViewers:                config.MaxViewers,
@@ -217,7 +219,7 @@ func (m *Manager) Start(
 		m.removeRoom(channelID, streamRoom)
 		return fmt.Errorf("add incoming video transceiver: %w", err)
 	}
-	if err = videoTransceiver.SetCodecPreferences(codecParameters(codec)); err != nil {
+	if err = videoTransceiver.SetCodecPreferences(codecParameters(m, codec)); err != nil {
 		_ = peer.Close()
 		m.removeRoom(channelID, streamRoom)
 		return fmt.Errorf("prefer incoming %s stream codec: %w", codec, err)
@@ -281,28 +283,196 @@ func validCodec(codec Codec) bool {
 	}
 }
 
+// videoCodecDescriptor describes one registered primary video payload type
+// together with its optional RTX retransmission payload type.
+type videoCodecDescriptor struct {
+	primary webrtc.RTPCodecParameters
+	rtxPT   uint8
+}
+
+const (
+	vp8PrimaryPT   = 96
+	vp8RTXPT       = 97
+	vp9PrimaryPT   = 98
+	vp9RTXPT       = 99
+	h264CBPrimary  = 102
+	h264CBRTX      = 103
+	h264LegPrimary = 104
+	h264LegRTX     = 105
+	av1PrimaryPT   = 45
+	av1RTXPT       = 46
+)
+
 func streamVideoCodecs() []webrtc.RTPCodecParameters {
+	result := make([]webrtc.RTPCodecParameters, 0)
+	for _, descriptor := range streamVideoCodecDescriptors() {
+		result = append(result, descriptor.primary)
+	}
+	return result
+}
+
+func streamVideoCodecDescriptors() []videoCodecDescriptor {
 	feedback := []webrtc.RTCPFeedback{
 		{Type: "goog-remb"},
 		{Type: "ccm", Parameter: "fir"},
 		{Type: "nack"},
 		{Type: "nack", Parameter: "pli"},
 	}
-	return []webrtc.RTPCodecParameters{
-		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: feedback}, PayloadType: 96},
-		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000, SDPFmtpLine: "profile-id=0", RTCPFeedback: feedback}, PayloadType: 98},
-		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", RTCPFeedback: feedback}, PayloadType: 102},
-		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeAV1, ClockRate: 90000, RTCPFeedback: feedback}, PayloadType: 45},
+	return []videoCodecDescriptor{
+		{
+			primary: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:     webrtc.MimeTypeVP8,
+					ClockRate:    90000,
+					RTCPFeedback: feedback,
+				},
+				PayloadType: vp8PrimaryPT,
+			},
+			rtxPT: vp8RTXPT,
+		},
+		{
+			primary: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:     webrtc.MimeTypeVP9,
+					ClockRate:    90000,
+					SDPFmtpLine:  "profile-id=0",
+					RTCPFeedback: feedback,
+				},
+				PayloadType: vp9PrimaryPT,
+			},
+			rtxPT: vp9RTXPT,
+		},
+		{
+			// Constrained Baseline is the interoperable WebRTC profile per
+			// RFC 7742; it must be offered before any legacy value.
+			primary: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType: webrtc.MimeTypeH264,
+					ClockRate: 90000,
+					SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+					RTCPFeedback: feedback,
+				},
+				PayloadType: h264CBPrimary,
+			},
+			rtxPT: h264CBRTX,
+		},
+		{
+			// Legacy profile kept on a separate payload type for older web
+			// clients that match exactly on 42001f.
+			primary: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType: webrtc.MimeTypeH264,
+					ClockRate: 90000,
+					SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+					RTCPFeedback: feedback,
+				},
+				PayloadType: h264LegPrimary,
+			},
+			rtxPT: h264LegRTX,
+		},
+		{
+			primary: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:     webrtc.MimeTypeAV1,
+					ClockRate:    90000,
+					RTCPFeedback: feedback,
+				},
+				PayloadType: av1PrimaryPT,
+			},
+			rtxPT: av1RTXPT,
+		},
 	}
 }
 
-func codecParameters(codec Codec) []webrtc.RTPCodecParameters {
-	for _, candidate := range streamVideoCodecs() {
-		if codecForMimeType(candidate.MimeType) == codec {
-			return []webrtc.RTPCodecParameters{candidate}
+// registerStreamCodecs registers every primary video codec and its paired
+// video/rtx payload type into the media engine.
+func registerStreamCodecs(
+	media *webrtc.MediaEngine,
+) ([]videoCodecDescriptor, error) {
+	rtxFeedback := []webrtc.RTCPFeedback{{Type: "goog-remb"}}
+	descriptors := make([]videoCodecDescriptor, 0, 5)
+	for _, descriptor := range streamVideoCodecDescriptors() {
+		if err := media.RegisterCodec(
+			descriptor.primary,
+			webrtc.RTPCodecTypeVideo,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"register stream video codec %s: %w",
+				descriptor.primary.MimeType,
+				err,
+			)
+		}
+		rtx := webrtc.RTPCodecParameters{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     "video/rtx",
+				ClockRate:    90000,
+				SDPFmtpLine:  fmt.Sprintf("apt=%d", descriptor.primary.PayloadType),
+				RTCPFeedback: rtxFeedback,
+			},
+			PayloadType: webrtc.PayloadType(descriptor.rtxPT),
+		}
+		if err := media.RegisterCodec(rtx, webrtc.RTPCodecTypeVideo); err != nil {
+			return nil, fmt.Errorf(
+				"register stream video rtx for %s: %w",
+				descriptor.primary.MimeType,
+				err,
+			)
+		}
+		descriptors = append(descriptors, descriptor)
+	}
+	return descriptors, nil
+}
+
+func codecParameters(m *Manager, codec Codec) []webrtc.RTPCodecParameters {
+	result := make([]webrtc.RTPCodecParameters, 0, 4)
+	for _, descriptor := range m.videoCodecDescriptors {
+		if codecForMimeType(descriptor.primary.MimeType) == codec {
+			result = append(result, descriptor.primary)
+			if rtx, ok := rtxForDescriptor(descriptor); ok {
+				result = append(result, rtx)
+			}
 		}
 	}
-	return nil
+	return result
+}
+
+// viewerCodecPreferences selects the exact registered payload types that match
+// the capability the publisher actually negotiated, plus its paired RTX
+// entry. It never substitutes one H.264 profile for another after ingest.
+func (m *Manager) viewerCodecPreferences(
+	capability webrtc.RTPCodecCapability,
+) []webrtc.RTPCodecParameters {
+	for _, descriptor := range m.videoCodecDescriptors {
+		primary := descriptor.primary.RTPCodecCapability
+		if !strings.EqualFold(primary.MimeType, capability.MimeType) ||
+			primary.ClockRate != capability.ClockRate ||
+			!strings.EqualFold(primary.SDPFmtpLine, capability.SDPFmtpLine) {
+
+			continue
+		}
+		result := []webrtc.RTPCodecParameters{descriptor.primary}
+		if rtx, ok := rtxForDescriptor(descriptor); ok {
+			result = append(result, rtx)
+		}
+		return result
+	}
+	return []webrtc.RTPCodecParameters{{RTPCodecCapability: capability}}
+}
+
+func rtxForDescriptor(
+	descriptor videoCodecDescriptor,
+) (webrtc.RTPCodecParameters, bool) {
+	if descriptor.rtxPT == 0 {
+		return webrtc.RTPCodecParameters{}, false
+	}
+	return webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    "video/rtx",
+			ClockRate:   90000,
+			SDPFmtpLine: fmt.Sprintf("apt=%d", descriptor.primary.PayloadType),
+		},
+		PayloadType: webrtc.PayloadType(descriptor.rtxPT),
+	}, true
 }
 
 func codecForMimeType(mimeType string) Codec {
@@ -407,6 +577,36 @@ func (m *Manager) AddICECandidate(
 		return ErrSessionNotFound
 	}
 	return value.addICECandidate(candidate)
+}
+
+// Recovery actions accepted from a server-mode viewer.
+const (
+	RecoveryActionKeyframe   = "keyframe"
+	RecoveryActionICERestart = "ice_restart"
+)
+
+var ErrRecoveryActionInvalid = errors.New("stream recovery action is invalid")
+
+// RequestRecovery applies a bounded viewer-initiated recovery action to the
+// session on this connection. The session enforces its own cooldowns; rate
+// limited requests are silently ignored and never close the session.
+func (m *Manager) RequestRecovery(
+	connectionID string,
+	action string,
+) error {
+	switch action {
+	case RecoveryActionKeyframe, RecoveryActionICERestart:
+	default:
+		return ErrRecoveryActionInvalid
+	}
+	value := m.session(connectionID)
+	if value == nil {
+		return ErrSessionNotFound
+	}
+	if value.role != sessionViewer {
+		return errors.New("stream recovery requires a viewer session")
+	}
+	return value.requestRecovery(action)
 }
 
 func (m *Manager) Leave(connectionID string) {

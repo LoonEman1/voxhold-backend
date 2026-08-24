@@ -44,6 +44,7 @@ import (
 	readstateSqlite "voxhold-backend/internal/readstate/sqlite"
 
 	realtimehttp "voxhold-backend/internal/realtime/http"
+	webrtcconfighttp "voxhold-backend/internal/webrtcconfig/http"
 
 	realtimeDomain "voxhold-backend/internal/realtime"
 )
@@ -119,6 +120,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if !equalICEConfig(voiceConfig, streamConfig) {
+		log.Fatal(
+			"WEBRTC_ICE_* environment values must be identical for voice and stream; " +
+				"voice and stream ICE configurations diverge",
+		)
+	}
+
 	streamManager, err := stream.NewManager(
 		streamConfig,
 		realtimeDomain.NewStreamSignalSink(realtimeHub),
@@ -233,8 +241,18 @@ func main() {
 		antiAbuseGuard,
 	)
 
+	webrtcConfigHandler := webrtcconfighttp.NewHandler(
+		voiceConfig.ICEServerURLs,
+		voiceConfig.ICEUsername,
+		voiceConfig.ICECredential,
+	)
+
 	mux := http.NewServeMux()
 	accountHandler.RegisterRoutes(mux)
+	webrtcConfigHandler.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
 	serverHandler.RegisterRoutes(
 		mux,
 		accountHandler.RequireAuth,
@@ -334,4 +352,17 @@ func main() {
 	realtimeHub.Close()
 
 	log.Println("server stopped")
+}
+
+func equalICEConfig(voice voice.Config, stream stream.Config) bool {
+	if len(voice.ICEServerURLs) != len(stream.ICEServerURLs) {
+		return false
+	}
+	for index, url := range voice.ICEServerURLs {
+		if stream.ICEServerURLs[index] != url {
+			return false
+		}
+	}
+	return voice.ICEUsername == stream.ICEUsername &&
+		voice.ICECredential == stream.ICECredential
 }

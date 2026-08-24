@@ -38,6 +38,15 @@ type session struct {
 	audioBitrate *bitrateLimiter
 	videoSSRC    atomic.Uint32
 
+	// Viewer-initiated recovery cooldowns under one mutex. A rate limited
+	// request is treated as successfully ignored, never as a failure.
+	recoveryMu          sync.Mutex
+	lastKeyframeRequest time.Time
+	lastICERestart      time.Time
+
+	keyframeCooldown time.Duration
+	iceCooldown      time.Duration
+
 	negotiationMu      sync.Mutex
 	negotiationPending bool
 	iceRestartPending  bool
@@ -73,6 +82,8 @@ func newSession(
 			manager.maxStreamAudioBitrateKbps,
 			3,
 		),
+		keyframeCooldown: 2 * time.Second,
+		iceCooldown:      10 * time.Second,
 		recovery: webrtcrecovery.New(
 			webrtcrecovery.Policy{
 				InitialDelay: 2 * time.Second,
@@ -284,9 +295,9 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 				s.negotiationMu.Unlock()
 				return errors.New("outgoing stream video transceiver is missing")
 			}
-			if err := transceiver.SetCodecPreferences([]webrtc.RTPCodecParameters{{
-				RTPCodecCapability: value.codec,
-			}}); err != nil {
+			if err := transceiver.SetCodecPreferences(
+				s.manager.viewerCodecPreferences(value.codec),
+			); err != nil {
 				s.negotiationMu.Unlock()
 				return fmt.Errorf("prefer outgoing %s stream codec: %w", s.room.codec, err)
 			}
@@ -536,6 +547,38 @@ func (s *session) requestKeyFrame() {
 	_ = s.peer.WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: ssrc},
 	})
+}
+
+// requestRecovery handles a viewer-initiated recovery request with per-action
+// cooldowns. Rate limited requests return nil: the viewer should treat them
+// as acknowledged but ignored.
+func (s *session) requestRecovery(action string) error {
+	now := time.Now()
+	s.recoveryMu.Lock()
+	switch action {
+	case RecoveryActionKeyframe:
+		if now.Sub(s.lastKeyframeRequest) < s.keyframeCooldown {
+			s.recoveryMu.Unlock()
+			return nil
+		}
+		s.lastKeyframeRequest = now
+		s.recoveryMu.Unlock()
+		s.room.requestKeyFrame()
+		return nil
+
+	case RecoveryActionICERestart:
+		if now.Sub(s.lastICERestart) < s.iceCooldown {
+			s.recoveryMu.Unlock()
+			return nil
+		}
+		s.lastICERestart = now
+		s.recoveryMu.Unlock()
+		return s.restartICE()
+
+	default:
+		s.recoveryMu.Unlock()
+		return ErrRecoveryActionInvalid
+	}
 }
 
 func drainViewerRTCP(sender *webrtc.RTPSender, room *room) {

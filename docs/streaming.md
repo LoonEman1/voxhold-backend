@@ -37,9 +37,15 @@ WEBRTC_STREAM_MAX_AUDIO_BITRATE_KBPS=320
 ```
 
 The client can select VP8, VP9, H.264, or AV1 when both its WebRTC sender and
-receiver support the codec. Automatic selection prefers VP9, then H.264, AV1,
-and finally VP8. The SFU forwards the selected encoded track without
-transcoding, so every viewer must support that stream's codec.
+receiver support the codec. Automatic selection follows the RFC 7742
+compatibility policy: H.264 first, then VP8, VP9, and AV1. For H.264 the SFU
+offers Constrained Baseline (`profile-level-id=42e01f`) first and keeps the
+legacy `42001f` value on a separate payload type for older web clients. Every
+primary video payload type is paired with a `video/rtx` retransmission payload
+type (`apt=<primary PT>`), so lost packets can be repaired with NACK/RTX before
+they turn into a freeze. The SFU forwards the selected encoded track without
+transcoding and never substitutes one H.264 profile for another after ingest,
+so every viewer must support that stream's codec.
 
 The browser marks captured video as detailed screen content and uses
 `maintain-resolution` degradation. During a short bandwidth shortage it should
@@ -63,6 +69,34 @@ Only one stream can be active in a voice channel. A publisher may send one
 video track in the declared codec and at most one Opus audio track. Pending ICE
 candidates are capped at 64 per server-side media session. The common WebSocket
 event limit also caps SDP and P2P signaling payloads.
+
+## Runtime ICE configuration for browsers
+
+The backend is the single runtime source of ICE configuration. An authorized
+client fetches it with:
+
+```
+GET /api/v1/webrtc/config
+Authorization: Bearer <token>
+Cache-Control: no-store
+```
+
+The response mirrors the validated `WEBRTC_ICE_*` environment values (empty
+`ice_servers` is valid) and always reports `ice_transport_policy: "all"`, so
+direct UDP stays the primary path and TURN is only an ICE fallback. The
+frontend keeps this configuration in memory only and never embeds TURN values
+at build time.
+
+## Viewer-initiated recovery
+
+A server-mode viewer can send `stream.recovery_request` with
+`{ "action": "keyframe" | "ice_restart" }`. The hub allows the request only
+from a current viewer of that server-mode stream; publishers, P2P participants,
+and foreign channels receive an error. The media session enforces per-viewer
+cooldowns: keyframe requests are accepted at most once every 2 seconds and ICE
+restarts at most once every 10 seconds; a rate-limited request is silently
+ignored and never closes the session. There are no unconditional periodic PLI
+requests.
 
 On a VPS, allow both UDP ports in the host and provider firewall and set
 `WEBRTC_PUBLIC_IP` to the public IPv4 address. TURN settings are shared with
