@@ -120,6 +120,8 @@ type StreamMedia interface {
 		connectionID string,
 		candidate stream.ICECandidate,
 	) error
+
+	RequestRecovery(connectionID string, action string) error
 }
 
 type RealtimeProtector interface {
@@ -728,6 +730,9 @@ func (h *Handler) handleIncomingEvent(
 
 	case realtime.EventStreamP2PRestart:
 		return h.requestStreamP2PRestart(client, event)
+
+	case realtime.EventStreamRecoveryRequest:
+		return h.requestStreamRecovery(client, event)
 
 	default:
 		return queueError(

@@ -22,6 +22,7 @@ const (
 	EventStreamP2PAnswer       EventType = "stream.p2p_answer"
 	EventStreamP2PICECandidate EventType = "stream.p2p_ice_candidate"
 	EventStreamP2PRestart      EventType = "stream.p2p_restart"
+	EventStreamRecoveryRequest EventType = "stream.recovery_request"
 )
 
 type StreamMode string
@@ -121,4 +122,26 @@ type StreamP2PICECandidateData struct {
 
 type StreamP2PRestartData struct {
 	TargetConnectionID string `json:"target_connection_id"`
+}
+
+type StreamRecoveryAction string
+
+const (
+	StreamRecoveryKeyframe   StreamRecoveryAction = "keyframe"
+	StreamRecoveryICERestart StreamRecoveryAction = "ice_restart"
+)
+
+func ValidStreamRecoveryAction(action StreamRecoveryAction) bool {
+	switch action {
+	case StreamRecoveryKeyframe, StreamRecoveryICERestart:
+		return true
+	default:
+		return false
+	}
+}
+
+type StreamRecoveryRequestData struct {
+	ServerID int64                `json:"server_id"`
+	ChannelID int64               `json:"channel_id"`
+	Action   StreamRecoveryAction `json:"action"`
 }

@@ -362,6 +362,44 @@ func (h *Handler) requestStreamP2PRestart(
 	return nil
 }
 
+func (h *Handler) requestStreamRecovery(
+	client *realtime.Client,
+	event realtime.IncomingEvent,
+) error {
+	var data realtime.StreamRecoveryRequestData
+	if err := json.Unmarshal(event.Data, &data); err != nil ||
+		data.ServerID <= 0 || data.ChannelID <= 0 ||
+		!realtime.ValidStreamRecoveryAction(data.Action) {
+
+		return queueError(
+			client,
+			event.RequestID,
+			realtime.ErrorInvalidPayload,
+			"invalid stream recovery request payload",
+		)
+	}
+	if err := h.hub.RequestStreamRecovery(
+		client,
+		data.ServerID,
+		data.ChannelID,
+		data.Action,
+	); err != nil {
+		return queueStreamStateError(client, event.RequestID, err)
+	}
+	if err := h.streamMedia.RequestRecovery(
+		client.ConnectionID(),
+		string(data.Action),
+	); err != nil {
+		return h.handleStreamMediaInputError(
+			client,
+			event.RequestID,
+			"request stream recovery",
+			err,
+		)
+	}
+	return nil
+}
+
 func queueStreamStateError(
 	client *realtime.Client,
 	requestID string,

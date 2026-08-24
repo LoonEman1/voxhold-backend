@@ -175,6 +175,31 @@ func (s *streamState) data(value *activeStream) StreamData {
 	return streamData(value)
 }
 
+// recoveryViewer returns the active server-mode stream that the client
+// currently watches. Publishers and P2P participants never qualify so that
+// recovery requests cannot reach a foreign room.
+func (s *streamState) recoveryViewer(
+	client *Client,
+	serverID int64,
+	channelID int64,
+) (*activeStream, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	state, exists := s.byClient[client]
+	if !exists || state.publisher {
+		return nil, false
+	}
+	value := state.stream
+	if value.mode != StreamModeServer ||
+		value.serverID != serverID ||
+		value.channelID != channelID {
+
+		return nil, false
+	}
+	return value, true
+}
+
 func (s *streamState) publisherForChannel(
 	channelID int64,
 ) *Client {

@@ -317,6 +317,21 @@ func (h *Hub) RequestStreamP2PRestart(
 	return nil
 }
 
+func (h *Hub) RequestStreamRecovery(
+	client *Client,
+	serverID int64,
+	channelID int64,
+	action StreamRecoveryAction,
+) error {
+	if client == nil || !ValidStreamRecoveryAction(action) {
+		return ErrStreamUnavailable
+	}
+	if _, ok := h.streams.recoveryViewer(client, serverID, channelID); !ok {
+		return ErrStreamP2PRelation
+	}
+	return nil
+}
+
 func (h *Hub) sendStreamSnapshot(client *Client) {
 	if !client.enqueue(
 		OutgoingEvent{
