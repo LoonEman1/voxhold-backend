@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 	"voxhold-backend/internal/account"
@@ -76,15 +77,64 @@ func main() {
 
 	log.Println("database is ready")
 
+	// Browser clients receive the CLIENT ICE configuration through the
+	// runtime endpoint; the backend's own Pion sessions use SERVER values so
+	// a public deployment does not create TURN allocations per media
+	// session. Legacy WEBRTC_ICE_* act as fallbacks, keeping deployments
+	// written before the split working unchanged.
+	firstNonEmpty := func(values ...string) string {
+		for _, value := range values {
+			if value != "" {
+				return value
+			}
+		}
+		return ""
+	}
+	splitICEURLs := func(raw string) []string {
+		urls := make([]string, 0, 4)
+		for _, part := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				urls = append(urls, trimmed)
+			}
+		}
+		return urls
+	}
+
+	clientICEUsername := firstNonEmpty(
+		os.Getenv("WEBRTC_CLIENT_ICE_USERNAME"),
+		os.Getenv("WEBRTC_ICE_USERNAME"),
+	)
+	clientICECredential := firstNonEmpty(
+		os.Getenv("WEBRTC_CLIENT_ICE_CREDENTIAL"),
+		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
+	)
+	clientICEURLs := splitICEURLs(firstNonEmpty(
+		os.Getenv("WEBRTC_CLIENT_ICE_SERVERS"),
+		os.Getenv("WEBRTC_ICE_SERVERS"),
+	))
+
+	serverICEUsername := firstNonEmpty(
+		os.Getenv("WEBRTC_SERVER_ICE_USERNAME"),
+		os.Getenv("WEBRTC_ICE_USERNAME"),
+	)
+	serverICECredential := firstNonEmpty(
+		os.Getenv("WEBRTC_SERVER_ICE_CREDENTIAL"),
+		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
+	)
+	serverICEServers := firstNonEmpty(
+		os.Getenv("WEBRTC_SERVER_ICE_SERVERS"),
+		os.Getenv("WEBRTC_ICE_SERVERS"),
+	)
+
 	realtimeHub := realtimeDomain.NewHub()
 	voiceConfig, err := voice.NewConfig(
 		os.Getenv("WEBRTC_UDP_PORT"),
 		os.Getenv("WEBRTC_MAX_PARTICIPANTS"),
 		os.Getenv("WEBRTC_MAX_AUDIO_BITRATE_KBPS"),
 		os.Getenv("WEBRTC_PUBLIC_IP"),
-		os.Getenv("WEBRTC_ICE_SERVERS"),
-		os.Getenv("WEBRTC_ICE_USERNAME"),
-		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
+		serverICEServers,
+		serverICEUsername,
+		serverICECredential,
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -113,9 +163,9 @@ func main() {
 		os.Getenv("WEBRTC_STREAM_MAX_VIDEO_BITRATE_KBPS"),
 		os.Getenv("WEBRTC_STREAM_MAX_AUDIO_BITRATE_KBPS"),
 		os.Getenv("WEBRTC_PUBLIC_IP"),
-		os.Getenv("WEBRTC_ICE_SERVERS"),
-		os.Getenv("WEBRTC_ICE_USERNAME"),
-		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
+		serverICEServers,
+		serverICEUsername,
+		serverICECredential,
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -242,9 +292,9 @@ func main() {
 	)
 
 	webrtcConfigHandler := webrtcconfighttp.NewHandler(
-		voiceConfig.ICEServerURLs,
-		voiceConfig.ICEUsername,
-		voiceConfig.ICECredential,
+		clientICEURLs,
+		clientICEUsername,
+		clientICECredential,
 	)
 
 	mux := http.NewServeMux()
@@ -287,7 +337,22 @@ func main() {
 	)
 
 	webSocketHandler.RegisterRoutes(mux)
+
+	// Liveness: the process is up. Deliberately dependency-free.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Readiness: dependencies (the SQLite database) are actually usable.
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
+		defer cancel()
+
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("readiness probe failed: %v", err)
+			http.Error(w, "database not ready", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 
