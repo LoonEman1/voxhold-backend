@@ -162,10 +162,7 @@ func (r *room) closeSnapshot() []*session {
 func (r *room) synchronizeViewers() {
 	for _, viewer := range r.viewerSnapshot() {
 		if err := viewer.synchronizeViewerTracks(false); err != nil {
-			go viewer.manager.failSession(
-				viewer,
-				"stream WebRTC renegotiation failed",
-			)
+			viewer.scheduleFail("stream WebRTC renegotiation failed")
 		}
 	}
 }

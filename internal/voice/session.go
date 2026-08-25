@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"voxhold-backend/internal/safego"
 	"voxhold-backend/internal/webrtcrecovery"
 
 	"github.com/pion/webrtc/v4"
@@ -76,30 +77,36 @@ func newSession(
 
 func (s *session) installCallbacks() {
 	s.peer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil || s.closed.Load() {
-			return
-		}
+		safego.Run("voice/onICECandidate", func() {
+			if candidate == nil || s.closed.Load() {
+				return
+			}
 
-		value := candidate.ToJSON()
-		if !s.manager.sink.SendICECandidate(
-			s.connectionID,
-			ICECandidate{
-				Candidate:        value.Candidate,
-				SDPMid:           value.SDPMid,
-				SDPMLineIndex:    value.SDPMLineIndex,
-				UsernameFragment: value.UsernameFragment,
-			},
-		) {
-			go s.manager.failSession(
-				s,
-				"WebRTC signaling connection was lost",
-			)
-		}
+			value := candidate.ToJSON()
+			if !s.manager.sink.SendICECandidate(
+				s.connectionID,
+				ICECandidate{
+					Candidate:        value.Candidate,
+					SDPMid:           value.SDPMid,
+					SDPMLineIndex:    value.SDPMLineIndex,
+					UsernameFragment: value.UsernameFragment,
+				},
+			) {
+				s.scheduleFail("WebRTC signaling connection was lost")
+			}
+		})
 	})
 
 	s.peer.OnConnectionStateChange(
 		func(state webrtc.PeerConnectionState) {
-			s.handleConnectionState(state)
+			// A panic inside the state handler would otherwise escape into
+			// Pion's callback goroutine and take down the whole process;
+			// contain it and fail only this damaged session.
+			safego.GuardedRun("voice/onConnectionStateChange", func() {
+				s.handleConnectionState(state)
+			}, func() {
+				s.scheduleFail("internal error in connection state handler")
+			})
 		},
 	)
 
@@ -108,13 +115,25 @@ func (s *session) installCallbacks() {
 			remote *webrtc.TrackRemote,
 			_ *webrtc.RTPReceiver,
 		) {
-			if remote.Kind() != webrtc.RTPCodecTypeAudio {
-				return
-			}
+			safego.GuardedRun("voice/onTrack", func() {
+				if remote.Kind() != webrtc.RTPCodecTypeAudio {
+					return
+				}
 
-			s.forwardAudio(remote)
+				s.forwardAudio(remote)
+			}, func() {
+				s.scheduleFail("internal error while forwarding audio")
+			})
 		},
 	)
+}
+
+// scheduleFail tears the session down behind a panic boundary so a failure
+// path can never itself crash the process.
+func (s *session) scheduleFail(reason string) {
+	safego.Go("voice/failSession", func() {
+		s.manager.failSession(s, reason)
+	})
 }
 
 func (s *session) setState(
@@ -175,10 +194,7 @@ func (s *session) forwardAudio(
 		}
 
 		if !s.audioBitrate.allow(len(packet.Payload)) {
-			go s.manager.failSession(
-				s,
-				"audio bitrate limit exceeded",
-			)
+			s.scheduleFail("audio bitrate limit exceeded")
 			return
 		}
 
@@ -253,7 +269,9 @@ func (s *session) synchronizeTracks(forceOffer bool) error {
 		}
 
 		changed = true
-		go drainRTCP(sender)
+		safego.Go("voice/drainRTCP", func() {
+			drainRTCP(sender)
+		})
 	}
 
 	if !changed && !forceOffer {
@@ -298,10 +316,7 @@ func (s *session) sendOffer(sdp string) {
 		s.connectionID,
 		sdp,
 	) {
-		go s.manager.failSession(
-			s,
-			"WebRTC signaling connection was lost",
-		)
+		s.scheduleFail("WebRTC signaling connection was lost")
 	}
 }
 
@@ -447,10 +462,7 @@ func (s *session) handleConnectionState(
 
 	case webrtc.PeerConnectionStateClosed:
 		if !s.closed.Load() {
-			go s.manager.failSession(
-				s,
-				"WebRTC connection closed",
-			)
+			s.scheduleFail("WebRTC connection closed")
 		}
 
 	default:

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"voxhold-backend/internal/safego"
 	"voxhold-backend/internal/webrtcrecovery"
 
 	"github.com/pion/rtcp"
@@ -96,29 +97,32 @@ func newSession(
 
 func (s *session) installCallbacks() {
 	s.peer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil || s.closed.Load() {
-			return
-		}
-		value := candidate.ToJSON()
-		if !s.manager.sink.SendICECandidate(
-			s.connectionID,
-			ICECandidate{
-				Candidate:        value.Candidate,
-				SDPMid:           value.SDPMid,
-				SDPMLineIndex:    value.SDPMLineIndex,
-				UsernameFragment: value.UsernameFragment,
-			},
-		) {
-			go s.manager.failSession(
-				s,
-				"stream signaling connection was lost",
-			)
-		}
+		safego.Run("stream/onICECandidate", func() {
+			if candidate == nil || s.closed.Load() {
+				return
+			}
+			value := candidate.ToJSON()
+			if !s.manager.sink.SendICECandidate(
+				s.connectionID,
+				ICECandidate{
+					Candidate:        value.Candidate,
+					SDPMid:           value.SDPMid,
+					SDPMLineIndex:    value.SDPMLineIndex,
+					UsernameFragment: value.UsernameFragment,
+				},
+			) {
+				s.scheduleFail("stream signaling connection was lost")
+			}
+		})
 	})
 
 	s.peer.OnConnectionStateChange(
 		func(state webrtc.PeerConnectionState) {
-			s.handleConnectionState(state)
+			safego.GuardedRun("stream/onConnectionStateChange", func() {
+				s.handleConnectionState(state)
+			}, func() {
+				s.scheduleFail("internal error in connection state handler")
+			})
 		},
 	)
 
@@ -128,10 +132,22 @@ func (s *session) installCallbacks() {
 				remote *webrtc.TrackRemote,
 				_ *webrtc.RTPReceiver,
 			) {
-				s.forwardTrack(remote)
+				safego.GuardedRun("stream/onTrack", func() {
+					s.forwardTrack(remote)
+				}, func() {
+					s.scheduleFail("internal error while forwarding stream track")
+				})
 			},
 		)
 	}
+}
+
+// scheduleFail tears the session down behind a panic boundary so a failure
+// path can never itself crash the process.
+func (s *session) scheduleFail(reason string) {
+	safego.Go("stream/failSession", func() {
+		s.manager.failSession(s, reason)
+	})
 }
 
 func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
@@ -205,7 +221,7 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
 			return
 		}
 		if !limiter.allow(len(packet.Payload)) {
-			go s.manager.failSession(s, limitReason)
+			s.scheduleFail(limitReason)
 			return
 		}
 
@@ -302,7 +318,9 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 				return fmt.Errorf("prefer outgoing %s stream codec: %w", s.room.codec, err)
 			}
 		}
-		go drainViewerRTCP(sender, s.room)
+		safego.Go("stream/drainViewerRTCP", func() {
+			drainViewerRTCP(sender, s.room)
+		})
 	}
 
 	if !changed && !force {
@@ -352,10 +370,7 @@ func (s *session) createOfferLocked(restartICE bool) (string, error) {
 
 func (s *session) sendOffer(sdp string) {
 	if !s.manager.sink.SendOffer(s.connectionID, sdp) {
-		go s.manager.failSession(
-			s,
-			"stream signaling connection was lost",
-		)
+		s.scheduleFail("stream signaling connection was lost")
 	}
 }
 
@@ -488,10 +503,7 @@ func (s *session) handleConnectionState(
 
 	case webrtc.PeerConnectionStateClosed:
 		if !s.closed.Load() {
-			go s.manager.failSession(
-				s,
-				"stream WebRTC connection closed",
-			)
+			s.scheduleFail("stream WebRTC connection closed")
 		}
 
 	default:

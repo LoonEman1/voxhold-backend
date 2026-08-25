@@ -3,6 +3,8 @@ package webrtcrecovery
 import (
 	"sync"
 	"time"
+
+	"voxhold-backend/internal/safego"
 )
 
 type Policy struct {
@@ -56,7 +58,9 @@ func (c *Controller) Start(
 	if immediate {
 		delay = 0
 	}
-	go c.run(cancel, delay, attempt, exhausted)
+	safego.Go("webrtcrecovery/run", func() {
+		c.run(cancel, delay, attempt, exhausted)
+	})
 }
 
 func (c *Controller) Stop() {

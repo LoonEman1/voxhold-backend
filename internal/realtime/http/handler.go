@@ -17,6 +17,7 @@ import (
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/readstate"
 	"voxhold-backend/internal/realtime"
+	"voxhold-backend/internal/safego"
 	serverDomain "voxhold-backend/internal/server"
 	"voxhold-backend/internal/stream"
 	"voxhold-backend/internal/voice"
@@ -485,22 +486,39 @@ func (h *Handler) serveConnection(
 	readErrors := make(chan error, 1)
 	writeErrors := make(chan error, 1)
 
-	go func() {
-		readErrors <- h.readLoop(
-			ctx,
-			connection,
-			client,
-		)
-	}()
+	// The loops run behind a panic boundary: a recovered panic is reported
+	// back through the error channel so serveConnection performs its normal
+	// cleanup instead of hanging forever.
+	safego.GuardedGo("realtime/readLoop",
+		func() {
+			readErrors <- h.readLoop(
+				ctx,
+				connection,
+				client,
+			)
+		},
+		func() {
+			readErrors <- errors.New(
+				"websocket read loop panicked",
+			)
+		},
+	)
 
-	go func() {
-		writeErrors <- h.writeLoop(
-			ctx,
-			connection,
-			client,
-			sessionToken,
-		)
-	}()
+	safego.GuardedGo("realtime/writeLoop",
+		func() {
+			writeErrors <- h.writeLoop(
+				ctx,
+				connection,
+				client,
+				sessionToken,
+			)
+		},
+		func() {
+			writeErrors <- errors.New(
+				"websocket write loop panicked",
+			)
+		},
+	)
 
 	var connectionError error
 

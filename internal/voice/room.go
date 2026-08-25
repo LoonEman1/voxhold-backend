@@ -148,10 +148,7 @@ func (r *room) empty() bool {
 func (r *room) synchronizeSessions() {
 	for _, value := range r.sessionSnapshot() {
 		if err := value.synchronizeTracks(false); err != nil {
-			go value.manager.failSession(
-				value,
-				"WebRTC renegotiation failed",
-			)
+			value.scheduleFail("WebRTC renegotiation failed")
 		}
 	}
 }
