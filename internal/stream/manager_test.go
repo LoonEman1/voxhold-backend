@@ -108,10 +108,16 @@ func acceptTestOffer(
 	if err != nil {
 		t.Fatalf("create answer: %v", err)
 	}
+	gatheringComplete := webrtc.GatheringCompletePromise(peer)
 	if err := peer.SetLocalDescription(answer); err != nil {
 		t.Fatalf("set local answer: %v", err)
 	}
-	if err := manager.AcceptAnswer(connectionID, answer.SDP); err != nil {
+	<-gatheringComplete
+	localDescription := peer.LocalDescription()
+	if localDescription == nil {
+		t.Fatal("local answer is missing after ICE gathering")
+	}
+	if err := manager.AcceptAnswer(connectionID, localDescription.SDP); err != nil {
 		t.Fatalf("accept answer: %v", err)
 	}
 }

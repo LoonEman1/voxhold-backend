@@ -3,6 +3,7 @@ package stream
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,12 @@ import (
 )
 
 const colorSpaceRTPHeaderExtensionURI = "http://www.webrtc.org/experiments/rtp-hdrext/color-space"
+
+var (
+	streamRecoveryStartedTotal   atomic.Uint64
+	streamRecoverySucceededTotal atomic.Uint64
+	streamRecoveryExhaustedTotal atomic.Uint64
+)
 
 type relayBinding struct {
 	id                    string
@@ -208,6 +215,7 @@ type session struct {
 	pendingCandidates  []ICECandidate
 	closeOnce          sync.Once
 	recovery           *webrtcrecovery.Controller
+	recoveryActive     atomic.Bool
 }
 
 func newSession(
@@ -675,6 +683,7 @@ func candidateMatchesRemoteDescription(
 func (s *session) close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
+		s.recoveryActive.Store(false)
 		s.recovery.Stop()
 		_ = s.peer.Close()
 	})
@@ -686,6 +695,13 @@ func (s *session) handleConnectionState(
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
 		s.recovery.Stop()
+		if s.recoveryActive.Swap(false) {
+			total := streamRecoverySucceededTotal.Add(1)
+			log.Printf(
+				"event=stream_media_recovery_succeeded total=%d connection_id=%s role=%s server_id=%d channel_id=%d",
+				total, s.connectionID, s.roleName(), s.serverID, s.channelID,
+			)
+		}
 		if s.role == sessionViewer {
 			s.room.requestKeyFrame(s.selectedRenditionID)
 		}
@@ -709,6 +725,13 @@ func (s *session) startRecovery(immediate bool) {
 	if s.closed.Load() {
 		return
 	}
+	if s.recoveryActive.CompareAndSwap(false, true) {
+		total := streamRecoveryStartedTotal.Add(1)
+		log.Printf(
+			"event=stream_media_recovery_started total=%d connection_id=%s role=%s server_id=%d channel_id=%d immediate=%t",
+			total, s.connectionID, s.roleName(), s.serverID, s.channelID, immediate,
+		)
+	}
 	s.recovery.Start(
 		immediate,
 		s.restartICE,
@@ -718,12 +741,25 @@ func (s *session) startRecovery(immediate bool) {
 
 				return
 			}
+			s.recoveryActive.Store(false)
+			total := streamRecoveryExhaustedTotal.Add(1)
+			log.Printf(
+				"event=stream_media_recovery_exhausted total=%d connection_id=%s role=%s server_id=%d channel_id=%d",
+				total, s.connectionID, s.roleName(), s.serverID, s.channelID,
+			)
 			s.manager.failSession(
 				s,
 				"stream WebRTC recovery exhausted",
 			)
 		},
 	)
+}
+
+func (s *session) roleName() string {
+	if s.role == sessionPublisher {
+		return "publisher"
+	}
+	return "viewer"
 }
 
 func (s *session) restartICE() error {
