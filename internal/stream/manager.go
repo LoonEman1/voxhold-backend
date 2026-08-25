@@ -29,6 +29,19 @@ type Manager struct {
 	maxStreamAudioBitrateKbps int
 }
 
+// Rendition is the validated media contract passed from realtime signaling to
+// the SFU. The SFU does not transcode it; it only negotiates and routes it.
+type Rendition struct {
+	ID             string
+	Codec          Codec
+	Profile        string
+	DynamicRange   string
+	BitDepth       int
+	ColorPrimaries string
+	Transfer       string
+	Matrix         string
+}
+
 func NewManager(config Config, sink SignalSink) (*Manager, error) {
 	if sink == nil {
 		return nil, errors.New("stream signal sink is required")
@@ -125,6 +138,13 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 		_ = udpMux.Close()
 		return nil, fmt.Errorf("register stream Opus codec: %w", err)
 	}
+	if err := media.RegisterHeaderExtension(
+		webrtc.RTPHeaderExtensionCapability{URI: colorSpaceRTPHeaderExtensionURI},
+		webrtc.RTPCodecTypeVideo,
+	); err != nil {
+		_ = udpMux.Close()
+		return nil, fmt.Errorf("register stream color-space RTP extension: %w", err)
+	}
 
 	registry := &interceptor.Registry{}
 	if err := webrtc.RegisterDefaultInterceptors(
@@ -179,10 +199,31 @@ func (m *Manager) Start(
 	codec Codec,
 	hasAudio bool,
 ) error {
+	return m.StartWithRenditions(
+		connectionID, userID, serverID, channelID, codec, hasAudio,
+		[]Rendition{legacySDRRendition(codec)},
+	)
+}
+
+func (m *Manager) StartWithRenditions(
+	connectionID string,
+	userID int64,
+	serverID int64,
+	channelID int64,
+	codec Codec,
+	hasAudio bool,
+	renditions []Rendition,
+) error {
 	if connectionID == "" || userID <= 0 ||
-		serverID <= 0 || channelID <= 0 || !validCodec(codec) {
+		serverID <= 0 || channelID <= 0 || !validCodec(codec) ||
+		!validMediaRenditions(renditions) || sdrCodec(renditions) != codec {
 
 		return errors.New("invalid stream identifiers")
+	}
+	for _, rendition := range renditions {
+		if len(codecParametersForRendition(m, rendition)) == 0 {
+			return fmt.Errorf("unsupported stream rendition %q", rendition.ID)
+		}
 	}
 
 	m.Leave(connectionID)
@@ -195,7 +236,7 @@ func (m *Manager) Start(
 		m.mu.Unlock()
 		return ErrStreamExists
 	}
-	streamRoom := newRoom(channelID, codec)
+	streamRoom := newRoomWithRenditions(channelID, renditions)
 	m.rooms[channelID] = streamRoom
 	m.mu.Unlock()
 
@@ -208,21 +249,30 @@ func (m *Manager) Start(
 		)
 	}
 
-	videoTransceiver, err := peer.AddTransceiverFromKind(
-		webrtc.RTPCodecTypeVideo,
-		webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
-		},
-	)
-	if err != nil {
-		_ = peer.Close()
-		m.removeRoom(channelID, streamRoom)
-		return fmt.Errorf("add incoming video transceiver: %w", err)
-	}
-	if err = videoTransceiver.SetCodecPreferences(codecParameters(m, codec)); err != nil {
-		_ = peer.Close()
-		m.removeRoom(channelID, streamRoom)
-		return fmt.Errorf("prefer incoming %s stream codec: %w", codec, err)
+	publisherTransceivers := make(map[*webrtc.RTPTransceiver]string, len(renditions))
+	for _, rendition := range renditions {
+		videoTransceiver, transceiverErr := peer.AddTransceiverFromKind(
+			webrtc.RTPCodecTypeVideo,
+			webrtc.RTPTransceiverInit{
+				Direction: webrtc.RTPTransceiverDirectionRecvonly,
+			},
+		)
+		if transceiverErr != nil {
+			_ = peer.Close()
+			m.removeRoom(channelID, streamRoom)
+			return fmt.Errorf("add incoming video transceiver: %w", transceiverErr)
+		}
+		if transceiverErr = videoTransceiver.SetCodecPreferences(
+			codecParametersForRendition(m, rendition),
+		); transceiverErr != nil {
+			_ = peer.Close()
+			m.removeRoom(channelID, streamRoom)
+			return fmt.Errorf(
+				"prefer incoming %s:%s stream codec: %w",
+				rendition.Codec, rendition.Profile, transceiverErr,
+			)
+		}
+		publisherTransceivers[videoTransceiver] = rendition.ID
 	}
 	if hasAudio {
 		if _, err = peer.AddTransceiverFromKind(
@@ -250,6 +300,7 @@ func (m *Manager) Start(
 		channelID,
 		sessionPublisher,
 	)
+	value.publisherTransceivers = publisherTransceivers
 	if !streamRoom.setPublisher(value) {
 		_ = peer.Close()
 		m.removeRoom(channelID, streamRoom)
@@ -274,6 +325,75 @@ func (m *Manager) Start(
 	return nil
 }
 
+func sdrCodec(renditions []Rendition) Codec {
+	for _, rendition := range renditions {
+		if rendition.DynamicRange == "sdr" {
+			return rendition.Codec
+		}
+	}
+	return ""
+}
+
+func validMediaRenditions(renditions []Rendition) bool {
+	if len(renditions) == 0 || len(renditions) > 2 {
+		return false
+	}
+	ids := make(map[string]struct{}, len(renditions))
+	ranges := make(map[string]struct{}, len(renditions))
+	hasSDR := false
+	for _, value := range renditions {
+		if value.ID == "" || len(value.ID) > 32 || value.BitDepth == 0 {
+			return false
+		}
+		if _, duplicate := ids[value.ID]; duplicate {
+			return false
+		}
+		if _, duplicate := ranges[value.DynamicRange]; duplicate {
+			return false
+		}
+		ids[value.ID] = struct{}{}
+		ranges[value.DynamicRange] = struct{}{}
+		switch value.DynamicRange {
+		case "sdr":
+			hasSDR = value.BitDepth == 8 && value.ColorPrimaries == "bt709" &&
+				value.Transfer == "bt709" && value.Matrix == "bt709" &&
+				validSDRProfile(value.Codec, value.Profile)
+			if !hasSDR {
+				return false
+			}
+		case "hdr10":
+			if value.BitDepth != 10 || value.ColorPrimaries != "bt2020" ||
+				value.Transfer != "pq" || value.Matrix != "bt2020-ncl" ||
+				!validHDRProfile(value.Codec, value.Profile) {
+
+				return false
+			}
+		case "hlg":
+			if value.BitDepth != 10 || value.ColorPrimaries != "bt2020" ||
+				value.Transfer != "hlg" || value.Matrix != "bt2020-ncl" ||
+				!validHDRProfile(value.Codec, value.Profile) {
+
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasSDR
+}
+
+func validSDRProfile(codec Codec, profile string) bool {
+	return (codec == CodecVP8 && profile == "") ||
+		(codec == CodecVP9 && profile == "0") ||
+		(codec == CodecH264 && profile == "baseline") ||
+		(codec == CodecAV1 && profile == "main")
+}
+
+func validHDRProfile(codec Codec, profile string) bool {
+	return (codec == CodecVP9 && profile == "2") ||
+		(codec == CodecAV1 && profile == "main10")
+}
+
 func validCodec(codec Codec) bool {
 	switch codec {
 	case CodecVP8, CodecVP9, CodecH264, CodecAV1:
@@ -295,6 +415,8 @@ const (
 	vp8RTXPT       = 97
 	vp9PrimaryPT   = 98
 	vp9RTXPT       = 99
+	vp9HDRPrimary  = 100
+	vp9HDRRTX      = 101
 	h264CBPrimary  = 102
 	h264CBRTX      = 103
 	h264LegPrimary = 104
@@ -343,13 +465,25 @@ func streamVideoCodecDescriptors() []videoCodecDescriptor {
 			rtxPT: vp9RTXPT,
 		},
 		{
+			primary: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:     webrtc.MimeTypeVP9,
+					ClockRate:    90000,
+					SDPFmtpLine:  "profile-id=2",
+					RTCPFeedback: feedback,
+				},
+				PayloadType: vp9HDRPrimary,
+			},
+			rtxPT: vp9HDRRTX,
+		},
+		{
 			// Constrained Baseline is the interoperable WebRTC profile per
 			// RFC 7742; it must be offered before any legacy value.
 			primary: webrtc.RTPCodecParameters{
 				RTPCodecCapability: webrtc.RTPCodecCapability{
-					MimeType: webrtc.MimeTypeH264,
-					ClockRate: 90000,
-					SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+					MimeType:     webrtc.MimeTypeH264,
+					ClockRate:    90000,
+					SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
 					RTCPFeedback: feedback,
 				},
 				PayloadType: h264CBPrimary,
@@ -361,9 +495,9 @@ func streamVideoCodecDescriptors() []videoCodecDescriptor {
 			// clients that match exactly on 42001f.
 			primary: webrtc.RTPCodecParameters{
 				RTPCodecCapability: webrtc.RTPCodecCapability{
-					MimeType: webrtc.MimeTypeH264,
-					ClockRate: 90000,
-					SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+					MimeType:     webrtc.MimeTypeH264,
+					ClockRate:    90000,
+					SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
 					RTCPFeedback: feedback,
 				},
 				PayloadType: h264LegPrimary,
@@ -423,14 +557,57 @@ func registerStreamCodecs(
 	return descriptors, nil
 }
 
-func codecParameters(m *Manager, codec Codec) []webrtc.RTPCodecParameters {
+func legacySDRRendition(codec Codec) Rendition {
+	profile := ""
+	switch codec {
+	case CodecVP9:
+		profile = "0"
+	case CodecH264:
+		profile = "baseline"
+	case CodecAV1:
+		profile = "main"
+	}
+	return Rendition{
+		ID: "sdr", Codec: codec, Profile: profile, DynamicRange: "sdr",
+		BitDepth: 8, ColorPrimaries: "bt709", Transfer: "bt709", Matrix: "bt709",
+	}
+}
+
+func codecParametersForRendition(
+	m *Manager,
+	rendition Rendition,
+) []webrtc.RTPCodecParameters {
+	if rendition.ID == "" || !validCodec(rendition.Codec) {
+		return nil
+	}
+	validProfile := rendition.Profile == ""
+	switch rendition.Codec {
+	case CodecVP8:
+		validProfile = rendition.Profile == ""
+	case CodecVP9:
+		validProfile = rendition.Profile == "0" || rendition.Profile == "2"
+	case CodecH264:
+		validProfile = rendition.Profile == "baseline"
+	case CodecAV1:
+		validProfile = rendition.Profile == "main" || rendition.Profile == "main10"
+	}
+	if !validProfile {
+		return nil
+	}
 	result := make([]webrtc.RTPCodecParameters, 0, 4)
 	for _, descriptor := range m.videoCodecDescriptors {
-		if codecForMimeType(descriptor.primary.MimeType) == codec {
-			result = append(result, descriptor.primary)
-			if rtx, ok := rtxForDescriptor(descriptor); ok {
-				result = append(result, rtx)
-			}
+		primary := descriptor.primary
+		if codecForMimeType(primary.MimeType) != rendition.Codec {
+			continue
+		}
+		if rendition.Codec == CodecVP9 &&
+			!strings.EqualFold(primary.SDPFmtpLine, "profile-id="+rendition.Profile) {
+
+			continue
+		}
+		result = append(result, primary)
+		if rtx, ok := rtxForDescriptor(descriptor); ok {
+			result = append(result, rtx)
 		}
 	}
 	return result
@@ -496,8 +673,27 @@ func (m *Manager) Watch(
 	serverID int64,
 	channelID int64,
 ) error {
+	m.mu.RLock()
+	streamRoom := m.rooms[channelID]
+	m.mu.RUnlock()
+	selectedRenditionID := "sdr"
+	if streamRoom != nil {
+		selectedRenditionID = streamRoom.defaultSDRRenditionID()
+	}
+	return m.WatchRendition(
+		connectionID, userID, serverID, channelID, selectedRenditionID,
+	)
+}
+
+func (m *Manager) WatchRendition(
+	connectionID string,
+	userID int64,
+	serverID int64,
+	channelID int64,
+	selectedRenditionID string,
+) error {
 	if connectionID == "" || userID <= 0 ||
-		serverID <= 0 || channelID <= 0 {
+		serverID <= 0 || channelID <= 0 || selectedRenditionID == "" {
 
 		return errors.New("invalid stream identifiers")
 	}
@@ -511,6 +707,9 @@ func (m *Manager) Watch(
 		return errors.New("stream manager is closed")
 	}
 	if streamRoom == nil {
+		return ErrStreamNotFound
+	}
+	if !streamRoom.hasRendition(selectedRenditionID) {
 		return ErrStreamNotFound
 	}
 	if !streamRoom.reserveViewer(m.maxViewers) {
@@ -537,6 +736,7 @@ func (m *Manager) Watch(
 		channelID,
 		sessionViewer,
 	)
+	value.selectedRenditionID = selectedRenditionID
 
 	m.mu.Lock()
 	if m.closed || m.rooms[channelID] != streamRoom {

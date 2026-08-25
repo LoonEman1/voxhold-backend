@@ -233,3 +233,57 @@ func TestManagerCreatesPublisherAndViewerOffers(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerCreatesDualRenditionPublisherOfferWithMIDMapping(t *testing.T) {
+	connection, err := net.ListenUDP("udp4", &net.UDPAddr{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := connection.LocalAddr().(*net.UDPAddr).Port
+	_ = connection.Close()
+
+	sink := &testSink{}
+	manager, err := NewManager(Config{
+		UDPPort: port, MaxViewers: 4,
+		MaxVideoBitrateKbps: 16000, MaxAudioBitrateKbps: 320,
+	}, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	renditions := []Rendition{
+		legacySDRRendition(CodecVP9),
+		{
+			ID: "hdr", Codec: CodecVP9, Profile: "2", DynamicRange: "hdr10",
+			BitDepth: 10, ColorPrimaries: "bt2020", Transfer: "pq", Matrix: "bt2020-ncl",
+		},
+	}
+	if err := manager.StartWithRenditions(
+		"dual-publisher", 1, 10, 200, CodecVP9, false, renditions,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	offer := sink.offer("dual-publisher")
+	if strings.Count(offer, "m=video") != 2 {
+		t.Fatalf("publisher offer must contain two video m-lines: %q", offer)
+	}
+	for _, expected := range []string{
+		"profile-id=0", "profile-id=2", colorSpaceRTPHeaderExtensionURI,
+	} {
+		if !strings.Contains(offer, expected) {
+			t.Fatalf("publisher offer is missing %q", expected)
+		}
+	}
+	value := manager.session("dual-publisher")
+	value.mediaMu.RLock()
+	mids := make(map[string]string, len(value.publisherMIDs))
+	for mid, renditionID := range value.publisherMIDs {
+		mids[mid] = renditionID
+	}
+	value.mediaMu.RUnlock()
+	if len(mids) != 2 || mids["0"] != "sdr" || mids["1"] != "hdr" {
+		t.Fatalf("unexpected MID mapping: %#v", mids)
+	}
+}
