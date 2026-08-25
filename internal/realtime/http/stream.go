@@ -29,13 +29,14 @@ func (h *Handler) startStream(
 		)
 	}
 
-	streamData, err := h.hub.StartStream(
+	streamData, err := h.hub.StartStreamWithRenditions(
 		client,
 		data.ServerID,
 		data.ChannelID,
 		data.Mode,
 		data.Codec,
 		data.HasAudio,
+		data.Renditions,
 	)
 	if err != nil {
 		return queueStreamStateError(client, event.RequestID, err)
@@ -101,10 +102,12 @@ func (h *Handler) watchStream(
 		)
 	}
 
-	watching, err := h.hub.WatchStream(
+	watching, err := h.hub.WatchStreamWithCapabilities(
 		client,
 		data.ServerID,
 		data.ChannelID,
+		data.SupportedDynamicRanges,
+		data.CodecProfiles,
 	)
 	if err != nil {
 		return queueStreamStateError(client, event.RequestID, err)
@@ -417,6 +420,11 @@ func queueStreamStateError(
 	case errors.Is(err, realtime.ErrStreamP2PRelation):
 		message = "P2P stream peer is not allowed"
 		code = realtime.ErrorForbidden
+	case errors.Is(err, realtime.ErrStreamRenditionsInvalid):
+		message = "stream renditions are invalid"
+		code = realtime.ErrorInvalidPayload
+	case errors.Is(err, realtime.ErrStreamRenditionUnavailable):
+		message = "compatible stream rendition is not available"
 	}
 	return queueError(client, requestID, code, message)
 }

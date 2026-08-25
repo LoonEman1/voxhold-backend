@@ -27,6 +27,10 @@ const (
 
 type StreamMode string
 type StreamCodec string
+type StreamDynamicRange string
+type StreamColorPrimaries string
+type StreamTransfer string
+type StreamMatrix string
 
 const (
 	StreamModeServer StreamMode = "server"
@@ -36,35 +40,72 @@ const (
 	StreamCodecVP9  StreamCodec = "vp9"
 	StreamCodecH264 StreamCodec = "h264"
 	StreamCodecAV1  StreamCodec = "av1"
+
+	StreamDynamicRangeSDR   StreamDynamicRange = "sdr"
+	StreamDynamicRangeHDR10 StreamDynamicRange = "hdr10"
+	StreamDynamicRangeHLG   StreamDynamicRange = "hlg"
+
+	StreamColorPrimariesBT709  StreamColorPrimaries = "bt709"
+	StreamColorPrimariesBT2020 StreamColorPrimaries = "bt2020"
+
+	StreamTransferBT709 StreamTransfer = "bt709"
+	StreamTransferPQ    StreamTransfer = "pq"
+	StreamTransferHLG   StreamTransfer = "hlg"
+
+	StreamMatrixBT709     StreamMatrix = "bt709"
+	StreamMatrixBT2020NCL StreamMatrix = "bt2020-ncl"
 )
 
+const MaxStreamRenditions = 2
+
+type StreamCodecProfileData struct {
+	Codec   StreamCodec `json:"codec"`
+	Profile string      `json:"profile"`
+}
+
+type StreamRenditionData struct {
+	ID             string               `json:"id"`
+	Codec          StreamCodec          `json:"codec"`
+	Profile        string               `json:"profile"`
+	DynamicRange   StreamDynamicRange   `json:"dynamic_range"`
+	BitDepth       int                  `json:"bit_depth"`
+	ColorPrimaries StreamColorPrimaries `json:"color_primaries"`
+	Transfer       StreamTransfer       `json:"transfer"`
+	Matrix         StreamMatrix         `json:"matrix"`
+}
+
 type StreamStartData struct {
-	ServerID  int64       `json:"server_id"`
-	ChannelID int64       `json:"channel_id"`
-	Mode      StreamMode  `json:"mode"`
-	Codec     StreamCodec `json:"codec"`
-	HasAudio  bool        `json:"has_audio"`
+	ServerID   int64                 `json:"server_id"`
+	ChannelID  int64                 `json:"channel_id"`
+	Mode       StreamMode            `json:"mode"`
+	Codec      StreamCodec           `json:"codec"`
+	HasAudio   bool                  `json:"has_audio"`
+	Renditions []StreamRenditionData `json:"renditions,omitempty"`
 }
 
 type StreamWatchData struct {
-	ServerID  int64 `json:"server_id"`
-	ChannelID int64 `json:"channel_id"`
+	ServerID               int64                    `json:"server_id"`
+	ChannelID              int64                    `json:"channel_id"`
+	SupportedDynamicRanges []StreamDynamicRange     `json:"supported_dynamic_ranges,omitempty"`
+	CodecProfiles          []StreamCodecProfileData `json:"codec_profiles,omitempty"`
 }
 
 type StreamData struct {
-	ServerID              int64       `json:"server_id"`
-	ChannelID             int64       `json:"channel_id"`
-	PublisherUserID       int64       `json:"publisher_user_id"`
-	PublisherConnectionID string      `json:"publisher_connection_id"`
-	Mode                  StreamMode  `json:"mode"`
-	Codec                 StreamCodec `json:"codec"`
-	HasAudio              bool        `json:"has_audio"`
-	ViewerCount           int         `json:"viewer_count"`
+	ServerID              int64                 `json:"server_id"`
+	ChannelID             int64                 `json:"channel_id"`
+	PublisherUserID       int64                 `json:"publisher_user_id"`
+	PublisherConnectionID string                `json:"publisher_connection_id"`
+	Mode                  StreamMode            `json:"mode"`
+	Codec                 StreamCodec           `json:"codec"`
+	HasAudio              bool                  `json:"has_audio"`
+	ViewerCount           int                   `json:"viewer_count"`
+	Renditions            []StreamRenditionData `json:"renditions"`
 }
 
 type StreamWatchingData struct {
-	Stream             StreamData `json:"stream"`
-	ViewerConnectionID string     `json:"viewer_connection_id"`
+	Stream              StreamData `json:"stream"`
+	ViewerConnectionID  string     `json:"viewer_connection_id"`
+	SelectedRenditionID string     `json:"selected_rendition_id"`
 }
 
 type StreamStoppedData struct {
@@ -141,7 +182,7 @@ func ValidStreamRecoveryAction(action StreamRecoveryAction) bool {
 }
 
 type StreamRecoveryRequestData struct {
-	ServerID int64                `json:"server_id"`
-	ChannelID int64               `json:"channel_id"`
-	Action   StreamRecoveryAction `json:"action"`
+	ServerID  int64                `json:"server_id"`
+	ChannelID int64                `json:"channel_id"`
+	Action    StreamRecoveryAction `json:"action"`
 }
