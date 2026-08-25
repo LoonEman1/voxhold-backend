@@ -132,15 +132,22 @@ type RealtimeProtector interface {
 }
 
 type Handler struct {
-	authenticator Authenticator
-	channelAccess ChannelAccess
-	memberships   MembershipLister
-	readStates    ReadStateLister
-	voiceMedia    VoiceMedia
-	streamMedia   StreamMedia
-	hub           *realtime.Hub
-	voiceJoins    userLockSet
-	protector     RealtimeProtector
+	authenticator  Authenticator
+	channelAccess  ChannelAccess
+	memberships    MembershipLister
+	readStates     ReadStateLister
+	voiceMedia     VoiceMedia
+	streamMedia    StreamMedia
+	hub            *realtime.Hub
+	voiceJoins     userLockSet
+	protector      RealtimeProtector
+	originPatterns func() []string
+}
+
+// SetOriginPatterns installs a runtime source for authorized cross-origin
+// WebSocket clients. Same-origin requests remain authorized by websocket.Accept.
+func (h *Handler) SetOriginPatterns(source func() []string) {
+	h.originPatterns = source
 }
 
 func NewHandler(
@@ -195,17 +202,22 @@ func (h *Handler) connect(
 		defer releaseIP()
 	}
 
+	originPatterns := []string{
+		"http://wails.localhost",
+		"https://wails.localhost",
+	}
+	if h.originPatterns != nil {
+		originPatterns = h.originPatterns()
+	}
+
 	connection, err := websocket.Accept(
 		w,
 		r,
 		&websocket.AcceptOptions{
-			// The packaged Wails client is served from this fixed local origin.
-			// Keep the allow-list narrow: authentication still happens in the
-			// first WebSocket event and arbitrary web origins remain rejected.
-			OriginPatterns: []string{
-				"http://wails.localhost",
-				"https://wails.localhost",
-			},
+			// Exact patterns come from the runtime CORS allow-list and include
+			// the packaged Wails origins. Authentication still happens in the
+			// first WebSocket event.
+			OriginPatterns: originPatterns,
 		},
 	)
 	if err != nil {

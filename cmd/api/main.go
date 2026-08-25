@@ -13,6 +13,7 @@ import (
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/antiabuse"
+	"voxhold-backend/internal/cors"
 	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/voice"
@@ -76,6 +77,11 @@ func main() {
 	}
 
 	log.Println("database is ready")
+
+	corsManager, err := cors.NewManager(context.Background(), db)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Browser clients receive the CLIENT ICE configuration through the
 	// runtime endpoint; the backend's own Pion sessions use SERVER values so
@@ -290,6 +296,7 @@ func main() {
 		realtimeHub,
 		antiAbuseGuard,
 	)
+	webSocketHandler.SetOriginPatterns(corsManager.OriginPatterns)
 
 	webrtcConfigHandler := webrtcconfighttp.NewHandler(
 		clientICEURLs,
@@ -335,6 +342,10 @@ func main() {
 		mux,
 		accountHandler.RequireAuth,
 	)
+	corsManager.RegisterRoutes(
+		mux,
+		accountHandler.RequireAuth,
+	)
 
 	webSocketHandler.RegisterRoutes(mux)
 
@@ -366,8 +377,10 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:              net.JoinHostPort(listenAddress, port),
-		Handler:           antiAbuseGuard.ProtectHTTP(mux),
+		Addr: net.JoinHostPort(listenAddress, port),
+		Handler: corsManager.Middleware(
+			antiAbuseGuard.ProtectHTTP(mux),
+		),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
