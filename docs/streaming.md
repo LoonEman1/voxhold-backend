@@ -22,6 +22,23 @@ WebRTC encrypts each hop with DTLS-SRTP. In server mode encryption terminates at
 the SFU and a new encrypted hop is created for every viewer. It is not end-to-end
 encryption against the server.
 
+## Experimental HDR
+
+HDR is opt-in and available only in `server` mode. The browser first verifies
+the captured frames, 10-bit codec path, WebGPU processing path, and the viewer's
+HDR output. A publisher that passes those checks uploads two video renditions:
+
+- a 10-bit BT.2020 PQ/HLG master for a verified HDR viewer;
+- an 8-bit BT.709 rendition tone-mapped on the publisher GPU for SDR and
+  unknown/legacy viewers.
+
+The SFU does not transcode. It selects one declared rendition for each viewer,
+forwards the matching encoded RTP, and rebuilds the negotiated color-space RTP
+extension. If either the HDR probe or the SDR tone-map pipeline fails, the HDR
+publication fails closed instead of sending washed-out HDR to SDR displays.
+P2P remains SDR-only. `Auto` also remains SDR until the hardware/browser matrix
+described below passes the product gate.
+
 ## Limits
 
 Client quality settings configure the browser encoder. They are not trusted by
@@ -66,9 +83,28 @@ from an older ICE generation are discarded on both sides instead of terminating
 the current session.
 
 Only one stream can be active in a voice channel. A publisher may send one
-video track in the declared codec and at most one Opus audio track. Pending ICE
-candidates are capped at 64 per server-side media session. The common WebSocket
-event limit also caps SDP and P2P signaling payloads.
+or, for experimental HDR, two declared video tracks in the same codec family,
+plus at most one common Opus audio track. The video bitrate ceiling applies to
+the sum of both renditions. Pending ICE candidates are capped at 64 per
+server-side media session. The common WebSocket event limit also caps SDP and
+P2P signaling payloads.
+
+## Single-node boundary
+
+Voxhold is a single-node SFU. SQLite data, WebSocket presence, rooms, rate
+limits, ICE sessions, and the UDP mux are owned by one backend process. Starting
+a second backend replica behind round-robin HTTP does not provide HA: signaling
+can land on a process that does not own the media session, and in-memory limits
+and room state diverge. Use one backend replica with durable off-host backups.
+
+Real multi-node HA is a separate architecture: shared durable application and
+signaling state, distributed rate limits/presence, sticky routing, and explicit
+media-room ownership with failover or session migration. SQLite file sharing
+and two processes binding different UDP ports are not substitutes for it.
+
+The default 32-viewer limit is a safety ceiling, not a capacity guarantee.
+Dual-rendition HDR approximately doubles publisher encode work and upload; SFU
+egress still grows with the selected rendition bitrate times viewer count.
 
 ## Runtime ICE configuration for browsers
 
@@ -101,3 +137,50 @@ requests.
 On a VPS, allow both UDP ports in the host and provider firewall and set
 `WEBRTC_PUBLIC_IP` to the public IPv4 address. TURN settings are shared with
 voice through `WEBRTC_ICE_*`.
+
+## Recovery observability
+
+Backend logs expose monotonic per-process totals without logging SDP, ICE
+credentials, or pixels:
+
+- `event=stream_media_recovery_started` when a stream session enters bounded
+  ICE recovery;
+- `event=stream_media_recovery_succeeded` when that session reconnects;
+- `event=stream_media_recovery_exhausted` before the failed session is removed;
+- `event=websocket_outgoing_queue_full` once per affected connection when its
+  bounded 128-event queue cannot accept another event.
+
+Alert on an increasing exhaustion/start ratio and any sustained queue-full
+rate. Totals reset on process restart, so a log collector should convert them
+to external counters if long-term aggregation is needed.
+
+## Browser and network smoke
+
+The frontend Playwright suite uses two real headless Chromium contexts, fake
+microphones and an animated synthetic screen track. Both prepared users must be
+members of the same server and voice channel. The suite logs in, joins voice,
+publishes through the SFU, verifies decoded frames, forces a network break, and
+requires a new remote ICE generation with decoded frames after recovery.
+
+```env
+VOXHOLD_E2E_BASE_URL=https://test.example.com
+VOXHOLD_E2E_VOICE_CHANNEL=e2e-voice
+VOXHOLD_E2E_PUBLISHER_USERNAME=e2e-publisher
+VOXHOLD_E2E_PUBLISHER_PASSWORD=change-me
+VOXHOLD_E2E_VIEWER_USERNAME=e2e-viewer
+VOXHOLD_E2E_VIEWER_PASSWORD=change-me
+```
+
+Run it from the frontend repository with `npm run test:e2e:stream`. To include
+the relay assertion, block the direct WebRTC UDP path for the browser runner,
+configure a reachable TURN server, and set `VOXHOLD_E2E_RUN_TURN=1`. The test
+then requires the nominated remote candidate to be `relay`. Trace, video,
+screenshot, WebRTC frame counts, ICE generations, and candidate types are kept
+only for failed runs.
+
+Before enabling automatic HDR, separately run the physical Windows HDR
+on/off × HDR/SDR display × supported Chromium × AV1/VP9 matrix. For each case,
+record join time, freeze ratio, recovery success, CPU/GPU, memory and upload for
+1/8/32 viewers under 1/3/5% loss, jitter, reorder, and UDP-blocked TURN. Also
+perform the deploy-owned backup restore drill. A headless synthetic SDR smoke
+cannot certify 10-bit display output or visual tone-map accuracy.

@@ -7,18 +7,20 @@ import (
 )
 
 type activeStream struct {
-	serverID  int64
-	channelID int64
-	mode      StreamMode
-	codec     StreamCodec
-	hasAudio  bool
-	publisher *Client
-	viewers   map[*Client]struct{}
+	serverID   int64
+	channelID  int64
+	mode       StreamMode
+	codec      StreamCodec
+	hasAudio   bool
+	renditions []StreamRenditionData
+	publisher  *Client
+	viewers    map[*Client]struct{}
 }
 
 type streamClientState struct {
-	stream    *activeStream
-	publisher bool
+	stream      *activeStream
+	publisher   bool
+	renditionID string
 }
 
 type streamState struct {
@@ -40,6 +42,7 @@ func (s *streamState) start(
 	mode StreamMode,
 	codec StreamCodec,
 	hasAudio bool,
+	renditions []StreamRenditionData,
 ) (StreamData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -50,13 +53,14 @@ func (s *streamState) start(
 		return StreamData{}, false
 	}
 	value := &activeStream{
-		serverID:  participant.ServerID,
-		channelID: participant.ChannelID,
-		mode:      mode,
-		codec:     codec,
-		hasAudio:  hasAudio,
-		publisher: client,
-		viewers:   make(map[*Client]struct{}),
+		serverID:   participant.ServerID,
+		channelID:  participant.ChannelID,
+		mode:       mode,
+		codec:      codec,
+		hasAudio:   hasAudio,
+		renditions: cloneStreamRenditions(renditions),
+		publisher:  client,
+		viewers:    make(map[*Client]struct{}),
 	}
 	s.byChannel[value.channelID] = value
 	s.byClient[client] = streamClientState{
@@ -71,7 +75,9 @@ func (s *streamState) watch(
 	participant VoiceParticipantData,
 	maxServerViewers int,
 	maxP2PViewers int,
-) (StreamData, *Client, error) {
+	supportedDynamicRanges []StreamDynamicRange,
+	codecProfiles []StreamCodecProfileData,
+) (StreamData, *Client, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -80,18 +86,29 @@ func (s *streamState) watch(
 		value.serverID != participant.ServerID ||
 		s.byClient[client].stream != nil {
 
-		return StreamData{}, nil, ErrStreamUnavailable
+		return StreamData{}, nil, "", ErrStreamUnavailable
 	}
 	maximum := maxServerViewers
 	if value.mode == StreamModeP2P {
 		maximum = maxP2PViewers
 	}
 	if len(value.viewers) >= maximum {
-		return StreamData{}, nil, ErrStreamViewerLimit
+		return StreamData{}, nil, "", ErrStreamViewerLimit
+	}
+	selectedRenditionID := selectStreamRendition(
+		value.renditions,
+		supportedDynamicRanges,
+		codecProfiles,
+	)
+	if selectedRenditionID == "" {
+		return StreamData{}, nil, "", ErrStreamRenditionUnavailable
 	}
 	value.viewers[client] = struct{}{}
-	s.byClient[client] = streamClientState{stream: value}
-	return streamData(value), value.publisher, nil
+	s.byClient[client] = streamClientState{
+		stream:      value,
+		renditionID: selectedRenditionID,
+	}
+	return streamData(value), value.publisher, selectedRenditionID, nil
 }
 
 func (s *streamState) leave(
@@ -222,5 +239,10 @@ func streamData(value *activeStream) StreamData {
 		Codec:                 value.codec,
 		HasAudio:              value.hasAudio,
 		ViewerCount:           len(value.viewers),
+		Renditions:            cloneStreamRenditions(value.renditions),
 	}
+}
+
+func cloneStreamRenditions(values []StreamRenditionData) []StreamRenditionData {
+	return append([]StreamRenditionData(nil), values...)
 }

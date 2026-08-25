@@ -18,6 +18,12 @@ var (
 	ErrStreamP2PRelation = errors.New(
 		"P2P stream peers are not related",
 	)
+	ErrStreamRenditionsInvalid = errors.New(
+		"stream renditions are invalid",
+	)
+	ErrStreamRenditionUnavailable = errors.New(
+		"compatible stream rendition is not available",
+	)
 )
 
 type StreamSessionCloser interface {
@@ -46,6 +52,26 @@ func (h *Hub) StartStream(
 	codec StreamCodec,
 	hasAudio bool,
 ) (StreamData, error) {
+	return h.StartStreamWithRenditions(
+		client,
+		serverID,
+		channelID,
+		mode,
+		codec,
+		hasAudio,
+		nil,
+	)
+}
+
+func (h *Hub) StartStreamWithRenditions(
+	client *Client,
+	serverID int64,
+	channelID int64,
+	mode StreamMode,
+	codec StreamCodec,
+	hasAudio bool,
+	renditions []StreamRenditionData,
+) (StreamData, error) {
 	if client == nil || (mode != StreamModeServer &&
 		mode != StreamModeP2P) || !validStreamCodec(codec) {
 
@@ -57,6 +83,10 @@ func (h *Hub) StartStream(
 
 		return StreamData{}, ErrStreamVoiceRequired
 	}
+	normalizedRenditions, ok := normalizeStreamRenditions(codec, renditions)
+	if !ok || (mode == StreamModeP2P && !onlySDRStreamRenditions(normalizedRenditions)) {
+		return StreamData{}, ErrStreamRenditionsInvalid
+	}
 
 	data, started := h.streams.start(
 		client,
@@ -64,6 +94,7 @@ func (h *Hub) StartStream(
 		mode,
 		codec,
 		hasAudio,
+		normalizedRenditions,
 	)
 	if !started {
 		return StreamData{}, ErrStreamAlreadyActive
@@ -103,6 +134,16 @@ func (h *Hub) WatchStream(
 	serverID int64,
 	channelID int64,
 ) (StreamWatchingData, error) {
+	return h.WatchStreamWithCapabilities(client, serverID, channelID, nil, nil)
+}
+
+func (h *Hub) WatchStreamWithCapabilities(
+	client *Client,
+	serverID int64,
+	channelID int64,
+	supportedDynamicRanges []StreamDynamicRange,
+	codecProfiles []StreamCodecProfileData,
+) (StreamWatchingData, error) {
 	if client == nil {
 		return StreamWatchingData{}, ErrStreamUnavailable
 	}
@@ -113,11 +154,13 @@ func (h *Hub) WatchStream(
 		return StreamWatchingData{}, ErrStreamVoiceRequired
 	}
 
-	data, publisher, err := h.streams.watch(
+	data, publisher, selectedRenditionID, err := h.streams.watch(
 		client,
 		participant,
 		h.maxStreamViewers,
 		h.maxP2PStreamViewers,
+		supportedDynamicRanges,
+		codecProfiles,
 	)
 	if err != nil {
 		return StreamWatchingData{}, err
@@ -153,9 +196,144 @@ func (h *Hub) WatchStream(
 		},
 	)
 	return StreamWatchingData{
-		Stream:             data,
-		ViewerConnectionID: client.ConnectionID(),
+		Stream:              data,
+		ViewerConnectionID:  client.ConnectionID(),
+		SelectedRenditionID: selectedRenditionID,
 	}, nil
+}
+
+func normalizeStreamRenditions(
+	legacyCodec StreamCodec,
+	values []StreamRenditionData,
+) ([]StreamRenditionData, bool) {
+	if len(values) == 0 {
+		return []StreamRenditionData{legacySDRStreamRendition(legacyCodec)}, true
+	}
+	if len(values) > MaxStreamRenditions {
+		return nil, false
+	}
+	result := cloneStreamRenditions(values)
+	seenIDs := make(map[string]struct{}, len(result))
+	seenRanges := make(map[StreamDynamicRange]struct{}, len(result))
+	for _, value := range result {
+		if !validStreamRenditionID(value.ID) || !validStreamRendition(value) {
+			return nil, false
+		}
+		if _, exists := seenIDs[value.ID]; exists {
+			return nil, false
+		}
+		if _, exists := seenRanges[value.DynamicRange]; exists {
+			return nil, false
+		}
+		seenIDs[value.ID] = struct{}{}
+		seenRanges[value.DynamicRange] = struct{}{}
+	}
+	return result, true
+}
+
+func legacySDRStreamRendition(codec StreamCodec) StreamRenditionData {
+	profile := ""
+	switch codec {
+	case StreamCodecVP9:
+		profile = "0"
+	case StreamCodecH264:
+		profile = "baseline"
+	case StreamCodecAV1:
+		profile = "main"
+	}
+	return StreamRenditionData{
+		ID:             "sdr",
+		Codec:          codec,
+		Profile:        profile,
+		DynamicRange:   StreamDynamicRangeSDR,
+		BitDepth:       8,
+		ColorPrimaries: StreamColorPrimariesBT709,
+		Transfer:       StreamTransferBT709,
+		Matrix:         StreamMatrixBT709,
+	}
+}
+
+func validStreamRenditionID(value string) bool {
+	if len(value) == 0 || len(value) > 32 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') &&
+			(character < '0' || character > '9') &&
+			character != '-' && character != '_' {
+
+			return false
+		}
+	}
+	return true
+}
+
+func validStreamRendition(value StreamRenditionData) bool {
+	if !validStreamCodec(value.Codec) || len(value.Profile) > 32 {
+		return false
+	}
+	switch value.DynamicRange {
+	case StreamDynamicRangeSDR:
+		return value.BitDepth == 8 &&
+			value.ColorPrimaries == StreamColorPrimariesBT709 &&
+			value.Transfer == StreamTransferBT709 &&
+			value.Matrix == StreamMatrixBT709
+	case StreamDynamicRangeHDR10:
+		return validHDRStreamCodecProfile(value.Codec, value.Profile) &&
+			value.BitDepth == 10 &&
+			value.ColorPrimaries == StreamColorPrimariesBT2020 &&
+			value.Transfer == StreamTransferPQ &&
+			value.Matrix == StreamMatrixBT2020NCL
+	case StreamDynamicRangeHLG:
+		return validHDRStreamCodecProfile(value.Codec, value.Profile) &&
+			value.BitDepth == 10 &&
+			value.ColorPrimaries == StreamColorPrimariesBT2020 &&
+			value.Transfer == StreamTransferHLG &&
+			value.Matrix == StreamMatrixBT2020NCL
+	default:
+		return false
+	}
+}
+
+func validHDRStreamCodecProfile(codec StreamCodec, profile string) bool {
+	return (codec == StreamCodecAV1 && profile == "main10") ||
+		(codec == StreamCodecVP9 && profile == "2")
+}
+
+func onlySDRStreamRenditions(values []StreamRenditionData) bool {
+	return len(values) == 1 && values[0].DynamicRange == StreamDynamicRangeSDR
+}
+
+func selectStreamRendition(
+	values []StreamRenditionData,
+	supportedDynamicRanges []StreamDynamicRange,
+	codecProfiles []StreamCodecProfileData,
+) string {
+	supportedRanges := make(map[StreamDynamicRange]struct{}, len(supportedDynamicRanges))
+	for _, value := range supportedDynamicRanges {
+		if value == StreamDynamicRangeHDR10 || value == StreamDynamicRangeHLG {
+			supportedRanges[value] = struct{}{}
+		}
+	}
+	for _, rendition := range values {
+		if rendition.DynamicRange == StreamDynamicRangeSDR {
+			continue
+		}
+		if _, supported := supportedRanges[rendition.DynamicRange]; !supported {
+			continue
+		}
+		for _, profile := range codecProfiles {
+			if profile.Codec == rendition.Codec && profile.Profile == rendition.Profile {
+				return rendition.ID
+			}
+		}
+	}
+	for _, rendition := range values {
+		if rendition.DynamicRange == StreamDynamicRangeSDR {
+			return rendition.ID
+		}
+	}
+	return ""
 }
 
 func (h *Hub) LeaveStream(

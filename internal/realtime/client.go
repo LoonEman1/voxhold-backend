@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"crypto/sha256"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,18 +11,22 @@ import (
 
 const outgoingBufferSize = 128
 
-var nextConnectionID atomic.Uint64
+var (
+	nextConnectionID        atomic.Uint64
+	websocketQueueFullTotal atomic.Uint64
+)
 
 type Client struct {
 	connectionID string
 	userID       int64
 	sessionKey   [sha256.Size]byte
 
-	outgoing    chan OutgoingEvent
-	done        chan struct{}
-	closeOnce   sync.Once
-	stateMu     sync.RWMutex
-	closeReason string
+	outgoing        chan OutgoingEvent
+	done            chan struct{}
+	closeOnce       sync.Once
+	stateMu         sync.RWMutex
+	closeReason     string
+	queueFullLogged atomic.Bool
 
 	subscriptionsMu sync.RWMutex
 	subscriptions   map[int64]int64
@@ -121,6 +126,13 @@ func (c *Client) enqueue(
 		return true
 
 	default:
+		if c.queueFullLogged.CompareAndSwap(false, true) {
+			total := websocketQueueFullTotal.Add(1)
+			log.Printf(
+				"event=websocket_outgoing_queue_full total=%d connection_id=%s user_id=%d capacity=%d",
+				total, c.connectionID, c.userID, cap(c.outgoing),
+			)
+		}
 		return false
 	}
 }

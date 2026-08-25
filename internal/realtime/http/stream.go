@@ -29,26 +29,24 @@ func (h *Handler) startStream(
 		)
 	}
 
-	streamData, err := h.hub.StartStream(
+	streamData, err := h.hub.StartStreamWithRenditions(
 		client,
 		data.ServerID,
 		data.ChannelID,
 		data.Mode,
 		data.Codec,
 		data.HasAudio,
+		data.Renditions,
 	)
 	if err != nil {
 		return queueStreamStateError(client, event.RequestID, err)
 	}
 
 	if data.Mode == realtime.StreamModeServer {
-		err = h.streamMedia.Start(
-			client.ConnectionID(),
-			client.UserID(),
-			data.ServerID,
-			data.ChannelID,
-			stream.Codec(data.Codec),
-			data.HasAudio,
+		err = startStreamMedia(
+			h.streamMedia, client.ConnectionID(), client.UserID(),
+			data.ServerID, data.ChannelID, stream.Codec(data.Codec),
+			data.HasAudio, mediaStreamRenditions(streamData.Renditions),
 		)
 		if err != nil {
 			h.hub.LeaveStream(
@@ -101,21 +99,21 @@ func (h *Handler) watchStream(
 		)
 	}
 
-	watching, err := h.hub.WatchStream(
+	watching, err := h.hub.WatchStreamWithCapabilities(
 		client,
 		data.ServerID,
 		data.ChannelID,
+		data.SupportedDynamicRanges,
+		data.CodecProfiles,
 	)
 	if err != nil {
 		return queueStreamStateError(client, event.RequestID, err)
 	}
 
 	if watching.Stream.Mode == realtime.StreamModeServer {
-		err = h.streamMedia.Watch(
-			client.ConnectionID(),
-			client.UserID(),
-			data.ServerID,
-			data.ChannelID,
+		err = watchStreamMedia(
+			h.streamMedia, client.ConnectionID(), client.UserID(),
+			data.ServerID, data.ChannelID, watching.SelectedRenditionID,
 		)
 		if err != nil {
 			h.hub.LeaveStream(
@@ -148,6 +146,82 @@ func (h *Handler) watchStream(
 			Data:      watching,
 		},
 	)
+}
+
+func mediaStreamRenditions(values []realtime.StreamRenditionData) []stream.Rendition {
+	result := make([]stream.Rendition, 0, len(values))
+	for _, value := range values {
+		result = append(result, stream.Rendition{
+			ID:             value.ID,
+			Codec:          stream.Codec(value.Codec),
+			Profile:        value.Profile,
+			DynamicRange:   string(value.DynamicRange),
+			BitDepth:       value.BitDepth,
+			ColorPrimaries: string(value.ColorPrimaries),
+			Transfer:       string(value.Transfer),
+			Matrix:         string(value.Matrix),
+		})
+	}
+	return result
+}
+
+type renditionStreamMedia interface {
+	StartWithRenditions(
+		connectionID string,
+		userID int64,
+		serverID int64,
+		channelID int64,
+		codec stream.Codec,
+		hasAudio bool,
+		renditions []stream.Rendition,
+	) error
+	WatchRendition(
+		connectionID string,
+		userID int64,
+		serverID int64,
+		channelID int64,
+		selectedRenditionID string,
+	) error
+}
+
+func startStreamMedia(
+	media StreamMedia,
+	connectionID string,
+	userID int64,
+	serverID int64,
+	channelID int64,
+	codec stream.Codec,
+	hasAudio bool,
+	renditions []stream.Rendition,
+) error {
+	if enhanced, ok := media.(renditionStreamMedia); ok {
+		return enhanced.StartWithRenditions(
+			connectionID, userID, serverID, channelID, codec, hasAudio, renditions,
+		)
+	}
+	if len(renditions) != 1 || renditions[0].DynamicRange != "sdr" {
+		return errors.New("stream media does not support HDR renditions")
+	}
+	return media.Start(connectionID, userID, serverID, channelID, codec, hasAudio)
+}
+
+func watchStreamMedia(
+	media StreamMedia,
+	connectionID string,
+	userID int64,
+	serverID int64,
+	channelID int64,
+	selectedRenditionID string,
+) error {
+	if enhanced, ok := media.(renditionStreamMedia); ok {
+		return enhanced.WatchRendition(
+			connectionID, userID, serverID, channelID, selectedRenditionID,
+		)
+	}
+	if selectedRenditionID != "sdr" {
+		return errors.New("stream media does not support the selected rendition")
+	}
+	return media.Watch(connectionID, userID, serverID, channelID)
 }
 
 func (h *Handler) leaveStream(
@@ -417,6 +491,11 @@ func queueStreamStateError(
 	case errors.Is(err, realtime.ErrStreamP2PRelation):
 		message = "P2P stream peer is not allowed"
 		code = realtime.ErrorForbidden
+	case errors.Is(err, realtime.ErrStreamRenditionsInvalid):
+		message = "stream renditions are invalid"
+		code = realtime.ErrorInvalidPayload
+	case errors.Is(err, realtime.ErrStreamRenditionUnavailable):
+		message = "compatible stream rendition is not available"
 	}
 	return queueError(client, requestID, code, message)
 }

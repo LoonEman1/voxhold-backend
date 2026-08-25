@@ -7,29 +7,66 @@ import (
 )
 
 type roomTrack struct {
-	kind  webrtc.RTPCodecType
-	track *webrtc.TrackLocalStaticRTP
-	codec webrtc.RTPCodecCapability
+	key       roomTrackKey
+	track     *relayTrack
+	codec     webrtc.RTPCodecCapability
+	rendition Rendition
+}
+
+type roomTrackKey struct {
+	renditionID string
+	kind        webrtc.RTPCodecType
 }
 
 type room struct {
-	id    int64
-	codec Codec
+	id         int64
+	renditions map[string]Rendition
+	order      []string
 
 	mu           sync.RWMutex
 	publisher    *session
 	viewers      map[string]*session
-	tracks       map[webrtc.RTPCodecType]roomTrack
+	tracks       map[roomTrackKey]roomTrack
 	reservations int
 }
 
 func newRoom(id int64, codec Codec) *room {
-	return &room{
-		id:      id,
-		codec:   codec,
-		viewers: make(map[string]*session),
-		tracks:  make(map[webrtc.RTPCodecType]roomTrack),
+	return newRoomWithRenditions(id, []Rendition{legacySDRRendition(codec)})
+}
+
+func newRoomWithRenditions(id int64, renditions []Rendition) *room {
+	byID := make(map[string]Rendition, len(renditions))
+	order := make([]string, 0, len(renditions))
+	for _, rendition := range renditions {
+		byID[rendition.ID] = rendition
+		order = append(order, rendition.ID)
 	}
+	return &room{
+		id:         id,
+		renditions: byID,
+		order:      order,
+		viewers:    make(map[string]*session),
+		tracks:     make(map[roomTrackKey]roomTrack),
+	}
+}
+
+func (r *room) hasRendition(id string) bool {
+	_, exists := r.renditions[id]
+	return exists
+}
+
+func (r *room) rendition(id string) (Rendition, bool) {
+	value, exists := r.renditions[id]
+	return value, exists
+}
+
+func (r *room) defaultSDRRenditionID() string {
+	for _, id := range r.order {
+		if r.renditions[id].DynamicRange == "sdr" {
+			return id
+		}
+	}
+	return ""
 }
 
 func (r *room) reserveViewer(maximum int) bool {
@@ -86,38 +123,40 @@ func (r *room) addTrack(value roomTrack) bool {
 	if r.publisher == nil {
 		return false
 	}
-	if _, exists := r.tracks[value.kind]; exists {
+	if _, exists := r.tracks[value.key]; exists {
 		return false
 	}
-	r.tracks[value.kind] = value
+	r.tracks[value.key] = value
 	return true
 }
 
 func (r *room) removeTrack(
-	kind webrtc.RTPCodecType,
-	track *webrtc.TrackLocalStaticRTP,
+	key roomTrackKey,
+	track *relayTrack,
 ) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	current, exists := r.tracks[kind]
+	current, exists := r.tracks[key]
 	if !exists || current.track != track {
 		return false
 	}
-	delete(r.tracks, kind)
+	delete(r.tracks, key)
 	return true
 }
 
-func (r *room) trackSnapshot() map[webrtc.RTPCodecType]roomTrack {
+func (r *room) trackSnapshot(selectedRenditionID string) map[roomTrackKey]roomTrack {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	result := make(
-		map[webrtc.RTPCodecType]roomTrack,
+		map[roomTrackKey]roomTrack,
 		len(r.tracks),
 	)
-	for kind, track := range r.tracks {
-		result[kind] = track
+	for key, track := range r.tracks {
+		if key.kind == webrtc.RTPCodecTypeAudio || key.renditionID == selectedRenditionID {
+			result[key] = track
+		}
 	}
 	return result
 }
@@ -133,12 +172,20 @@ func (r *room) viewerSnapshot() []*session {
 	return result
 }
 
-func (r *room) requestKeyFrame() {
+func (r *room) requestKeyFrame(renditionID string) {
 	r.mu.RLock()
 	publisher := r.publisher
 	r.mu.RUnlock()
 	if publisher != nil {
-		publisher.requestKeyFrame()
+		publisher.requestKeyFrame(renditionID)
+	}
+}
+
+func (r *room) disconnectViewersForRendition(renditionID, reason string) {
+	for _, viewer := range r.viewerSnapshot() {
+		if viewer.selectedRenditionID == renditionID {
+			viewer.scheduleFail(reason)
+		}
 	}
 }
 

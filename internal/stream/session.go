@@ -3,6 +3,7 @@ package stream
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,8 +14,162 @@ import (
 	"voxhold-backend/internal/webrtcrecovery"
 
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
+
+const colorSpaceRTPHeaderExtensionURI = "http://www.webrtc.org/experiments/rtp-hdrext/color-space"
+
+var (
+	streamRecoveryStartedTotal   atomic.Uint64
+	streamRecoverySucceededTotal atomic.Uint64
+	streamRecoveryExhaustedTotal atomic.Uint64
+)
+
+type relayBinding struct {
+	id                    string
+	ssrc                  webrtc.SSRC
+	payloadType           webrtc.PayloadType
+	writeStream           webrtc.TrackLocalWriter
+	colorSpaceExtensionID uint8
+}
+
+// relayTrack deliberately rebuilds outbound RTP headers per PeerConnection.
+// Incoming extension IDs are scoped to the publisher SDP and must never be
+// copied into a viewer SDP where the same URI may use a different ID.
+type relayTrack struct {
+	mu        sync.RWMutex
+	bindings  []relayBinding
+	codec     webrtc.RTPCodecCapability
+	id        string
+	streamID  string
+	colorData []byte
+}
+
+func newRelayTrack(
+	codec webrtc.RTPCodecCapability,
+	id string,
+	streamID string,
+	rendition Rendition,
+) *relayTrack {
+	return &relayTrack{
+		codec: codec, id: id, streamID: streamID,
+		colorData: colorSpaceExtensionData(rendition),
+	}
+}
+
+func (t *relayTrack) Bind(context webrtc.TrackLocalContext) (webrtc.RTPCodecParameters, error) {
+	for _, codec := range context.CodecParameters() {
+		if !strings.EqualFold(codec.MimeType, t.codec.MimeType) ||
+			codec.ClockRate != t.codec.ClockRate ||
+			codec.Channels != t.codec.Channels ||
+			!strings.EqualFold(codec.SDPFmtpLine, t.codec.SDPFmtpLine) {
+
+			continue
+		}
+		var colorSpaceExtensionID uint8
+		for _, extension := range context.HeaderExtensions() {
+			if extension.ID > 0 && extension.ID <= 255 &&
+				strings.EqualFold(extension.URI, colorSpaceRTPHeaderExtensionURI) {
+
+				colorSpaceExtensionID = uint8(extension.ID)
+				break
+			}
+		}
+		t.mu.Lock()
+		t.bindings = append(t.bindings, relayBinding{
+			id: context.ID(), ssrc: context.SSRC(), payloadType: codec.PayloadType,
+			writeStream: context.WriteStream(), colorSpaceExtensionID: colorSpaceExtensionID,
+		})
+		t.mu.Unlock()
+		return codec, nil
+	}
+	return webrtc.RTPCodecParameters{}, webrtc.ErrUnsupportedCodec
+}
+
+func (t *relayTrack) Unbind(context webrtc.TrackLocalContext) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for index := range t.bindings {
+		if t.bindings[index].id == context.ID() {
+			t.bindings[index] = t.bindings[len(t.bindings)-1]
+			t.bindings = t.bindings[:len(t.bindings)-1]
+			return nil
+		}
+	}
+	return webrtc.ErrUnbindFailed
+}
+
+func (t *relayTrack) ID() string                       { return t.id }
+func (*relayTrack) RID() string                        { return "" }
+func (t *relayTrack) StreamID() string                 { return t.streamID }
+func (t *relayTrack) Kind() webrtc.RTPCodecType        { return codecType(t.codec.MimeType) }
+func (t *relayTrack) Codec() webrtc.RTPCodecCapability { return t.codec }
+
+func (t *relayTrack) WriteRTP(packet *rtp.Packet) error {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	var result error
+	for _, binding := range t.bindings {
+		header := packet.Header
+		header.SSRC = uint32(binding.ssrc)
+		header.PayloadType = uint8(binding.payloadType)
+		header.Extension = false
+		header.ExtensionProfile = 0
+		header.Extensions = nil
+		if packet.Marker && binding.colorSpaceExtensionID != 0 && len(t.colorData) != 0 {
+			if err := header.SetExtension(binding.colorSpaceExtensionID, t.colorData); err != nil {
+				result = errors.Join(result, err)
+				continue
+			}
+		}
+		if _, err := binding.writeStream.WriteRTP(&header, packet.Payload); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
+}
+
+func codecType(mimeType string) webrtc.RTPCodecType {
+	if strings.HasPrefix(strings.ToLower(mimeType), "audio/") {
+		return webrtc.RTPCodecTypeAudio
+	}
+	return webrtc.RTPCodecTypeVideo
+}
+
+func colorSpaceExtensionData(rendition Rendition) []byte {
+	// H.273: BT.709=1, BT.2020=9, PQ=16, HLG=18. The fourth
+	// byte declares limited range with unspecified chroma siting.
+	switch rendition.DynamicRange {
+	case "sdr":
+		return []byte{1, 1, 1, 0x10}
+	case "hdr10":
+		return []byte{9, 16, 9, 0x10}
+	case "hlg":
+		return []byte{9, 18, 9, 0x10}
+	default:
+		return nil
+	}
+}
+
+func codecMatchesRendition(
+	capability webrtc.RTPCodecCapability,
+	rendition Rendition,
+) bool {
+	if codecForMimeType(capability.MimeType) != rendition.Codec {
+		return false
+	}
+	if rendition.Codec != CodecVP9 {
+		return true
+	}
+	expected := "profile-id=" + rendition.Profile
+	for _, part := range strings.Split(capability.SDPFmtpLine, ";") {
+		if strings.EqualFold(strings.TrimSpace(part), expected) {
+			return true
+		}
+	}
+	return false
+}
 
 type sessionRole uint8
 
@@ -37,7 +192,13 @@ type session struct {
 	closed       atomic.Bool
 	videoBitrate *bitrateLimiter
 	audioBitrate *bitrateLimiter
-	videoSSRC    atomic.Uint32
+	mediaMu      sync.RWMutex
+	videoSSRC    map[string]uint32
+	writeRTCP    func([]rtcp.Packet) error
+
+	selectedRenditionID   string
+	publisherTransceivers map[*webrtc.RTPTransceiver]string
+	publisherMIDs         map[string]string
 
 	// Viewer-initiated recovery cooldowns under one mutex. A rate limited
 	// request is treated as successfully ignored, never as a failure.
@@ -54,6 +215,7 @@ type session struct {
 	pendingCandidates  []ICECandidate
 	closeOnce          sync.Once
 	recovery           *webrtcrecovery.Controller
+	recoveryActive     atomic.Bool
 }
 
 func newSession(
@@ -85,6 +247,9 @@ func newSession(
 		),
 		keyframeCooldown: 2 * time.Second,
 		iceCooldown:      10 * time.Second,
+		videoSSRC:        make(map[string]uint32),
+		writeRTCP:        peer.WriteRTCP,
+		publisherMIDs:    make(map[string]string),
 		recovery: webrtcrecovery.New(
 			webrtcrecovery.Policy{
 				InitialDelay: 2 * time.Second,
@@ -130,10 +295,10 @@ func (s *session) installCallbacks() {
 		s.peer.OnTrack(
 			func(
 				remote *webrtc.TrackRemote,
-				_ *webrtc.RTPReceiver,
+				receiver *webrtc.RTPReceiver,
 			) {
 				safego.GuardedRun("stream/onTrack", func() {
-					s.forwardTrack(remote)
+					s.forwardTrack(remote, receiver)
 				}, func() {
 					s.scheduleFail("internal error while forwarding stream track")
 				})
@@ -150,41 +315,46 @@ func (s *session) scheduleFail(reason string) {
 	})
 }
 
-func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
+func (s *session) forwardTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 	if s.closed.Load() ||
 		(remote.Kind() != webrtc.RTPCodecTypeVideo &&
 			remote.Kind() != webrtc.RTPCodecTypeAudio) {
 
 		return
 	}
-	if remote.Kind() == webrtc.RTPCodecTypeVideo &&
-		codecForMimeType(remote.Codec().MimeType) != s.room.codec {
-
-		s.manager.failSession(s, "publisher negotiated an unexpected stream codec")
-		return
+	key := roomTrackKey{kind: remote.Kind()}
+	rendition := Rendition{}
+	if remote.Kind() == webrtc.RTPCodecTypeVideo {
+		transceiver := receiver.RTPTransceiver()
+		mid := ""
+		if transceiver != nil {
+			mid = transceiver.Mid()
+		}
+		s.mediaMu.RLock()
+		key.renditionID = s.publisherMIDs[mid]
+		s.mediaMu.RUnlock()
+		var exists bool
+		rendition, exists = s.room.rendition(key.renditionID)
+		if !exists || !codecMatchesRendition(remote.Codec().RTPCodecCapability, rendition) {
+			s.manager.failSession(s, "publisher negotiated an unexpected stream rendition")
+			return
+		}
 	}
 
 	trackName := "screen-video"
 	if remote.Kind() == webrtc.RTPCodecTypeAudio {
 		trackName = "screen-audio"
 	}
-	local, err := webrtc.NewTrackLocalStaticRTP(
+	local := newRelayTrack(
 		remote.Codec().RTPCodecCapability,
 		trackName+"-"+s.connectionID,
 		"stream-"+strconv.FormatInt(s.channelID, 10),
+		rendition,
 	)
-	if err != nil {
-		s.manager.failSession(
-			s,
-			"failed to create outgoing stream track",
-		)
-		return
-	}
 
 	if !s.room.addTrack(roomTrack{
-		kind:  remote.Kind(),
-		track: local,
-		codec: remote.Codec().RTPCodecCapability,
+		key: key, track: local, codec: remote.Codec().RTPCodecCapability,
+		rendition: rendition,
 	}) {
 		s.manager.failSession(
 			s,
@@ -193,18 +363,29 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
 		return
 	}
 	if remote.Kind() == webrtc.RTPCodecTypeVideo {
-		s.videoSSRC.Store(uint32(remote.SSRC()))
+		s.mediaMu.Lock()
+		s.videoSSRC[key.renditionID] = uint32(remote.SSRC())
+		s.mediaMu.Unlock()
 		// Ask for the first key frame once. Further key frames are requested
 		// when a viewer connects or explicitly reports picture loss.
-		s.requestKeyFrame()
+		s.requestKeyFrame(key.renditionID)
 	}
 	s.room.synchronizeViewers()
 	defer func() {
 		if remote.Kind() == webrtc.RTPCodecTypeVideo {
-			s.videoSSRC.Store(0)
+			s.mediaMu.Lock()
+			delete(s.videoSSRC, key.renditionID)
+			s.mediaMu.Unlock()
 		}
-		if s.room.removeTrack(remote.Kind(), local) {
-			s.room.synchronizeViewers()
+		if s.room.removeTrack(key, local) {
+			if remote.Kind() == webrtc.RTPCodecTypeVideo {
+				s.room.disconnectViewersForRendition(
+					key.renditionID,
+					"selected stream rendition ended",
+				)
+			} else {
+				s.room.synchronizeViewers()
+			}
 		}
 	}()
 
@@ -225,8 +406,6 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote) {
 			return
 		}
 
-		packet.Extension = false
-		packet.Extensions = nil
 		if err := local.WriteRTP(packet); err != nil {
 			return
 		}
@@ -240,6 +419,9 @@ func (s *session) createOffer() error {
 		return ErrSessionNotFound
 	}
 	sdp, err := s.createOfferLocked(false)
+	if err == nil && s.role == sessionPublisher {
+		err = s.bindPublisherMIDs()
+	}
 	s.negotiationMu.Unlock()
 	if err != nil {
 		return err
@@ -248,11 +430,29 @@ func (s *session) createOffer() error {
 	return nil
 }
 
+func (s *session) bindPublisherMIDs() error {
+	mids := make(map[string]string, len(s.publisherTransceivers))
+	for transceiver, renditionID := range s.publisherTransceivers {
+		mid := transceiver.Mid()
+		if mid == "" {
+			return errors.New("publisher video transceiver MID is missing")
+		}
+		if _, duplicate := mids[mid]; duplicate {
+			return errors.New("publisher video transceiver MID is duplicated")
+		}
+		mids[mid] = renditionID
+	}
+	s.mediaMu.Lock()
+	s.publisherMIDs = mids
+	s.mediaMu.Unlock()
+	return nil
+}
+
 func (s *session) synchronizeViewerTracks(force bool) error {
 	if s.role != sessionViewer {
 		return nil
 	}
-	tracks := s.room.trackSnapshot()
+	tracks := s.room.trackSnapshot(s.selectedRenditionID)
 	// A PeerConnection without media sections produces an SDP answer without
 	// ICE credentials in browsers. Wait for the publisher's first RTP track;
 	// forwardTrack will call synchronizeViewers again as soon as it arrives.
@@ -305,7 +505,7 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 			)
 		}
 		changed = true
-		if value.kind == webrtc.RTPCodecTypeVideo {
+		if value.key.kind == webrtc.RTPCodecTypeVideo {
 			transceiver := transceiverForSender(s.peer, sender)
 			if transceiver == nil {
 				s.negotiationMu.Unlock()
@@ -315,11 +515,14 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 				s.manager.viewerCodecPreferences(value.codec),
 			); err != nil {
 				s.negotiationMu.Unlock()
-				return fmt.Errorf("prefer outgoing %s stream codec: %w", s.room.codec, err)
+				return fmt.Errorf(
+					"prefer outgoing %s:%s stream codec: %w",
+					value.rendition.Codec, value.rendition.Profile, err,
+				)
 			}
 		}
 		safego.Go("stream/drainViewerRTCP", func() {
-			drainViewerRTCP(sender, s.room)
+			drainViewerRTCP(sender, s.room, value.key.renditionID)
 		})
 	}
 
@@ -480,6 +683,7 @@ func candidateMatchesRemoteDescription(
 func (s *session) close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
+		s.recoveryActive.Store(false)
 		s.recovery.Stop()
 		_ = s.peer.Close()
 	})
@@ -491,8 +695,15 @@ func (s *session) handleConnectionState(
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
 		s.recovery.Stop()
+		if s.recoveryActive.Swap(false) {
+			total := streamRecoverySucceededTotal.Add(1)
+			log.Printf(
+				"event=stream_media_recovery_succeeded total=%d connection_id=%s role=%s server_id=%d channel_id=%d",
+				total, s.connectionID, s.roleName(), s.serverID, s.channelID,
+			)
+		}
 		if s.role == sessionViewer {
-			s.room.requestKeyFrame()
+			s.room.requestKeyFrame(s.selectedRenditionID)
 		}
 
 	case webrtc.PeerConnectionStateDisconnected:
@@ -514,6 +725,13 @@ func (s *session) startRecovery(immediate bool) {
 	if s.closed.Load() {
 		return
 	}
+	if s.recoveryActive.CompareAndSwap(false, true) {
+		total := streamRecoveryStartedTotal.Add(1)
+		log.Printf(
+			"event=stream_media_recovery_started total=%d connection_id=%s role=%s server_id=%d channel_id=%d immediate=%t",
+			total, s.connectionID, s.roleName(), s.serverID, s.channelID, immediate,
+		)
+	}
 	s.recovery.Start(
 		immediate,
 		s.restartICE,
@@ -523,12 +741,25 @@ func (s *session) startRecovery(immediate bool) {
 
 				return
 			}
+			s.recoveryActive.Store(false)
+			total := streamRecoveryExhaustedTotal.Add(1)
+			log.Printf(
+				"event=stream_media_recovery_exhausted total=%d connection_id=%s role=%s server_id=%d channel_id=%d",
+				total, s.connectionID, s.roleName(), s.serverID, s.channelID,
+			)
 			s.manager.failSession(
 				s,
 				"stream WebRTC recovery exhausted",
 			)
 		},
 	)
+}
+
+func (s *session) roleName() string {
+	if s.role == sessionPublisher {
+		return "publisher"
+	}
+	return "viewer"
 }
 
 func (s *session) restartICE() error {
@@ -551,12 +782,17 @@ func (s *session) restartICE() error {
 	return nil
 }
 
-func (s *session) requestKeyFrame() {
-	ssrc := s.videoSSRC.Load()
+func (s *session) requestKeyFrame(renditionID string) {
+	s.mediaMu.RLock()
+	ssrc := s.videoSSRC[renditionID]
+	s.mediaMu.RUnlock()
 	if s.closed.Load() || ssrc == 0 {
 		return
 	}
-	_ = s.peer.WriteRTCP([]rtcp.Packet{
+	if s.writeRTCP == nil {
+		return
+	}
+	_ = s.writeRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: ssrc},
 	})
 }
@@ -575,7 +811,7 @@ func (s *session) requestRecovery(action string) error {
 		}
 		s.lastKeyframeRequest = now
 		s.recoveryMu.Unlock()
-		s.room.requestKeyFrame()
+		s.room.requestKeyFrame(s.selectedRenditionID)
 		return nil
 
 	case RecoveryActionICERestart:
@@ -593,7 +829,7 @@ func (s *session) requestRecovery(action string) error {
 	}
 }
 
-func drainViewerRTCP(sender *webrtc.RTPSender, room *room) {
+func drainViewerRTCP(sender *webrtc.RTPSender, room *room, renditionID string) {
 	for {
 		packets, _, err := sender.ReadRTCP()
 		if err != nil {
@@ -604,7 +840,7 @@ func drainViewerRTCP(sender *webrtc.RTPSender, room *room) {
 			case *rtcp.PictureLossIndication,
 				*rtcp.FullIntraRequest:
 
-				room.requestKeyFrame()
+				room.requestKeyFrame(renditionID)
 			}
 		}
 	}

@@ -106,6 +106,151 @@ func TestP2PStreamSignalingOnlyAllowsPublisherViewerPair(t *testing.T) {
 	}
 }
 
+func TestLegacyStreamDefaultsToSDRRendition(t *testing.T) {
+	hub := NewHub()
+	publisher := NewClient(1, "publisher", []int64{10})
+	viewer := NewClient(2, "viewer", []int64{10})
+	for _, client := range []*Client{publisher, viewer} {
+		hub.Register(client)
+		hub.JoinVoice(client, 10, 100, false, false)
+	}
+
+	streamData, err := hub.StartStream(
+		publisher, 10, 100, StreamModeServer, StreamCodecVP9, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streamData.Renditions) != 1 ||
+		streamData.Renditions[0].ID != "sdr" ||
+		streamData.Renditions[0].DynamicRange != StreamDynamicRangeSDR ||
+		streamData.Renditions[0].Profile != "0" {
+
+		t.Fatalf("unexpected legacy rendition: %+v", streamData.Renditions)
+	}
+
+	watching, err := hub.WatchStream(viewer, 10, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if watching.SelectedRenditionID != "sdr" {
+		t.Fatalf("legacy viewer selected %q, want sdr", watching.SelectedRenditionID)
+	}
+}
+
+func TestStreamSelectsHDRRenditionOnlyForExactCapability(t *testing.T) {
+	hub := NewHub()
+	publisher := NewClient(1, "publisher", []int64{10})
+	sdrViewer := NewClient(2, "sdr-viewer", []int64{10})
+	hdrViewer := NewClient(3, "hdr-viewer", []int64{10})
+	for _, client := range []*Client{publisher, sdrViewer, hdrViewer} {
+		hub.Register(client)
+		hub.JoinVoice(client, 10, 100, false, false)
+	}
+	renditions := []StreamRenditionData{
+		legacySDRStreamRendition(StreamCodecH264),
+		{
+			ID:             "hdr",
+			Codec:          StreamCodecAV1,
+			Profile:        "main10",
+			DynamicRange:   StreamDynamicRangeHDR10,
+			BitDepth:       10,
+			ColorPrimaries: StreamColorPrimariesBT2020,
+			Transfer:       StreamTransferPQ,
+			Matrix:         StreamMatrixBT2020NCL,
+		},
+	}
+	if _, err := hub.StartStreamWithRenditions(
+		publisher, 10, 100, StreamModeServer, StreamCodecH264, false, renditions,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	sdrWatching, err := hub.WatchStreamWithCapabilities(
+		sdrViewer,
+		10,
+		100,
+		[]StreamDynamicRange{StreamDynamicRangeHDR10},
+		[]StreamCodecProfileData{{Codec: StreamCodecVP9, Profile: "2"}},
+	)
+	if err != nil || sdrWatching.SelectedRenditionID != "sdr" {
+		t.Fatalf("mismatched HDR capability did not fall back to SDR: %+v, %v", sdrWatching, err)
+	}
+
+	hdrWatching, err := hub.WatchStreamWithCapabilities(
+		hdrViewer,
+		10,
+		100,
+		[]StreamDynamicRange{StreamDynamicRangeHDR10},
+		[]StreamCodecProfileData{{Codec: StreamCodecAV1, Profile: "main10"}},
+	)
+	if err != nil || hdrWatching.SelectedRenditionID != "hdr" {
+		t.Fatalf("exact HDR capability was not selected: %+v, %v", hdrWatching, err)
+	}
+}
+
+func TestStreamRejectsInvalidRenditionsAndMissingSDRFallback(t *testing.T) {
+	hub := NewHub()
+	publisher := NewClient(1, "publisher", []int64{10})
+	viewer := NewClient(2, "viewer", []int64{10})
+	for _, client := range []*Client{publisher, viewer} {
+		hub.Register(client)
+		hub.JoinVoice(client, 10, 100, false, false)
+	}
+
+	invalid := legacySDRStreamRendition(StreamCodecVP9)
+	invalid.BitDepth = 10
+	if _, err := hub.StartStreamWithRenditions(
+		publisher, 10, 100, StreamModeServer, StreamCodecVP9, false,
+		[]StreamRenditionData{invalid},
+	); err != ErrStreamRenditionsInvalid {
+		t.Fatalf("invalid SDR metadata returned %v", err)
+	}
+
+	hdrOnly := StreamRenditionData{
+		ID:             "hdr",
+		Codec:          StreamCodecVP9,
+		Profile:        "2",
+		DynamicRange:   StreamDynamicRangeHLG,
+		BitDepth:       10,
+		ColorPrimaries: StreamColorPrimariesBT2020,
+		Transfer:       StreamTransferHLG,
+		Matrix:         StreamMatrixBT2020NCL,
+	}
+	if _, err := hub.StartStreamWithRenditions(
+		publisher, 10, 100, StreamModeServer, StreamCodecVP9, false,
+		[]StreamRenditionData{hdrOnly},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hub.WatchStream(viewer, 10, 100); err != ErrStreamRenditionUnavailable {
+		t.Fatalf("viewer without SDR fallback returned %v", err)
+	}
+}
+
+func TestP2PRejectsHDRRenditions(t *testing.T) {
+	hub := NewHub()
+	publisher := NewClient(1, "publisher", []int64{10})
+	hub.Register(publisher)
+	hub.JoinVoice(publisher, 10, 100, false, false)
+	hdr := StreamRenditionData{
+		ID:             "hdr",
+		Codec:          StreamCodecAV1,
+		Profile:        "main10",
+		DynamicRange:   StreamDynamicRangeHDR10,
+		BitDepth:       10,
+		ColorPrimaries: StreamColorPrimariesBT2020,
+		Transfer:       StreamTransferPQ,
+		Matrix:         StreamMatrixBT2020NCL,
+	}
+	if _, err := hub.StartStreamWithRenditions(
+		publisher, 10, 100, StreamModeP2P, StreamCodecAV1, false,
+		[]StreamRenditionData{hdr},
+	); err != ErrStreamRenditionsInvalid {
+		t.Fatalf("P2P HDR returned %v", err)
+	}
+}
+
 func drainTestEvents(events <-chan OutgoingEvent) {
 	for {
 		select {
