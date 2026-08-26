@@ -25,11 +25,13 @@ encryption against the server.
 ## Experimental HDR
 
 HDR is opt-in and available only in `server` mode. The browser first verifies
-the captured frames, 10-bit codec path, WebGPU processing path, and the viewer's
-HDR output. A publisher that passes those checks uploads two video renditions:
+the captured frames, 10-bit codec path, color-managed canvas capture path, and
+the viewer's HDR output. A publisher that passes those checks uploads two video
+renditions:
 
 - a 10-bit BT.2020 PQ/HLG master for a verified HDR viewer;
-- an 8-bit BT.709 rendition tone-mapped on the publisher GPU for SDR and
+- an 8-bit BT.709 rendition normalized through the publisher's color-managed
+  sRGB canvas for SDR and
   unknown/legacy viewers.
 
 The SFU does not transcode. It selects one declared rendition for each viewer,
@@ -37,7 +39,10 @@ forwards the matching encoded RTP, and rebuilds the negotiated color-space RTP
 extension. If either the HDR probe or the SDR tone-map pipeline fails, the HDR
 publication fails closed instead of sending washed-out HDR to SDR displays.
 P2P remains SDR-only. `Auto` also remains SDR until the hardware/browser matrix
-described below passes the product gate.
+described below passes the product gate. Auto/SDR always sends the generated
+sRGB canvas track, never the original capture merely labelled as BT.709. If the
+browser cannot create that track, publication fails closed with a compatibility
+error instead of sending washed-out HDR pixels.
 
 ## Limits
 
