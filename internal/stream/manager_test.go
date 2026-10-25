@@ -122,6 +122,19 @@ func acceptTestOffer(
 	}
 }
 
+// mediaSection returns the first m-section of the given kind.
+func mediaSection(sdp, kind string) string {
+	start := strings.Index(sdp, "m="+kind+" ")
+	if start < 0 {
+		return ""
+	}
+	section := sdp[start:]
+	if end := strings.Index(section[2:], "\r\nm="); end >= 0 {
+		section = section[:end+4]
+	}
+	return section
+}
+
 func iceUfrag(sdp string) string {
 	const prefix = "a=ice-ufrag:"
 	start := strings.Index(sdp, prefix)
@@ -220,13 +233,17 @@ func TestManagerCreatesPublisherAndViewerOffers(t *testing.T) {
 				t.Fatalf("%s publisher offer unexpectedly contains %s", test.codec, other.codec)
 			}
 		}
+		// Checked inside the video section: the audio section always carries
+		// transport-cc and used to hide its absence from video.
+		videoSection := mediaSection(publisherOffer, "video")
 		for _, feedback := range []string{
 			" nack\r\n",
 			" nack pli\r\n",
 			" transport-cc\r\n",
 			"transport-wide-cc-extensions",
+			"b=AS:12000\r\n",
 		} {
-			if !strings.Contains(publisherOffer, feedback) {
+			if !strings.Contains(videoSection, feedback) {
 				t.Fatalf(
 					"%s publisher offer is missing WebRTC loss feedback %q",
 					test.codec,
@@ -274,6 +291,10 @@ func TestManagerCreatesDualRenditionPublisherOfferWithMIDMapping(t *testing.T) {
 	offer := sink.offer("dual-publisher")
 	if strings.Count(offer, "m=video") != 2 {
 		t.Fatalf("publisher offer must contain two video m-lines: %q", offer)
+	}
+	// Both renditions share the 16000 kbit/s ingest ceiling.
+	if strings.Count(offer, "b=AS:8000\r\n") != 2 {
+		t.Fatalf("each rendition must be capped to half of the ceiling: %q", offer)
 	}
 	for _, expected := range []string{
 		"profile-id=0", "profile-id=2", colorSpaceRTPHeaderExtensionURI,
