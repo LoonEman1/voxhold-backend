@@ -128,13 +128,18 @@ func NewHub() *Hub {
 	}
 }
 
+// CloseReasonServerShutdown marks connections closed by a server restart.
+// The WebSocket layer sends it with 1012 (Service Restart) so clients
+// reconnect and restore voice instead of treating it as an auth failure.
+const CloseReasonServerShutdown = "server is shutting down"
+
 func (h *Hub) Close() {
 	h.clientsMu.RLock()
 	clients := clientSetSnapshot(h.clients)
 	h.clientsMu.RUnlock()
 
 	for _, client := range clients {
-		client.CloseWithReason("server is shutting down")
+		client.CloseWithReason(CloseReasonServerShutdown)
 		h.Unregister(client)
 	}
 }
