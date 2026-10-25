@@ -25,6 +25,9 @@ func TestStreamRequiresSameVoiceChannel(t *testing.T) {
 	if err != nil || streamData.ChannelID != 100 {
 		t.Fatalf("start stream in voice room: %+v, %v", streamData, err)
 	}
+	if age := time.Now().UnixMilli() - streamData.StartedAtMS; streamData.StartedAtMS == 0 || age < 0 || age > 5_000 {
+		t.Fatalf("stream start time is missing or wrong: %d", streamData.StartedAtMS)
+	}
 
 	hub.JoinVoice(viewer, 10, 101, false, false)
 	if _, err := hub.WatchStream(viewer, 10, 100); err != ErrStreamVoiceRequired {
