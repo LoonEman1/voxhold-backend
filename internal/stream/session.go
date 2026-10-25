@@ -406,9 +406,11 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPR
 			return
 		}
 
-		if err := local.WriteRTP(packet); err != nil {
-			return
-		}
+		// A write error belongs to one viewer binding (closed DTLS, transient
+		// ENOBUFS); the packet still reached every other viewer. Leaving the
+		// loop would end this rendition for the whole room, so only a failed
+		// read from the publisher stops forwarding.
+		_ = local.WriteRTP(packet)
 	}
 }
 
