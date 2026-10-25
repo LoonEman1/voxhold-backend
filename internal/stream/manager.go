@@ -9,8 +9,16 @@ import (
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
 )
+
+// streamNACKHistory is the number of RTP packets kept for retransmission and
+// tracked for loss detection per stream. The pion default (512 generator /
+// 1024 responder) covers well under a second at 16 Mbit/s screen sharing, so
+// NACKs on high-RTT links arrived after the packet had been evicted and the
+// viewer froze until the next key frame.
+const streamNACKHistory = 2048
 
 type Manager struct {
 	api           *webrtc.API
@@ -147,9 +155,11 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 	}
 
 	registry := &interceptor.Registry{}
-	if err := webrtc.RegisterDefaultInterceptors(
+	if err := webrtc.RegisterDefaultInterceptorsWithOptions(
 		media,
 		registry,
+		webrtc.WithNackGeneratorOptions(nack.GeneratorSize(streamNACKHistory)),
+		webrtc.WithNackResponderOptions(nack.ResponderSize(streamNACKHistory)),
 	); err != nil {
 		_ = udpMux.Close()
 		return nil, fmt.Errorf(
@@ -434,8 +444,12 @@ func streamVideoCodecs() []webrtc.RTPCodecParameters {
 }
 
 func streamVideoCodecDescriptors() []videoCodecDescriptor {
+	// Transceiver codec preferences intersect their feedback with the media
+	// engine, so transport-cc must be listed here: otherwise it is dropped from
+	// every video m-section and browsers lose send-side bandwidth estimation.
 	feedback := []webrtc.RTCPFeedback{
 		{Type: "goog-remb"},
+		{Type: webrtc.TypeRTCPFBTransportCC},
 		{Type: "ccm", Parameter: "fir"},
 		{Type: "nack"},
 		{Type: "nack", Parameter: "pli"},

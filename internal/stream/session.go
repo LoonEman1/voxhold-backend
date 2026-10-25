@@ -171,6 +171,30 @@ func codecMatchesRendition(
 	return false
 }
 
+const (
+	// publisherKeyFrameInterval bounds how often viewers' picture loss reports
+	// reach the publisher. Every key frame is a large bitrate spike that blurs
+	// the picture for all viewers, so a burst of joins or losses collapses into
+	// one immediate PLI plus one trailing PLI.
+	publisherKeyFrameInterval = 500 * time.Millisecond
+
+	// The publisher's encoder is capped through b=AS in its offer; the ingest
+	// guard only stops abusive publishers, so it tolerates key frame bursts and
+	// NACK/RTX retransmissions on lossy uplinks instead of killing honest
+	// streams that briefly exceed the nominal rate.
+	ingestHeadroomPercent = 150
+	ingestBurstSeconds    = 4
+)
+
+type keyframeGate struct {
+	last    time.Time
+	pending bool
+}
+
+func ingestCeilingKbps(kbps int) int {
+	return kbps * ingestHeadroomPercent / 100
+}
+
 type sessionRole uint8
 
 const (
@@ -209,6 +233,11 @@ type session struct {
 	keyframeCooldown time.Duration
 	iceCooldown      time.Duration
 
+	// Publisher-side PLI coalescing per rendition.
+	keyframeMu       sync.Mutex
+	keyframeInterval time.Duration
+	keyframeGates    map[string]*keyframeGate
+
 	negotiationMu      sync.Mutex
 	negotiationPending bool
 	iceRestartPending  bool
@@ -238,15 +267,16 @@ func newSession(
 		channelID:    channelID,
 		role:         role,
 		videoBitrate: newBitrateLimiter(
-			manager.maxVideoBitrateKbps,
-			2,
+			ingestCeilingKbps(manager.maxVideoBitrateKbps),
+			ingestBurstSeconds,
 		),
 		audioBitrate: newBitrateLimiter(
-			manager.maxStreamAudioBitrateKbps,
-			3,
+			ingestCeilingKbps(manager.maxStreamAudioBitrateKbps),
+			ingestBurstSeconds,
 		),
 		keyframeCooldown: 2 * time.Second,
 		iceCooldown:      10 * time.Second,
+		keyframeInterval: publisherKeyFrameInterval,
 		videoSSRC:        make(map[string]uint32),
 		writeRTCP:        peer.WriteRTCP,
 		publisherMIDs:    make(map[string]string),
@@ -406,9 +436,11 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPR
 			return
 		}
 
-		if err := local.WriteRTP(packet); err != nil {
-			return
-		}
+		// A write error belongs to one viewer binding (closed DTLS, transient
+		// ENOBUFS); the packet still reached every other viewer. Leaving the
+		// loop would end this rendition for the whole room, so only a failed
+		// read from the publisher stops forwarding.
+		_ = local.WriteRTP(packet)
 	}
 }
 
@@ -572,6 +604,13 @@ func (s *session) createOfferLocked(restartICE bool) (string, error) {
 }
 
 func (s *session) sendOffer(sdp string) {
+	if s.role == sessionPublisher {
+		// Renditions share one ingest ceiling, so each video m-section gets
+		// its share. The browser encoder never targets more than that, which
+		// keeps honest publishers clear of the ingest guard.
+		renditions := max(1, len(s.publisherTransceivers))
+		sdp = withVideoBandwidth(sdp, s.manager.maxVideoBitrateKbps/renditions)
+	}
 	if !s.manager.sink.SendOffer(s.connectionID, sdp) {
 		s.scheduleFail("stream signaling connection was lost")
 	}
@@ -783,13 +822,59 @@ func (s *session) restartICE() error {
 }
 
 func (s *session) requestKeyFrame(renditionID string) {
-	s.mediaMu.RLock()
-	ssrc := s.videoSSRC[renditionID]
-	s.mediaMu.RUnlock()
-	if s.closed.Load() || ssrc == 0 {
+	if s.closed.Load() || s.videoSSRCFor(renditionID) == 0 {
 		return
 	}
-	if s.writeRTCP == nil {
+	s.keyframeMu.Lock()
+	if s.keyframeGates == nil {
+		s.keyframeGates = make(map[string]*keyframeGate)
+	}
+	gate := s.keyframeGates[renditionID]
+	if gate == nil {
+		gate = &keyframeGate{}
+		s.keyframeGates[renditionID] = gate
+	}
+	if wait := s.keyframeInterval - time.Since(gate.last); wait > 0 {
+		if !gate.pending {
+			gate.pending = true
+			time.AfterFunc(wait, func() {
+				safego.Run("stream/flushKeyFrame", func() {
+					s.flushKeyFrame(renditionID)
+				})
+			})
+		}
+		s.keyframeMu.Unlock()
+		return
+	}
+	gate.last = time.Now()
+	s.keyframeMu.Unlock()
+	s.writeKeyFrameRequest(renditionID)
+}
+
+// flushKeyFrame sends the trailing PLI of a coalesced burst so a viewer that
+// joined inside the interval still receives a key frame promptly.
+func (s *session) flushKeyFrame(renditionID string) {
+	s.keyframeMu.Lock()
+	gate := s.keyframeGates[renditionID]
+	if gate == nil || !gate.pending {
+		s.keyframeMu.Unlock()
+		return
+	}
+	gate.pending = false
+	gate.last = time.Now()
+	s.keyframeMu.Unlock()
+	s.writeKeyFrameRequest(renditionID)
+}
+
+func (s *session) videoSSRCFor(renditionID string) uint32 {
+	s.mediaMu.RLock()
+	defer s.mediaMu.RUnlock()
+	return s.videoSSRC[renditionID]
+}
+
+func (s *session) writeKeyFrameRequest(renditionID string) {
+	ssrc := s.videoSSRCFor(renditionID)
+	if s.closed.Load() || ssrc == 0 || s.writeRTCP == nil {
 		return
 	}
 	_ = s.writeRTCP([]rtcp.Packet{

@@ -205,9 +205,11 @@ func (s *session) forwardAudio(
 		packet.Extension = false
 		packet.Extensions = nil
 
-		if err := local.WriteRTP(packet); err != nil {
-			return
-		}
+		// TrackLocalStaticRTP still delivers the packet to every other
+		// listener when one binding fails (closed DTLS, transient ENOBUFS).
+		// Leaving the loop would silence this speaker for the whole channel,
+		// so only a failed read from the speaker stops forwarding.
+		_ = local.WriteRTP(packet)
 	}
 }
 

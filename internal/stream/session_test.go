@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -72,5 +73,68 @@ func TestPublisherRenditionsShareOneVideoBitrateCeiling(t *testing.T) {
 	}
 	if publisher.videoBitrate.allow(500) {
 		t.Fatal("second rendition bypassed the shared publisher ceiling")
+	}
+}
+
+func TestRequestKeyFrameCoalescesBursts(t *testing.T) {
+	var mu sync.Mutex
+	sent := 0
+	publisher := &session{
+		videoSSRC:        map[string]uint32{"sdr": 100},
+		keyframeInterval: 40 * time.Millisecond,
+		writeRTCP: func([]rtcp.Packet) error {
+			mu.Lock()
+			sent++
+			mu.Unlock()
+			return nil
+		},
+	}
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return sent
+	}
+
+	for range 10 {
+		publisher.requestKeyFrame("sdr")
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("a burst must send exactly one immediate PLI, got %d", got)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("the burst must end with one trailing PLI, got %d", got)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if got := count(); got != 2 {
+		t.Fatalf("no further PLI may follow a flushed burst, got %d", got)
+	}
+}
+
+func TestRequestKeyFrameSkipsRenditionWithoutTrack(t *testing.T) {
+	sent := 0
+	publisher := &session{
+		videoSSRC:        map[string]uint32{},
+		keyframeInterval: time.Hour,
+		writeRTCP: func([]rtcp.Packet) error {
+			sent++
+			return nil
+		},
+	}
+	publisher.requestKeyFrame("sdr")
+	publisher.videoSSRC["sdr"] = 100
+	publisher.requestKeyFrame("sdr")
+	if sent != 1 {
+		t.Fatalf("a request before the track existed must not consume the interval, got %d PLIs", sent)
+	}
+}
+
+func TestIngestCeilingToleratesBurstsAboveNominalRate(t *testing.T) {
+	if got := ingestCeilingKbps(16000); got != 24000 {
+		t.Fatalf("unexpected ingest ceiling: %d", got)
 	}
 }
