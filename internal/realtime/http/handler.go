@@ -619,10 +619,7 @@ func (h *Handler) writeLoop(
 
 		case <-client.Done():
 			if reason := client.CloseReason(); reason != "" {
-				_ = connection.Close(
-					websocket.StatusPolicyViolation,
-					reason,
-				)
+				_ = connection.Close(closeStatusFor(reason), reason)
 			}
 
 			return nil
@@ -1333,6 +1330,16 @@ func (h *Handler) unsubscribeFromChannel(
 			Data:      data,
 		},
 	)
+}
+
+// closeStatusFor maps a server-side close reason to its WebSocket status. A
+// restart must not look like a policy violation: clients treat 1008 as a
+// lost session and stop reconnecting.
+func closeStatusFor(reason string) websocket.StatusCode {
+	if reason == realtime.CloseReasonServerShutdown {
+		return websocket.StatusServiceRestart
+	}
+	return websocket.StatusPolicyViolation
 }
 
 func queueError(

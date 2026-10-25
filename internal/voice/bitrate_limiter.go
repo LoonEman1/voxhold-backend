@@ -6,7 +6,14 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const audioBitrateBurstDuration = 3 * time.Second
+const (
+	// The guard only stops abusive clients. Opus VBR legitimately runs above
+	// its average target for seconds at a time (laughter, music, noise); a
+	// guard set exactly at the configured bitrate disconnected honest speakers
+	// from the channel with "audio bitrate limit exceeded".
+	audioBitrateHeadroomPercent = 150
+	audioBitrateBurstDuration   = 4 * time.Second
+)
 
 type audioBitrateLimiter struct {
 	limiter *rate.Limiter
@@ -15,7 +22,8 @@ type audioBitrateLimiter struct {
 func newAudioBitrateLimiter(
 	maxBitrateKbps int,
 ) *audioBitrateLimiter {
-	bytesPerSecond := maxBitrateKbps * 1000 / 8
+	bytesPerSecond := maxBitrateKbps * 1000 / 8 *
+		audioBitrateHeadroomPercent / 100
 	burstBytes := bytesPerSecond *
 		int(audioBitrateBurstDuration/time.Second)
 

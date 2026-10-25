@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"sync"
+	"time"
 )
 
 type activeStream struct {
@@ -15,6 +16,7 @@ type activeStream struct {
 	renditions []StreamRenditionData
 	publisher  *Client
 	viewers    map[*Client]struct{}
+	startedAt  time.Time
 }
 
 type streamClientState struct {
@@ -61,6 +63,7 @@ func (s *streamState) start(
 		renditions: cloneStreamRenditions(renditions),
 		publisher:  client,
 		viewers:    make(map[*Client]struct{}),
+		startedAt:  time.Now(),
 	}
 	s.byChannel[value.channelID] = value
 	s.byClient[client] = streamClientState{
@@ -240,6 +243,7 @@ func streamData(value *activeStream) StreamData {
 		HasAudio:              value.hasAudio,
 		ViewerCount:           len(value.viewers),
 		Renditions:            cloneStreamRenditions(value.renditions),
+		StartedAtMS:           value.startedAt.UnixMilli(),
 	}
 }
 

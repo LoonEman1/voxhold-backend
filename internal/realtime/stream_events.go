@@ -100,6 +100,8 @@ type StreamData struct {
 	HasAudio              bool                  `json:"has_audio"`
 	ViewerCount           int                   `json:"viewer_count"`
 	Renditions            []StreamRenditionData `json:"renditions"`
+	// Unix milliseconds; lets every client show the same live duration.
+	StartedAtMS int64 `json:"started_at_ms,omitempty"`
 }
 
 type StreamWatchingData struct {
