@@ -8,14 +8,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/antiabuse"
+	"voxhold-backend/internal/avatar"
 	"voxhold-backend/internal/cors"
 	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
+	"voxhold-backend/internal/recordings"
+	"voxhold-backend/internal/safego"
 	"voxhold-backend/internal/voice"
 
 	accounthttp "voxhold-backend/internal/account/http"
@@ -133,6 +138,30 @@ func main() {
 	)
 
 	realtimeHub := realtimeDomain.NewHub()
+	recordingQuota := recordings.DefaultQuotaBytes
+	if raw := os.Getenv("RECORDING_STORAGE_QUOTA_BYTES"); raw != "" {
+		recordingQuota, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			log.Fatal("invalid recording storage quota")
+		}
+	}
+	recordingRate := 2 << 20
+	if raw := os.Getenv("RECORDING_DOWNLOAD_BYTES_PER_SECOND"); raw != "" {
+		recordingRate, err = strconv.Atoi(raw)
+		if err != nil {
+			log.Fatal("invalid recording download rate")
+		}
+	}
+	recordingService, err := recordings.New(db, recordings.Config{Directory: os.Getenv("RECORDING_DIRECTORY"), QuotaBytes: recordingQuota, DownloadBytesPerSecond: recordingRate}, realtimeHub.HasVoiceParticipant, realtimeHub.PublishRecordingChanged)
+	if err != nil {
+		log.Fatal(err)
+	}
+	recordingContext, cancelRecordings := context.WithCancel(context.Background())
+	var recordingWorker sync.WaitGroup
+	recordingWorker.Add(1)
+	safego.Go("recordings/cleanup", func() { defer recordingWorker.Done(); recordingService.Run(recordingContext) })
+	defer func() { cancelRecordings(); recordingWorker.Wait(); _ = recordingService.Close() }()
+	recordingHandler := recordings.NewHandler(recordingService)
 	voiceConfig, err := voice.NewConfig(
 		os.Getenv("WEBRTC_UDP_PORT"),
 		os.Getenv("WEBRTC_MAX_PARTICIPANTS"),
@@ -256,6 +285,22 @@ func main() {
 	profileRepository := profileSqlite.NewRepository(db)
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
+	avatarHandler := avatar.NewHandler(db, profileService, func(userID int64, version *string) {
+		rows, err := db.Query("SELECT server_id FROM server_members WHERE user_id = ?", userID)
+		if err != nil {
+			log.Printf("avatar event membership lookup: %v", err)
+			return
+		}
+		var serverIDs []int64
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				serverIDs = append(serverIDs, id)
+			}
+		}
+		_ = rows.Close()
+		realtimeHub.PublishAvatarChanged(serverIDs, userID, version)
+	})
 
 	messageEventPublisher :=
 		realtimeDomain.NewMessageEventPublisher(
@@ -328,6 +373,8 @@ func main() {
 		mux,
 		accountHandler.RequireAuth,
 	)
+	avatarHandler.RegisterRoutes(mux, accountHandler.RequireAuth)
+	recordingHandler.RegisterRoutes(mux, accountHandler.RequireAuth)
 
 	messageHandler.RegisterRoutes(
 		mux,

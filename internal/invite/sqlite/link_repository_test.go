@@ -212,6 +212,11 @@ func openInviteTestDB(t *testing.T) *sql.DB {
 		country_code TEXT,
 		last_seen_at INTEGER
 	);
+	CREATE TABLE user_avatars (
+		user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+		content BLOB NOT NULL,
+		etag TEXT NOT NULL
+	);
 	CREATE TABLE server_invite_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,

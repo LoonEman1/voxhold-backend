@@ -34,7 +34,7 @@ func (r *Repository) Mark(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := requireTextChannelMember(
+	if err := requireMessageChannelMember(
 		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return readstate.ChannelRead{}, false, err
@@ -169,7 +169,7 @@ func (r *Repository) ListByChannelID(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := requireTextChannelMember(
+	if err := requireMessageChannelMember(
 		ctx,
 		tx,
 		serverID,
@@ -300,7 +300,7 @@ func selectChannelRead(
 	return read, nil
 }
 
-func requireTextChannelMember(
+func requireMessageChannelMember(
 	ctx context.Context,
 	tx *sql.Tx,
 	serverID int64,
@@ -346,7 +346,7 @@ func requireTextChannelMember(
 		return readstate.ErrForbidden
 	}
 
-	if kind != channel.KindText {
+	if kind != channel.KindText && kind != channel.KindVoice {
 		return readstate.ErrTextChannelRequired
 	}
 
