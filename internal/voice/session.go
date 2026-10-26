@@ -16,9 +16,10 @@ import (
 )
 
 type session struct {
-	manager *Manager
-	room    *room
-	peer    *webrtc.PeerConnection
+	onFailure func(string)
+	manager   *Manager
+	room      *room
+	peer      *webrtc.PeerConnection
 
 	connectionID string
 	userID       int64
@@ -69,6 +70,12 @@ func newSession(
 		),
 	}
 
+	// Capture the logical join now; failures from this PeerConnection must
+	// never tear down a later join on the same WebSocket connection.
+	value.onFailure = func(reason string) { manager.sink.CloseVoice(connectionID, reason) }
+	if sink, ok := manager.sink.(interface{ SessionFailureHandler(string) func(string) }); ok {
+		value.onFailure = sink.SessionFailureHandler(connectionID)
+	}
 	value.selfMute.Store(selfMute)
 	value.selfDeaf.Store(selfDeaf)
 

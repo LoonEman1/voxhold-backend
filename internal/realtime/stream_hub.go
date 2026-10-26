@@ -72,6 +72,10 @@ func (h *Hub) StartStreamWithRenditions(
 	hasAudio bool,
 	renditions []StreamRenditionData,
 ) (StreamData, error) {
+	if client == nil {
+		return StreamData{}, ErrStreamUnavailable
+	}
+	defer h.mediaTransitions.Lock(client.UserID())()
 	if client == nil || (mode != StreamModeServer &&
 		mode != StreamModeP2P) || !validStreamCodec(codec) {
 
@@ -144,6 +148,10 @@ func (h *Hub) WatchStreamWithCapabilities(
 	supportedDynamicRanges []StreamDynamicRange,
 	codecProfiles []StreamCodecProfileData,
 ) (StreamWatchingData, error) {
+	if client == nil {
+		return StreamWatchingData{}, ErrStreamUnavailable
+	}
+	defer h.mediaTransitions.Lock(client.UserID())()
 	if client == nil {
 		return StreamWatchingData{}, ErrStreamUnavailable
 	}

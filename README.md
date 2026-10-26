@@ -190,6 +190,7 @@ SBOM and provenance, and create a GitHub Release.
 - [Voice protocol](docs/voice.md)
 - [Screen streaming](docs/streaming.md)
 - [Client diagnostics](docs/client-diagnostics.md)
+- [Reliability and v0.10.0 upgrade notes](docs/reliability.md)
 - [Production deployment](https://github.com/LoonEman1/voxhold-deploy)
 
 ## Security

@@ -153,6 +153,10 @@ func (g *Guard) AllowLogin(
 
 	for _, key := range keys {
 		entry, ok := g.failures[key]
+		if ok && now.Sub(entry.lastSeen) >= g.config.EntryTTL && !now.Before(entry.blockedUntil) {
+			delete(g.failures, key)
+			continue
+		}
 		if !ok || !now.Before(entry.blockedUntil) {
 			continue
 		}
@@ -175,6 +179,9 @@ func (g *Guard) RecordLoginFailure(
 	g.cleanupFailuresLocked(now)
 	for _, key := range g.loginFailureKeys(r, username) {
 		entry, exists := g.failures[key]
+		if exists && now.Sub(entry.lastSeen) >= g.config.EntryTTL && !now.Before(entry.blockedUntil) {
+			entry = failureEntry{}
+		}
 		if !exists && len(g.failures) >= g.config.MaxRateEntries {
 			continue
 		}

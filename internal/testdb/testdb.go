@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"testing"
+	"voxhold-backend/internal/storage"
 )
 
 func Open(t *testing.T) *sql.DB {
@@ -18,8 +19,24 @@ func Open(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
+	return prepare(t, db)
+}
+
+// OpenFile exercises the production WAL pool and transaction configuration.
+func OpenFile(t *testing.T) *sql.DB {
+	t.Helper()
+	t.Setenv("DATABASE_PATH", filepath.Join(t.TempDir(), "test.db"))
+	db, err := storage.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prepare(t, db)
+}
+
+func prepare(t *testing.T, db *sql.DB) *sql.DB {
+	t.Helper()
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err = db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		t.Fatal(err)
 	}
 	_, file, _, _ := runtime.Caller(0)

@@ -343,6 +343,12 @@ func (r *Repository) DeleteAccount(
 	DELETE FROM user_profiles
 	WHERE user_id = ?;
 
+	DELETE FROM user_avatars
+	WHERE user_id = ?;
+
+	DELETE FROM client_diagnostic_events
+	WHERE user_id = ?;
+
 	DELETE FROM sessions
 	WHERE user_id = ?;
 
@@ -359,6 +365,8 @@ func (r *Repository) DeleteAccount(
 		userID,
 		userID,
 		userID,
+		userID,
+		userID,
 	); err != nil {
 		return 0, fmt.Errorf(
 			"delete account-owned data: %w",
@@ -368,10 +376,7 @@ func (r *Repository) DeleteAccount(
 
 	const anonymizeQuery = `
 	UPDATE users
-	SET username = printf(
-		'Удалённый #%d',
-		id
-	),
+	SET username = 'Удалённый #' || lower(hex(randomblob(10))),
 		password_hash = '',
 		deleted_at = unixepoch()
 	WHERE id = ?

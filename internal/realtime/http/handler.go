@@ -27,7 +27,8 @@ const (
 	authenticationTimeout = 5 * time.Second
 	writeTimeout          = 3 * time.Second
 	pingInterval          = 30 * time.Second
-	maxIncomingEventSize  = 16 * 1024
+	// Large-room Opus answers exceed 40 KiB before ICE candidates and JSON escaping.
+	maxIncomingEventSize = 128 * 1024
 )
 
 type Authenticator interface {

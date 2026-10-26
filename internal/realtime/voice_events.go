@@ -32,6 +32,7 @@ type VoiceStateUpdateData struct {
 }
 
 type VoiceParticipantData struct {
+	generation   uint64
 	ConnectionID string `json:"connection_id"`
 	UserID       int64  `json:"user_id"`
 	ServerID     int64  `json:"server_id"`

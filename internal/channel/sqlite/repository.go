@@ -115,7 +115,7 @@ func (r *Repository) ListByServerID(
 	serverID int64,
 	userID int64,
 ) ([]channel.Channel, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf(
 			"begin list channels transaction: %w",

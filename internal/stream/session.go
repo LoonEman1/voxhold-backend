@@ -203,9 +203,10 @@ const (
 )
 
 type session struct {
-	manager *Manager
-	room    *room
-	peer    *webrtc.PeerConnection
+	onFailure func(string)
+	manager   *Manager
+	room      *room
+	peer      *webrtc.PeerConnection
 
 	connectionID string
 	userID       int64
@@ -257,7 +258,7 @@ func newSession(
 	channelID int64,
 	role sessionRole,
 ) *session {
-	return &session{
+	value := &session{
 		manager:      manager,
 		room:         streamRoom,
 		peer:         peer,
@@ -288,6 +289,11 @@ func newSession(
 			},
 		),
 	}
+	value.onFailure = func(reason string) { manager.sink.CloseStream(connectionID, reason) }
+	if sink, ok := manager.sink.(interface{ SessionFailureHandler(string) func(string) }); ok {
+		value.onFailure = sink.SessionFailureHandler(connectionID)
+	}
+	return value
 }
 
 func (s *session) installCallbacks() {

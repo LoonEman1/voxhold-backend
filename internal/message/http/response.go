@@ -14,6 +14,7 @@ type messageResponse struct {
 	Content   string         `json:"content"`
 	CreatedAt int64          `json:"created_at"`
 	EditedAt  *int64         `json:"edited_at"`
+	Revision  int64          `json:"revision"`
 }
 
 func newMessageResponse(
@@ -29,6 +30,7 @@ func newMessageResponse(
 		Content:   value.Content,
 		CreatedAt: value.CreatedAt,
 		EditedAt:  value.EditedAt,
+		Revision:  value.Revision,
 	}
 }
 

@@ -16,10 +16,11 @@ type voiceJoinResult struct {
 }
 
 type voiceState struct {
-	mu        sync.RWMutex
-	byChannel map[int64]map[*Client]VoiceParticipantData
-	byClient  map[*Client]VoiceParticipantData
-	byUser    map[int64]*Client
+	nextGeneration uint64
+	mu             sync.RWMutex
+	byChannel      map[int64]map[*Client]VoiceParticipantData
+	byClient       map[*Client]VoiceParticipantData
+	byUser         map[int64]*Client
 }
 
 func newVoiceState() *voiceState {
@@ -42,8 +43,10 @@ func (s *voiceState) join(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.nextGeneration++
 	result := voiceJoinResult{
 		participant: VoiceParticipantData{
+			generation:   s.nextGeneration,
 			ConnectionID: client.ConnectionID(),
 			UserID:       client.UserID(),
 			ServerID:     serverID,

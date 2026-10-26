@@ -824,15 +824,19 @@ func (m *Manager) RequestRecovery(
 }
 
 func (m *Manager) Leave(connectionID string) {
+	m.leave(connectionID, nil)
+}
+
+func (m *Manager) leave(connectionID string, expected *session) bool {
 	if connectionID == "" {
-		return
+		return false
 	}
 
 	m.mu.Lock()
 	value := m.sessions[connectionID]
-	if value == nil {
+	if value == nil || (expected != nil && value != expected) {
 		m.mu.Unlock()
-		return
+		return false
 	}
 
 	if value.role == sessionPublisher {
@@ -847,7 +851,7 @@ func (m *Manager) Leave(connectionID string) {
 		for _, current := range values {
 			current.close()
 		}
-		return
+		return true
 	}
 
 	delete(m.sessions, connectionID)
@@ -855,6 +859,7 @@ func (m *Manager) Leave(connectionID string) {
 	value.closed.Store(true)
 	m.mu.Unlock()
 	value.close()
+	return true
 }
 
 func (m *Manager) Close() error {
@@ -896,13 +901,7 @@ func (m *Manager) failSession(value *session, reason string) {
 	if value == nil {
 		return
 	}
-	m.mu.RLock()
-	current := m.sessions[value.connectionID]
-	m.mu.RUnlock()
-	if current != value {
-		return
+	if m.leave(value.connectionID, value) {
+		value.onFailure(reason)
 	}
-
-	m.Leave(value.connectionID)
-	m.sink.CloseStream(value.connectionID, reason)
 }
