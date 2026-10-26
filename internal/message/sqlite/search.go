@@ -62,7 +62,7 @@ func (r *Repository) Search(
 		ON users.id = messages.author_user_id
 	WHERE message_search MATCH ?
 	  AND channels.server_id = ?
-	  AND channels.kind = 'text'
+	  AND channels.kind IN ('text', 'voice')
 	  AND messages.id < ?
 	ORDER BY messages.id DESC
 	LIMIT ?
@@ -156,7 +156,7 @@ func (r *Repository) GetContext(
 		return message.Context{}, err
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
 		return message.Context{}, err

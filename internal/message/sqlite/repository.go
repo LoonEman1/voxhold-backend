@@ -50,7 +50,7 @@ func (r *Repository) Create(
 		return message.Message{}, err
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx,
 		tx,
 		serverID,
@@ -145,7 +145,7 @@ func (r *Repository) ListByChannelID(
 		return nil, err
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx,
 		tx,
 		serverID,
@@ -262,7 +262,7 @@ func (r *Repository) Update(
 		return message.Message{}, err
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
 		return message.Message{}, err
@@ -355,7 +355,7 @@ func (r *Repository) Delete(
 		return message.Message{}, err
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
 		return message.Message{}, err
@@ -434,7 +434,7 @@ func (r *Repository) Pin(
 		return message.PinnedMessage{}, false, message.ErrPinForbidden
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
 		return message.PinnedMessage{}, false, err
@@ -539,7 +539,7 @@ func (r *Repository) Unpin(
 		return false, message.ErrPinForbidden
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
 		return false, err
@@ -605,7 +605,7 @@ func (r *Repository) ListPinned(
 		return nil, err
 	}
 
-	if err := requireTextChannel(
+	if err := requireMessageChannel(
 		ctx, tx, serverID, channelID,
 	); err != nil {
 		return nil, err
@@ -796,7 +796,7 @@ func requireServerMemberWithRole(
 	return username, role, nil
 }
 
-func requireTextChannel(
+func requireMessageChannel(
 	ctx context.Context,
 	tx *sql.Tx,
 	serverID int64,
@@ -828,7 +828,7 @@ func requireTextChannel(
 		)
 	}
 
-	if kind != channel.KindText {
+	if kind != channel.KindText && kind != channel.KindVoice {
 		return message.ErrTextChannelRequired
 	}
 

@@ -22,7 +22,7 @@ SQLite and is distributed as a multi-platform container image.
 
 ## Technology
 
-- Go 1.26;
+- Go 1.27.3;
 - standard-library `net/http` routing;
 - SQLite through `modernc.org/sqlite` (no runtime CGO dependency);
 - `coder/websocket` for realtime transport;
@@ -213,3 +213,5 @@ If you modify this program and make the modified version available to users
 over a network, AGPL section 13 requires offering those users the corresponding
 source code. Consult the license text for the exact terms; this summary is not
 legal advice. Third-party dependencies remain under their respective licenses.
+
+Channel recordings, voice-channel chat and optimized avatars: [storage, API and upgrade notes](docs/channel-media.md).

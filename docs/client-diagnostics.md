@@ -5,6 +5,20 @@ Authenticated web clients send bounded diagnostic batches to
 status and latency, WebSocket lifecycle and event types, WebRTC state, media
 track lifecycle, playback failures and periodic RTP counters.
 
+Updated clients also include interval media-quality summaries in RTP event
+`quality`: RTT, direct/relay route, packet-loss percentage, concealed-audio
+percentage, jitter-buffer delay, decode time and video freeze counters. Missing
+interval measurements are null; `interval_available` is false on the first
+sample. ICE candidate strings and addresses are still excluded.
+
+Connection attempts have a `media_attempt_id`; connection-state events include
+`connection_ms` and successful `recovery_ms`. `stream_first_frame` measures media
+attachment to first presented frame, and `stream_playback_summary` records visible
+playback stalls. `session_started.browser` identifies the browser family,
+including Yandex. `main_thread_load` describes long tasks during visible-page
+10-second intervals. These events use the same bounded, owner-only collector;
+no database migration is required.
+
 The collector does not intentionally store message bodies, passwords, access
 tokens, cookies, SDP, ICE candidates or network addresses. Sensitive field
 names are redacted independently by both the client and the backend. Diagnostic
