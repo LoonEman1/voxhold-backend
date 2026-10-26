@@ -13,19 +13,24 @@ type Handler struct {
 	service   *Service
 	uploads   chan struct{}
 	downloads chan struct{}
+	previews  chan struct{}
 }
 
 func NewHandler(service *Service) *Handler {
-	return &Handler{service: service, uploads: make(chan struct{}, 4), downloads: make(chan struct{}, 4)}
+	return &Handler{service: service, uploads: make(chan struct{}, 4), downloads: make(chan struct{}, 4), previews: make(chan struct{}, 2)}
 }
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/v1/servers/{serverID}/recordings", auth(http.HandlerFunc(h.list)))
+	mux.Handle("GET /api/v1/recordings/{recordingID}", auth(http.HandlerFunc(h.get)))
+	mux.Handle("DELETE /api/v1/recordings/{recordingID}", auth(http.HandlerFunc(h.remove)))
 	mux.Handle("POST /api/v1/servers/{serverID}/channels/{channelID}/recordings", auth(http.HandlerFunc(h.start)))
 	mux.Handle("POST /api/v1/recordings/{recordingID}/heartbeat", auth(http.HandlerFunc(h.heartbeat)))
 	mux.Handle("POST /api/v1/recordings/{recordingID}/stop", auth(http.HandlerFunc(h.stop)))
 	mux.Handle("GET /api/v1/recordings/{recordingID}/upload", auth(http.HandlerFunc(h.offset)))
 	mux.Handle("PATCH /api/v1/recordings/{recordingID}/content", auth(http.HandlerFunc(h.append)))
 	mux.Handle("POST /api/v1/recordings/{recordingID}/complete", auth(http.HandlerFunc(h.complete)))
+	mux.Handle("PUT /api/v1/recordings/{recordingID}/preview", auth(http.HandlerFunc(h.putPreview)))
+	mux.Handle("GET /api/v1/recordings/{recordingID}/preview", auth(http.HandlerFunc(h.getPreview)))
 	mux.Handle("POST /api/v1/recordings/{recordingID}/download", auth(http.HandlerFunc(h.ticket)))
 	mux.HandleFunc("GET /api/v1/recording-downloads/{ticket}", h.download)
 	mux.Handle("GET /api/v1/instance/recording-storage", auth(http.HandlerFunc(h.storage)))
@@ -62,6 +67,30 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, map[string]any{"recordings": records, "max_file_bytes": MaxFileBytes, "retention_seconds": int64(Retention / time.Second)})
+}
+func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+	user, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	record, err := h.service.Get(r.Context(), r.PathValue("recordingID"), user)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, record)
+}
+func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
+	user, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	record, err := h.service.Delete(r.Context(), r.PathValue("recordingID"), user)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, record)
 }
 func (h *Handler) storage(w http.ResponseWriter, r *http.Request) {
 	user, ok := httpapi.AuthenticatedUserID(w, r)
