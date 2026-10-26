@@ -29,7 +29,9 @@ The API and filesystem are intended for **one API process per SQLite database/st
 
 ## Avatars
 
-Authenticated raw `PUT /api/v1/me/avatar` accepts JPEG/PNG/WebP/GIF up to 5 MiB and 16 million decoded pixels. Configuration is checked before decode; two processing slots limit parallel image allocations. The server takes a centered square crop, scales to 256×256, flattens transparency onto white and writes JPEG quality 82. Metadata and animation are removed; GIF uses the first frame. EXIF orientation is not applied. The original is discarded. SQLite bounds the saved derivative to 128 KiB.
+Authenticated raw `PUT /api/v1/me/avatar` accepts JPEG/PNG/WebP/GIF up to 5 MiB and 16 million decoded pixels. Optional `crop_x`, `crop_y`, and `crop_size` query parameters must be supplied together as integer pixels defining a square inside the EXIF-oriented image. Without them the crop is centered. Invalid, duplicate, or out-of-bounds coordinates return 400 without changing the existing avatar. Configuration is checked before decode; two processing slots limit parallel image allocations.
+
+The server applies JPEG EXIF orientation, crops the selected region, scales to 256×256 and erases alpha **and RGB** outside the circle. Only this transparent PNG derivative is stored. High-entropy images use palette quantization if necessary to fit the existing 128 KiB database limit. Metadata, animation, the source image and pixels outside the selected circle are discarded. GIF uses the first frame. Existing JPEG avatars remain readable with their original content type; no migration is required.
 
 `GET /api/v1/users/{id}/avatar` uses existing profile visibility, including before conditional 304 responses. The response has a private ETag cache; the frontend revalidates HTTP cache on invalidation and shares lazily loaded Blob URLs among visible avatars. `DELETE /api/v1/me/avatar` restores initials. `avatar.updated` invalidates clients after save/removal. Auth/session caches were not introduced, so membership and session revocation keep their existing behavior.
 

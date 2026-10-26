@@ -56,9 +56,27 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 413, "avatar upload exceeds 5 MB")
 		return
 	}
-	optimized, err := Optimize(data)
+	var crop *Crop
+	query := r.URL.Query()
+	if query.Has("crop_x") || query.Has("crop_y") || query.Has("crop_size") {
+		values := make([]int, 3)
+		for index, key := range []string{"crop_x", "crop_y", "crop_size"} {
+			entries := query[key]
+			if len(entries) != 1 {
+				httpapi.WriteError(w, 400, ErrCrop.Error())
+				return
+			}
+			values[index], err = strconv.Atoi(entries[0])
+			if err != nil {
+				httpapi.WriteError(w, 400, ErrCrop.Error())
+				return
+			}
+		}
+		crop = &Crop{X: values[0], Y: values[1], Size: values[2]}
+	}
+	optimized, err := OptimizeWithCrop(data, crop)
 	if err != nil {
-		httpapi.WriteError(w, 400, ErrImage.Error())
+		httpapi.WriteError(w, 400, err.Error())
 		return
 	}
 	checksum := sha256.Sum256(optimized)
@@ -127,7 +145,8 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	etag = `"` + etag + `"`
 	w.Header().Set("ETag", etag)
 	w.Header().Add("Vary", "Authorization")
-	w.Header().Set("Content-Type", "image/jpeg")
+	// Existing JPEG avatars remain readable; new circular avatars use PNG.
+	w.Header().Set("Content-Type", http.DetectContentType(content))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
