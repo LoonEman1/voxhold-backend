@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"image"
@@ -162,6 +163,9 @@ func (h *Handler) getPreview(w http.ResponseWriter, r *http.Request) {
 	var content []byte
 	var etag string
 	if err := h.service.db.QueryRowContext(r.Context(), `SELECT content,etag FROM recording_previews WHERE recording_id=?`, record.ID).Scan(&content, &etag); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = ErrNotFound
+		}
 		h.fail(w, err)
 		return
 	}
