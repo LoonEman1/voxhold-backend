@@ -2,14 +2,14 @@
 
 ## Upgrade and storage
 
-Apply migrations **000015** (optimized avatar BLOBs) and **000016** (recording metadata) before starting this API. The existing migration runner/deployment process still owns migration execution. The matching frontend is required for the new controls. Go is now 1.27.3; the Pion and crypto upgrades are included in this branch.
+Apply migrations **000015** (optimized avatar BLOBs), **000016** (recording metadata) and **000017** (owner recording quota) before starting this API. The existing migration runner/deployment process still owns migration execution. The matching frontend is required for the new controls. Go is now 1.27.3; the Pion and crypto upgrades are included in this branch.
 
 Recordings use a directory on the persistent data volume, separate from SQLite. Defaults:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `RECORDING_DIRECTORY` | `data/recordings` | Private partial/final media files; never expose as static files |
-| `RECORDING_STORAGE_QUOTA_BYTES` | `10737418240` | 10 GiB total of reserved uploads and ready files |
+| `RECORDING_STORAGE_QUOTA_BYTES` | `6442450944` | 6 GiB default total of reserved uploads and ready files; the instance owner can set 1 GiB-1 TiB in the server settings (`GET`/`PUT /api/v1/instance/recording-storage`), which overrides this value. Lowering it affects new uploads only; existing files expire after 24 hours |
 | `RECORDING_DOWNLOAD_BYTES_PER_SECOND` | `2097152` | Shared 2 MiB/s recording download budget |
 
 The per-file server limit is **2,147,483,648 bytes, inclusive**. Larger files stay in the recorder's browser. No server encoder, ffmpeg process, or media decoding is started. Live WebRTC bitrate/resolution is unchanged. Limits bound recording work, but do not promise isolation from every CPU/disk/network bottleneck; size the instance for concurrent calls and downloads.

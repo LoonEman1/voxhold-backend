@@ -21,11 +21,12 @@ type Visibility interface {
 type Handler struct {
 	db       *sql.DB
 	profiles Visibility
-	publish  func(int64)
+	publish  func(userID int64, version *string)
 	slots    chan struct{}
 }
 
-func NewHandler(db *sql.DB, profiles Visibility, publish func(int64)) *Handler {
+// publish receives the new ETag, or nil after removal, so clients never probe for missing avatars.
+func NewHandler(db *sql.DB, profiles Visibility, publish func(userID int64, version *string)) *Handler {
 	return &Handler{db: db, profiles: profiles, publish: publish, slots: make(chan struct{}, 2)}
 }
 
@@ -68,7 +69,7 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.publish != nil {
-		h.publish(userID)
+		h.publish(userID, &etag)
 	}
 	httpapi.WriteJSON(w, 200, map[string]any{"etag": etag, "bytes": len(optimized), "width": Size, "height": Size})
 }
@@ -83,7 +84,7 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.publish != nil {
-		h.publish(userID)
+		h.publish(userID, nil)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -117,9 +118,14 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 500, "could not read avatar")
 		return
 	}
+	// Clients address avatars by version (?v=<etag>), so a matching URL never changes.
+	if r.URL.Query().Get("v") == etag {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=300, must-revalidate")
+	}
 	etag = `"` + etag + `"`
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=300, must-revalidate")
 	w.Header().Add("Vary", "Authorization")
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

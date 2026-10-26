@@ -138,7 +138,7 @@ func main() {
 	)
 
 	realtimeHub := realtimeDomain.NewHub()
-	recordingQuota := int64(10 << 30)
+	recordingQuota := recordings.DefaultQuotaBytes
 	if raw := os.Getenv("RECORDING_STORAGE_QUOTA_BYTES"); raw != "" {
 		recordingQuota, err = strconv.ParseInt(raw, 10, 64)
 		if err != nil {
@@ -285,7 +285,7 @@ func main() {
 	profileRepository := profileSqlite.NewRepository(db)
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
-	avatarHandler := avatar.NewHandler(db, profileService, func(userID int64) {
+	avatarHandler := avatar.NewHandler(db, profileService, func(userID int64, version *string) {
 		rows, err := db.Query("SELECT server_id FROM server_members WHERE user_id = ?", userID)
 		if err != nil {
 			log.Printf("avatar event membership lookup: %v", err)
@@ -299,7 +299,7 @@ func main() {
 			}
 		}
 		_ = rows.Close()
-		realtimeHub.PublishAvatarChanged(serverIDs, userID)
+		realtimeHub.PublishAvatarChanged(serverIDs, userID, version)
 	})
 
 	messageEventPublisher :=

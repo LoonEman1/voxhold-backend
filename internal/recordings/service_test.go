@@ -120,7 +120,7 @@ func TestResumableUploadAndNativeAttachment(t *testing.T) {
 }
 func TestQuotaLargeLocalOnlyAndHeaderValidation(t *testing.T) {
 	s := setup(t)
-	s.config.QuotaBytes = MaxFileBytes
+	s.quota.Store(MaxFileBytes)
 	r := start(t, s)
 	if r, e := s.Stop(ctx, r.ID, 1, MaxFileBytes+1, 1000, false); e != nil || r.Status != "local_only" || r.SizeBytes != 0 {
 		t.Fatal(r, e)
@@ -151,6 +151,51 @@ func TestQuotaLargeLocalOnlyAndHeaderValidation(t *testing.T) {
 	}
 	if _, e = s.Complete(ctx, r.ID, 1); !errors.Is(e, ErrConflict) {
 		t.Fatal(e)
+	}
+}
+func TestOwnerQuotaDefaultsToSixGiBAndPersists(t *testing.T) {
+	db := testdb.Open(t)
+	s, err := New(db, Config{Directory: t.TempDir()}, func(user, server, channel int64) bool { return user < 3 && server == 1 && channel == 1 }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	storage, err := s.Storage(ctx, 1)
+	if err != nil || storage.QuotaBytes != 6<<30 || storage.DefaultQuotaBytes != 6<<30 || storage.UsedBytes != 0 {
+		t.Fatal(storage, err)
+	}
+	if _, err = s.Storage(ctx, 2); !errors.Is(err, ErrForbidden) {
+		t.Fatal(err)
+	}
+	if _, err = s.SetQuota(ctx, 2, 8<<30); !errors.Is(err, ErrForbidden) {
+		t.Fatal(err)
+	}
+	for _, invalid := range []int64{0, MinQuotaBytes - 1, MaxQuotaBytes + 1} {
+		if _, err = s.SetQuota(ctx, 1, invalid); !errors.Is(err, ErrInvalidQuota) {
+			t.Fatal(invalid, err)
+		}
+	}
+	if storage, err = s.SetQuota(ctx, 1, MinQuotaBytes); err != nil || storage.QuotaBytes != MinQuotaBytes {
+		t.Fatal(storage, err)
+	}
+	r := start(t, s)
+	if _, err = s.Stop(ctx, r.ID, 1, MinQuotaBytes+1, 1000, false); !errors.Is(err, ErrLimit) {
+		t.Fatal(err)
+	}
+	if r, err = s.Stop(ctx, r.ID, 1, MinQuotaBytes, 1000, false); err != nil || r.Status != "uploading" {
+		t.Fatal(r, err)
+	}
+	if storage, err = s.Storage(ctx, 1); err != nil || storage.UsedBytes != MinQuotaBytes {
+		t.Fatal(storage, err)
+	}
+	// The owner's value survives restarts and wins over the environment default.
+	restarted, err := New(db, Config{Directory: t.TempDir(), QuotaBytes: 3 << 30}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if storage, err = restarted.Storage(ctx, 1); err != nil || storage.QuotaBytes != MinQuotaBytes || storage.DefaultQuotaBytes != 3<<30 {
+		t.Fatal(storage, err)
 	}
 }
 func TestCleanupLeaseExpirationAndOrphans(t *testing.T) {

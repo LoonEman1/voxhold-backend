@@ -62,28 +62,30 @@ func newJoinedServersResponse(
 }
 
 type serverMemberResponse struct {
-	UserID      int64   `json:"user_id"`
-	Username    string  `json:"username"`
-	CreatedAt   int64   `json:"created_at"`
-	Role        string  `json:"role"`
-	JoinedAt    int64   `json:"joined_at"`
-	About       string  `json:"about"`
-	CountryCode *string `json:"country_code"`
-	LastSeenAt  *int64  `json:"last_seen_at"`
+	UserID        int64   `json:"user_id"`
+	Username      string  `json:"username"`
+	CreatedAt     int64   `json:"created_at"`
+	Role          string  `json:"role"`
+	JoinedAt      int64   `json:"joined_at"`
+	About         string  `json:"about"`
+	CountryCode   *string `json:"country_code"`
+	LastSeenAt    *int64  `json:"last_seen_at"`
+	AvatarVersion *string `json:"avatar_version"`
 }
 
 func newServerMemberResponse(
 	value server.ServerMember,
 ) serverMemberResponse {
 	return serverMemberResponse{
-		UserID:      value.UserID,
-		Username:    value.Username,
-		CreatedAt:   value.CreatedAt,
-		Role:        string(value.Role),
-		JoinedAt:    value.JoinedAt,
-		About:       value.About,
-		CountryCode: value.CountryCode,
-		LastSeenAt:  value.LastSeenAt,
+		UserID:        value.UserID,
+		Username:      value.Username,
+		CreatedAt:     value.CreatedAt,
+		Role:          string(value.Role),
+		JoinedAt:      value.JoinedAt,
+		About:         value.About,
+		CountryCode:   value.CountryCode,
+		LastSeenAt:    value.LastSeenAt,
+		AvatarVersion: value.AvatarVersion,
 	}
 }
 

@@ -550,7 +550,8 @@ func selectAcceptedMember(
 		server_members.joined_at,
 		COALESCE(user_profiles.about, ''),
 		user_profiles.country_code,
-		user_profiles.last_seen_at
+		user_profiles.last_seen_at,
+		(SELECT etag FROM user_avatars WHERE user_avatars.user_id = server_members.user_id)
 	FROM server_members
 	JOIN users
 		ON users.id = server_members.user_id
@@ -573,6 +574,7 @@ func selectAcceptedMember(
 		&member.About,
 		&member.CountryCode,
 		&member.LastSeenAt,
+		&member.AvatarVersion,
 	); err != nil {
 		return server.ServerMember{}, fmt.Errorf(
 			"select accepted server member: %w",

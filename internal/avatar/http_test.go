@@ -17,7 +17,8 @@ import (
 func TestAvatarOptimizationPrivateCacheAndRemoval(t *testing.T) {
 	db := testdb.Open(t)
 	var events int
-	handler := NewHandler(db, profile.NewService(profilesqlite.NewRepository(db)), func(int64) { events++ })
+	var version *string
+	handler := NewHandler(db, profile.NewService(profilesqlite.NewRepository(db)), func(_ int64, next *string) { events++; version = next })
 	user := int64(1)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, func(next http.Handler) http.Handler {
@@ -51,6 +52,14 @@ func TestAvatarOptimizationPrivateCacheAndRemoval(t *testing.T) {
 		t.Fatal(config, kind, err)
 	}
 	etag := response.Header().Get("ETag")
+	if version == nil || `"`+*version+`"` != etag {
+		t.Fatalf("event version %v, etag %s", version, etag)
+	}
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest("GET", "/api/v1/users/1/avatar?v="+*version, nil))
+	if response.Code != 200 || response.Header().Get("Cache-Control") != "private, max-age=31536000, immutable" {
+		t.Fatal(response.Code, response.Header().Get("Cache-Control"))
+	}
 	request := httptest.NewRequest("GET", "/api/v1/users/1/avatar", nil)
 	request.Header.Set("If-None-Match", etag)
 	response = httptest.NewRecorder()
@@ -67,7 +76,7 @@ func TestAvatarOptimizationPrivateCacheAndRemoval(t *testing.T) {
 	user = 1
 	response = httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequest("DELETE", "/api/v1/me/avatar", nil))
-	if response.Code != 204 || events != 2 {
+	if response.Code != 204 || events != 2 || version != nil {
 		t.Fatal(response.Code, events)
 	}
 	response = httptest.NewRecorder()

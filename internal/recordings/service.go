@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -27,9 +28,16 @@ const MaxFileBytes int64 = 2 << 30
 const ChunkBytes = 1 << 20
 const Retention = 24 * time.Hour
 
+// The instance owner may reserve 1 GiB-1 TiB; files above the quota stay local.
+const DefaultQuotaBytes int64 = 6 << 30
+const MinQuotaBytes int64 = 1 << 30
+const MaxQuotaBytes int64 = 1 << 40
+
 var ErrNotFound = errors.New("recording not found")
 var ErrConflict = errors.New("recording state changed or another recording is active")
 var ErrLimit = errors.New("server recording storage limit reached; the local file is preserved")
+var ErrForbidden = errors.New("only the instance owner can manage recording storage")
+var ErrInvalidQuota = errors.New("recording storage must be between 1 and 1024 GiB")
 
 type Record struct {
 	ID            string `json:"id"`
@@ -61,11 +69,21 @@ type Config struct {
 	QuotaBytes             int64
 	DownloadBytesPerSecond int
 }
+type Storage struct {
+	QuotaBytes        int64 `json:"quota_bytes"`
+	UsedBytes         int64 `json:"used_bytes"`
+	DefaultQuotaBytes int64 `json:"default_quota_bytes"`
+	MinQuotaBytes     int64 `json:"min_quota_bytes"`
+	MaxQuotaBytes     int64 `json:"max_quota_bytes"`
+	MaxFileBytes      int64 `json:"max_file_bytes"`
+	RetentionSeconds  int64 `json:"retention_seconds"`
+}
 type Service struct {
 	db           *sql.DB
 	root         *os.Root
 	config       Config
-	mu           sync.Mutex // Serializes only short metadata/chunk mutations, never RTP or downloads.
+	quota        atomic.Int64 // Owner setting, or Config.QuotaBytes when unset.
+	mu           sync.Mutex   // Serializes only short metadata/chunk mutations, never RTP or downloads.
 	key          [32]byte
 	now          func() time.Time
 	publish      func(Record)
@@ -78,10 +96,14 @@ func New(db *sql.DB, config Config, present func(int64, int64, int64) bool, publ
 		config.Directory = filepath.Join("data", "recordings")
 	}
 	if config.QuotaBytes == 0 {
-		config.QuotaBytes = 10 << 30
+		config.QuotaBytes = DefaultQuotaBytes
 	}
-	if config.QuotaBytes < MaxFileBytes {
-		return nil, fmt.Errorf("recording quota must allow at least 2 GiB")
+	if config.QuotaBytes < MinQuotaBytes || config.QuotaBytes > MaxQuotaBytes {
+		return nil, fmt.Errorf("recording quota must be between 1 GiB and 1 TiB")
+	}
+	var configured sql.NullInt64
+	if err := db.QueryRow(`SELECT recording_quota_bytes FROM instance_settings WHERE id=1`).Scan(&configured); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("load recording quota: %w", err)
 	}
 	if config.DownloadBytesPerSecond == 0 {
 		config.DownloadBytesPerSecond = 2 << 20
@@ -97,6 +119,10 @@ func New(db *sql.DB, config Config, present func(int64, int64, int64) bool, publ
 		return nil, err
 	}
 	s := &Service{db: db, root: root, config: config, now: time.Now, publish: publish, present: present, downloadRate: rate.NewLimiter(rate.Limit(config.DownloadBytesPerSecond), 256<<10)}
+	s.quota.Store(config.QuotaBytes)
+	if configured.Valid {
+		s.quota.Store(configured.Int64)
+	}
 	if _, err = rand.Read(s.key[:]); err != nil {
 		root.Close()
 		return nil, err
@@ -246,13 +272,12 @@ func (s *Service) Stop(ctx context.Context, id string, userID, size, duration in
 		size = 0
 	}
 	if state == "uploading" {
-		var used int64
-		err = s.db.QueryRowContext(ctx, `SELECT COALESCE(sum(size_bytes),0) FROM channel_recordings WHERE status IN ('uploading','ready') AND expires_at>? AND id<>?`, s.now().Unix(), id).Scan(&used)
+		used, err := s.used(ctx, id)
 		if err != nil {
 			s.mu.Unlock()
 			return r, err
 		}
-		if used+size > s.config.QuotaBytes {
+		if used+size > s.quota.Load() {
 			s.mu.Unlock()
 			return r, ErrLimit
 		}
@@ -270,6 +295,53 @@ func (s *Service) Stop(ctx context.Context, id string, userID, size, duration in
 		s.emit(r)
 	}
 	return r, err
+}
+
+// used counts reserved uploads and ready files, except the recording being resized.
+func (s *Service) used(ctx context.Context, exceptID string) (int64, error) {
+	var used int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(sum(size_bytes),0) FROM channel_recordings WHERE status IN ('uploading','ready') AND expires_at>? AND id<>?`, s.now().Unix(), exceptID).Scan(&used)
+	return used, err
+}
+func (s *Service) requireOwner(ctx context.Context, userID int64) error {
+	var owner bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_members WHERE user_id=? AND role='owner')`, userID).Scan(&owner); err != nil {
+		return err
+	}
+	if !owner {
+		return ErrForbidden
+	}
+	return nil
+}
+func (s *Service) Storage(ctx context.Context, userID int64) (Storage, error) {
+	if err := s.requireOwner(ctx, userID); err != nil {
+		return Storage{}, err
+	}
+	used, err := s.used(ctx, "")
+	if err != nil {
+		return Storage{}, err
+	}
+	return Storage{QuotaBytes: s.quota.Load(), UsedBytes: used, DefaultQuotaBytes: s.config.QuotaBytes, MinQuotaBytes: MinQuotaBytes, MaxQuotaBytes: MaxQuotaBytes, MaxFileBytes: MaxFileBytes, RetentionSeconds: int64(Retention / time.Second)}, nil
+}
+
+// SetQuota applies to new uploads only: files above a lowered quota expire normally.
+func (s *Service) SetQuota(ctx context.Context, userID, quota int64) (Storage, error) {
+	if err := s.requireOwner(ctx, userID); err != nil {
+		return Storage{}, err
+	}
+	if quota < MinQuotaBytes || quota > MaxQuotaBytes {
+		return Storage{}, ErrInvalidQuota
+	}
+	s.mu.Lock()
+	_, err := s.db.ExecContext(ctx, `UPDATE instance_settings SET recording_quota_bytes=? WHERE id=1`, quota)
+	if err == nil {
+		s.quota.Store(quota)
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return Storage{}, err
+	}
+	return s.Storage(ctx, userID)
 }
 func (s *Service) Offset(ctx context.Context, id string, userID int64) (int64, error) {
 	r, err := s.Get(ctx, id, userID)

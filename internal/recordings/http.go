@@ -28,6 +28,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) htt
 	mux.Handle("POST /api/v1/recordings/{recordingID}/complete", auth(http.HandlerFunc(h.complete)))
 	mux.Handle("POST /api/v1/recordings/{recordingID}/download", auth(http.HandlerFunc(h.ticket)))
 	mux.HandleFunc("GET /api/v1/recording-downloads/{ticket}", h.download)
+	mux.Handle("GET /api/v1/instance/recording-storage", auth(http.HandlerFunc(h.storage)))
+	mux.Handle("PUT /api/v1/instance/recording-storage", auth(http.HandlerFunc(h.setStorage)))
 }
 func pathInt(r *http.Request, key string) int64 {
 	value, _ := strconv.ParseInt(r.PathValue(key), 10, 64)
@@ -41,6 +43,10 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 		httpapi.WriteError(w, 409, ErrConflict.Error())
 	case errors.Is(err, ErrLimit):
 		httpapi.WriteError(w, 507, ErrLimit.Error())
+	case errors.Is(err, ErrForbidden):
+		httpapi.WriteError(w, 403, ErrForbidden.Error())
+	case errors.Is(err, ErrInvalidQuota):
+		httpapi.WriteError(w, 400, ErrInvalidQuota.Error())
 	default:
 		httpapi.WriteError(w, 500, "recording operation failed")
 	}
@@ -56,6 +62,36 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, map[string]any{"recordings": records, "max_file_bytes": MaxFileBytes, "retention_seconds": int64(Retention / time.Second)})
+}
+func (h *Handler) storage(w http.ResponseWriter, r *http.Request) {
+	user, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	storage, err := h.service.Storage(r.Context(), user)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, storage)
+}
+func (h *Handler) setStorage(w http.ResponseWriter, r *http.Request) {
+	user, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		QuotaBytes int64 `json:"quota_bytes"`
+	}
+	if !httpapi.DecodeJSON(w, r, &input) {
+		return
+	}
+	storage, err := h.service.SetQuota(r.Context(), user, input.QuotaBytes)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, storage)
 }
 func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 	user, ok := httpapi.AuthenticatedUserID(w, r)

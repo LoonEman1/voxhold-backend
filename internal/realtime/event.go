@@ -98,14 +98,15 @@ type ServerMemberRemovedData struct {
 }
 
 type ServerMemberData struct {
-	UserID      int64   `json:"user_id"`
-	Username    string  `json:"username"`
-	CreatedAt   int64   `json:"created_at"`
-	Role        string  `json:"role"`
-	JoinedAt    int64   `json:"joined_at"`
-	About       string  `json:"about"`
-	CountryCode *string `json:"country_code"`
-	LastSeenAt  *int64  `json:"last_seen_at"`
+	UserID        int64   `json:"user_id"`
+	Username      string  `json:"username"`
+	CreatedAt     int64   `json:"created_at"`
+	Role          string  `json:"role"`
+	JoinedAt      int64   `json:"joined_at"`
+	About         string  `json:"about"`
+	CountryCode   *string `json:"country_code"`
+	LastSeenAt    *int64  `json:"last_seen_at"`
+	AvatarVersion *string `json:"avatar_version"`
 }
 
 type ServerMemberChangedData struct {
