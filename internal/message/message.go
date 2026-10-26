@@ -12,6 +12,7 @@ type Message struct {
 	Content   string
 	CreatedAt int64
 	EditedAt  *int64
+	Revision  int64
 }
 
 type Page struct {

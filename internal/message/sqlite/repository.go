@@ -71,7 +71,8 @@ func (r *Repository) Create(
 		channel_id,
 		content,
 		created_at,
-		edited_at
+		edited_at,
+		revision
 	`
 
 	createdMessage := message.Message{
@@ -93,6 +94,7 @@ func (r *Repository) Create(
 		&createdMessage.Content,
 		&createdMessage.CreatedAt,
 		&createdMessage.EditedAt,
+		&createdMessage.Revision,
 	)
 	if err != nil {
 		return message.Message{}, fmt.Errorf(
@@ -169,7 +171,8 @@ func (r *Repository) ListByChannelID(
 		users.username,
 		messages.content,
 		messages.created_at,
-		messages.edited_at
+		messages.edited_at,
+		messages.revision
 	FROM messages
 	JOIN users
 		ON users.id = messages.author_user_id
@@ -211,6 +214,7 @@ func (r *Repository) ListByChannelID(
 			&value.Content,
 			&value.CreatedAt,
 			&value.EditedAt,
+			&value.Revision,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scan channel message: %w",
@@ -272,7 +276,8 @@ func (r *Repository) Update(
 	UPDATE messages
 	SET
 		content = ?,
-		edited_at = unixepoch()
+		edited_at = unixepoch(),
+		revision = revision + 1
 	WHERE id = ?
 	  AND channel_id = ?
 	  AND author_user_id = ?
@@ -281,7 +286,8 @@ func (r *Repository) Update(
 		channel_id,
 		content,
 		created_at,
-		edited_at
+		edited_at,
+		revision
 	`
 
 	updatedMessage := message.Message{
@@ -304,6 +310,7 @@ func (r *Repository) Update(
 		&updatedMessage.Content,
 		&updatedMessage.CreatedAt,
 		&updatedMessage.EditedAt,
+		&updatedMessage.Revision,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -620,6 +627,7 @@ func (r *Repository) ListPinned(
 		messages.content,
 		messages.created_at,
 		messages.edited_at,
+		messages.revision,
 		message_pins.pinned_by_user_id,
 		pinners.username,
 		message_pins.pinned_at
@@ -658,6 +666,7 @@ func (r *Repository) ListPinned(
 			&value.Message.Content,
 			&value.Message.CreatedAt,
 			&value.Message.EditedAt,
+			&value.Message.Revision,
 			&value.PinnedBy.UserID,
 			&value.PinnedBy.Username,
 			&value.PinnedAt,
@@ -702,7 +711,8 @@ func findMessage(
 		users.username,
 		messages.content,
 		messages.created_at,
-		messages.edited_at
+		messages.edited_at,
+		messages.revision
 	FROM messages
 	JOIN users
 		ON users.id = messages.author_user_id
@@ -722,6 +732,7 @@ func findMessage(
 		&value.Content,
 		&value.CreatedAt,
 		&value.EditedAt,
+		&value.Revision,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

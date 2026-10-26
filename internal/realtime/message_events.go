@@ -33,6 +33,7 @@ func (p *MessageEventPublisher) PublishMessageCreated(
 				Content:   value.Content,
 				CreatedAt: value.CreatedAt,
 				EditedAt:  value.EditedAt,
+				Revision:  value.Revision,
 			},
 		},
 	)
@@ -115,5 +116,6 @@ func newMessageData(
 		Content:   value.Content,
 		CreatedAt: value.CreatedAt,
 		EditedAt:  value.EditedAt,
+		Revision:  value.Revision,
 	}
 }

@@ -17,6 +17,10 @@ func (h *Hub) JoinVoice(
 	selfMute bool,
 	selfDeaf bool,
 ) (VoiceJoinedData, bool) {
+	if client == nil {
+		return VoiceJoinedData{}, false
+	}
+	defer h.mediaTransitions.Lock(client.UserID())()
 	if client == nil || serverID <= 0 || channelID <= 0 ||
 		!client.hasServer(serverID) {
 

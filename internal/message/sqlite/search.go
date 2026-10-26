@@ -52,7 +52,8 @@ func (r *Repository) Search(
 		users.username,
 		messages.content,
 		messages.created_at,
-		messages.edited_at
+		messages.edited_at,
+		messages.revision
 	FROM message_search
 	JOIN messages
 		ON messages.id = message_search.rowid
@@ -102,6 +103,7 @@ func (r *Repository) Search(
 			&result.Message.Content,
 			&result.Message.CreatedAt,
 			&result.Message.EditedAt,
+			&result.Message.Revision,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scan message search result: %w",
@@ -252,7 +254,8 @@ func queryMessageContextSide(
 		users.username,
 		messages.content,
 		messages.created_at,
-		messages.edited_at
+		messages.edited_at,
+		messages.revision
 	FROM messages
 	JOIN users
 		ON users.id = messages.author_user_id
@@ -271,7 +274,8 @@ func queryMessageContextSide(
 			users.username,
 			messages.content,
 			messages.created_at,
-			messages.edited_at
+			messages.edited_at,
+			messages.revision
 		FROM messages
 		JOIN users
 			ON users.id = messages.author_user_id
@@ -305,6 +309,7 @@ func queryMessageContextSide(
 			&value.Content,
 			&value.CreatedAt,
 			&value.EditedAt,
+			&value.Revision,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scan message context side: %w",

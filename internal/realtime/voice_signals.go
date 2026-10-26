@@ -12,6 +12,24 @@ func NewVoiceSignalSink(hub *Hub) *VoiceSignalSink {
 	return &VoiceSignalSink{hub: hub}
 }
 
+// SessionFailureHandler snapshots the logical join, not just its WebSocket ID.
+// A delayed failure of an old PeerConnection must not remove a replacement.
+func (s *VoiceSignalSink) SessionFailureHandler(connectionID string) func(string) {
+	client := s.hub.clientByConnectionID(connectionID)
+	if client == nil {
+		return func(string) {}
+	}
+	participant, exists := s.hub.voice.current(client)
+	return func(reason string) {
+		defer s.hub.mediaTransitions.Lock(client.UserID())()
+		current, active := s.hub.voice.current(client)
+		if !exists || !active || current.generation != participant.generation {
+			return
+		}
+		s.CloseVoice(connectionID, reason)
+	}
+}
+
 func (s *VoiceSignalSink) SendOffer(
 	connectionID string,
 	sdp string,

@@ -89,6 +89,25 @@ func TestLoginFailuresTemporarilyBlockClient(t *testing.T) {
 	}
 }
 
+func TestLoginFailureWindowExpiresBelowStoreCapacity(t *testing.T) {
+	config := DefaultConfig()
+	config.LoginMaxFailures = 2
+	guard := New(config)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	request.RemoteAddr = "192.0.2.11:1234"
+	guard.RecordLoginFailure(request, "owner")
+	guard.failuresMu.Lock()
+	for key, entry := range guard.failures {
+		entry.lastSeen = time.Now().Add(-2 * config.EntryTTL)
+		guard.failures[key] = entry
+	}
+	guard.failuresMu.Unlock()
+	guard.RecordLoginFailure(request, "owner")
+	if allowed, _ := guard.AllowLogin(request, "owner"); !allowed {
+		t.Fatal("expired failures were counted toward a new block")
+	}
+}
+
 func TestWebSocketConnectionLimitsAreReleased(t *testing.T) {
 	config := DefaultConfig()
 	config.WebSocketMaxPerIP = 1

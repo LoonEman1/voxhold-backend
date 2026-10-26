@@ -20,15 +20,17 @@ type activeStream struct {
 }
 
 type streamClientState struct {
+	generation  uint64
 	stream      *activeStream
 	publisher   bool
 	renditionID string
 }
 
 type streamState struct {
-	mu        sync.RWMutex
-	byChannel map[int64]*activeStream
-	byClient  map[*Client]streamClientState
+	nextGeneration uint64
+	mu             sync.RWMutex
+	byChannel      map[int64]*activeStream
+	byClient       map[*Client]streamClientState
 }
 
 func newStreamState() *streamState {
@@ -66,9 +68,11 @@ func (s *streamState) start(
 		startedAt:  time.Now(),
 	}
 	s.byChannel[value.channelID] = value
+	s.nextGeneration++
 	s.byClient[client] = streamClientState{
-		stream:    value,
-		publisher: true,
+		generation: s.nextGeneration,
+		stream:     value,
+		publisher:  true,
 	}
 	return streamData(value), true
 }
@@ -107,7 +111,9 @@ func (s *streamState) watch(
 		return StreamData{}, nil, "", ErrStreamRenditionUnavailable
 	}
 	value.viewers[client] = struct{}{}
+	s.nextGeneration++
 	s.byClient[client] = streamClientState{
+		generation:  s.nextGeneration,
 		stream:      value,
 		renditionID: selectedRenditionID,
 	}

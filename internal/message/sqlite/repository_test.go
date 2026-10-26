@@ -98,7 +98,8 @@ func openMessageTestDB(t *testing.T) *sql.DB {
 		author_user_id INTEGER NOT NULL REFERENCES users(id),
 		content TEXT NOT NULL,
 		created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-		edited_at INTEGER
+		edited_at INTEGER,
+		revision INTEGER NOT NULL DEFAULT 1
 	);
 	CREATE TABLE message_pins (
 		message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,

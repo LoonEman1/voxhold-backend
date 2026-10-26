@@ -3,6 +3,7 @@ package realtime
 import (
 	"slices"
 	"sync"
+	"voxhold-backend/internal/keylock"
 )
 
 type room struct {
@@ -96,6 +97,7 @@ type Hub struct {
 	rooms   map[int64]*room
 
 	clientsMu           sync.RWMutex
+	closed              bool
 	clients             map[*Client]struct{}
 	clientsByUser       map[int64]map[*Client]struct{}
 	clientsBySession    map[[32]byte]map[*Client]struct{}
@@ -104,8 +106,9 @@ type Hub struct {
 	presenceMu sync.RWMutex
 	presence   map[int64]map[int64]int
 
-	voice         *voiceState
-	voiceSessions VoiceSessionCloser
+	mediaTransitions keylock.Set
+	voice            *voiceState
+	voiceSessions    VoiceSessionCloser
 
 	streams             *streamState
 	streamSessions      StreamSessionCloser
@@ -134,9 +137,10 @@ func NewHub() *Hub {
 const CloseReasonServerShutdown = "server is shutting down"
 
 func (h *Hub) Close() {
-	h.clientsMu.RLock()
+	h.clientsMu.Lock()
+	h.closed = true
 	clients := clientSetSnapshot(h.clients)
-	h.clientsMu.RUnlock()
+	h.clientsMu.Unlock()
 
 	for _, client := range clients {
 		client.CloseWithReason(CloseReasonServerShutdown)
@@ -150,6 +154,10 @@ func (h *Hub) Register(client *Client) bool {
 	}
 
 	h.clientsMu.Lock()
+	if h.closed {
+		h.clientsMu.Unlock()
+		return false
+	}
 
 	select {
 	case <-client.Done():
@@ -196,6 +204,16 @@ func (h *Hub) Subscribe(
 	if client == nil || serverID <= 0 || channelID <= 0 {
 		return false
 	}
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	if _, registered := h.clients[client]; !registered || h.closed || !client.hasServer(serverID) {
+		return false
+	}
+	select {
+	case <-client.Done():
+		return false
+	default:
+	}
 
 	room := h.getOrCreateRoom(channelID)
 
@@ -235,12 +253,6 @@ func (h *Hub) Unregister(client *Client) {
 	}
 
 	client.Close()
-	h.leaveVoice(client)
-
-	for _, channelID := range client.subscriptionIDs() {
-		h.Unsubscribe(client, channelID)
-	}
-
 	h.clientsMu.Lock()
 	delete(h.clients, client)
 	delete(h.clientsByConnection, client.ConnectionID())
@@ -257,6 +269,13 @@ func (h *Hub) Unregister(client *Client) {
 		delete(h.clientsBySession, client.sessionKey)
 	}
 	h.clientsMu.Unlock()
+
+	// Detach the client first, waiting for any in-flight Subscribe to finish.
+	// It can no longer add a subscription after the cleanup snapshot.
+	h.leaveVoice(client)
+	for _, channelID := range client.subscriptionIDs() {
+		h.Unsubscribe(client, channelID)
+	}
 
 	h.unregisterPresence(client)
 }

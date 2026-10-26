@@ -221,11 +221,11 @@ func (m *Manager) Join(
 		voiceRoom = newRoom(channelID)
 		m.rooms[channelID] = voiceRoom
 	}
-	m.mu.Unlock()
-
 	if !voiceRoom.reserve(m.maxParticipants) {
+		m.mu.Unlock()
 		return ErrRoomFull
 	}
+	m.mu.Unlock()
 
 	reservationActive := true
 	defer func() {
@@ -359,15 +359,19 @@ func (m *Manager) AddICECandidate(
 }
 
 func (m *Manager) Leave(connectionID string) {
+	m.leave(connectionID, nil)
+}
+
+func (m *Manager) leave(connectionID string, expected *session) bool {
 	if connectionID == "" {
-		return
+		return false
 	}
 
 	m.mu.Lock()
 	value := m.sessions[connectionID]
-	if value == nil {
+	if value == nil || (expected != nil && value != expected) {
 		m.mu.Unlock()
-		return
+		return false
 	}
 
 	delete(m.sessions, connectionID)
@@ -385,6 +389,7 @@ func (m *Manager) Leave(connectionID string) {
 	if trackRemoved && !roomEmpty {
 		voiceRoom.synchronizeSessions()
 	}
+	return true
 }
 
 func (m *Manager) Close() error {
@@ -426,14 +431,7 @@ func (m *Manager) failSession(
 		return
 	}
 
-	m.mu.RLock()
-	current := m.sessions[value.connectionID]
-	m.mu.RUnlock()
-
-	if current != value {
-		return
+	if m.leave(value.connectionID, value) {
+		value.onFailure(reason)
 	}
-
-	m.Leave(value.connectionID)
-	m.sink.CloseVoice(value.connectionID, reason)
 }

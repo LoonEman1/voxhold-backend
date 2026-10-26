@@ -90,6 +90,7 @@ type MessageCreatedData struct {
 	Content   string            `json:"content"`
 	CreatedAt int64             `json:"created_at"`
 	EditedAt  *int64            `json:"edited_at"`
+	Revision  int64             `json:"revision"`
 }
 
 type ServerMemberRemovedData struct {

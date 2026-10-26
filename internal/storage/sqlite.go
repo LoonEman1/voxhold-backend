@@ -23,6 +23,9 @@ func Open() (*sql.DB, error) {
 	}
 
 	params := url.Values{}
+	// Reserve the writer before authorization reads: stale WAL snapshots
+	// cannot upgrade to a writer, even with busy_timeout enabled.
+	params.Set("_txlock", "immediate")
 	params.Add("_pragma", "foreign_keys(1)")
 	params.Add("_pragma", "journal_mode(WAL)")
 	params.Add("_pragma", "busy_timeout(5000)")

@@ -212,6 +212,13 @@ func openServerTestDB(t *testing.T) *sql.DB {
 		user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 		about TEXT NOT NULL DEFAULT ''
 	);
+	CREATE TABLE user_avatars (
+		user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
+	);
+	CREATE TABLE client_diagnostic_events (
+		id INTEGER PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
+	);
 	CREATE TABLE channels (
 		id INTEGER PRIMARY KEY,
 		server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE

@@ -10,6 +10,7 @@ type searchResultResponse struct {
 	Content     string         `json:"content"`
 	CreatedAt   int64          `json:"created_at"`
 	EditedAt    *int64         `json:"edited_at"`
+	Revision    int64          `json:"revision"`
 }
 
 type searchPageResponse struct {
@@ -40,6 +41,7 @@ func newSearchPageResponse(
 				Content:   result.Message.Content,
 				CreatedAt: result.Message.CreatedAt,
 				EditedAt:  result.Message.EditedAt,
+				Revision:  result.Message.Revision,
 			},
 		)
 	}
