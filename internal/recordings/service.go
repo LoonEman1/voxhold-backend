@@ -40,18 +40,19 @@ var ErrForbidden = errors.New("only the instance owner can manage recording stor
 var ErrInvalidQuota = errors.New("recording storage must be between 1 and 1024 GiB")
 
 type Record struct {
-	ID            string `json:"id"`
-	ServerID      int64  `json:"server_id"`
-	ChannelID     int64  `json:"channel_id"`
-	OwnerUserID   int64  `json:"owner_user_id"`
-	OwnerUsername string `json:"owner_username"`
-	Status        string `json:"status"`
-	MIMEType      string `json:"mime_type"`
-	SizeBytes     int64  `json:"size_bytes"`
-	DurationMS    int64  `json:"duration_ms"`
-	CreatedAt     int64  `json:"created_at"`
-	UpdatedAt     int64  `json:"updated_at"`
-	ExpiresAt     int64  `json:"expires_at"`
+	ID             string  `json:"id"`
+	ServerID       int64   `json:"server_id"`
+	ChannelID      int64   `json:"channel_id"`
+	OwnerUserID    int64   `json:"owner_user_id"`
+	OwnerUsername  string  `json:"owner_username"`
+	Status         string  `json:"status"`
+	MIMEType       string  `json:"mime_type"`
+	SizeBytes      int64   `json:"size_bytes"`
+	DurationMS     int64   `json:"duration_ms"`
+	CreatedAt      int64   `json:"created_at"`
+	UpdatedAt      int64   `json:"updated_at"`
+	ExpiresAt      int64   `json:"expires_at"`
+	PreviewVersion *string `json:"preview_version,omitempty"`
 }
 
 func (r Record) extension() string {
@@ -149,13 +150,17 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-const columns = `r.id,r.server_id,r.channel_id,r.owner_user_id,u.username,r.status,r.mime_type,r.size_bytes,r.duration_ms,r.created_at,r.updated_at,r.expires_at`
+const columns = `r.id,r.server_id,r.channel_id,r.owner_user_id,u.username,r.status,r.mime_type,r.size_bytes,r.duration_ms,r.created_at,r.updated_at,r.expires_at,(SELECT etag FROM recording_previews WHERE recording_id=r.id)`
 
 type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Record, error) {
 	var r Record
-	err := row.Scan(&r.ID, &r.ServerID, &r.ChannelID, &r.OwnerUserID, &r.OwnerUsername, &r.Status, &r.MIMEType, &r.SizeBytes, &r.DurationMS, &r.CreatedAt, &r.UpdatedAt, &r.ExpiresAt)
+	var preview sql.NullString
+	err := row.Scan(&r.ID, &r.ServerID, &r.ChannelID, &r.OwnerUserID, &r.OwnerUsername, &r.Status, &r.MIMEType, &r.SizeBytes, &r.DurationMS, &r.CreatedAt, &r.UpdatedAt, &r.ExpiresAt, &preview)
+	if preview.Valid {
+		r.PreviewVersion = &preview.String
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -300,7 +305,7 @@ func (s *Service) Stop(ctx context.Context, id string, userID, size, duration in
 // used counts reserved uploads and ready files, except the recording being resized.
 func (s *Service) used(ctx context.Context, exceptID string) (int64, error) {
 	var used int64
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(sum(size_bytes),0) FROM channel_recordings WHERE status IN ('uploading','ready') AND expires_at>? AND id<>?`, s.now().Unix(), exceptID).Scan(&used)
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(sum(r.size_bytes+COALESCE(length(p.content),0)),0) FROM channel_recordings r LEFT JOIN recording_previews p ON p.recording_id=r.id WHERE r.status IN ('uploading','ready') AND r.expires_at>? AND r.id<>?`, s.now().Unix(), exceptID).Scan(&used)
 	return used, err
 }
 func (s *Service) requireOwner(ctx context.Context, userID int64) error {
