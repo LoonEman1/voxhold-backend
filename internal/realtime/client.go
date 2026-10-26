@@ -21,7 +21,15 @@ type Client struct {
 	userID       int64
 	sessionKey   [sha256.Size]byte
 
-	outgoing        chan OutgoingEvent
+	queueMu         sync.Mutex
+	outgoing        []OutgoingEvent
+	priority        []OutgoingEvent
+	outgoingReady   chan struct{}
+	priorityBurst   int
+	queueCoalesced  uint64
+	queueResyncs    uint64
+	queueHighWater  int
+	messageSync     atomic.Bool
 	done            chan struct{}
 	closeOnce       sync.Once
 	stateMu         sync.RWMutex
@@ -44,7 +52,9 @@ func NewClient(
 		connectionID:  newConnectionID(),
 		userID:        userID,
 		sessionKey:    newSessionKey(sessionToken),
-		outgoing:      make(chan OutgoingEvent, outgoingBufferSize),
+		outgoing:      make([]OutgoingEvent, 0, outgoingBufferSize),
+		priority:      make([]OutgoingEvent, 0, outgoingBufferSize),
+		outgoingReady: make(chan struct{}, 1),
 		done:          make(chan struct{}),
 		subscriptions: make(map[int64]int64),
 		servers:       make(map[int64]struct{}, len(serverIDs)),
@@ -76,12 +86,14 @@ func (c *Client) UserID() int64 {
 	return c.userID
 }
 
+func (c *Client) EnableMessageSync() { c.messageSync.Store(true) }
+
 func (c *Client) ConnectionID() string {
 	return c.connectionID
 }
 
-func (c *Client) Outgoing() <-chan OutgoingEvent {
-	return c.outgoing
+func (c *Client) OutgoingReady() <-chan struct{} {
+	return c.outgoingReady
 }
 
 func (c *Client) Done() <-chan struct{} {
@@ -121,20 +133,22 @@ func (c *Client) enqueue(
 	default:
 	}
 
-	select {
-	case c.outgoing <- event:
-		return true
-
-	default:
-		if c.queueFullLogged.CompareAndSwap(false, true) {
-			total := websocketQueueFullTotal.Add(1)
-			log.Printf(
-				"event=websocket_outgoing_queue_full total=%d connection_id=%s user_id=%d capacity=%d",
-				total, c.connectionID, c.userID, cap(c.outgoing),
-			)
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
+	accepted := c.enqueueLocked(event)
+	if accepted {
+		pending := len(c.outgoing) + len(c.priority)
+		if pending > c.queueHighWater {
+			c.queueHighWater = pending
 		}
-		return false
+		c.notifyOutgoing()
+		return true
 	}
+	if c.queueFullLogged.CompareAndSwap(false, true) {
+		total := websocketQueueFullTotal.Add(1)
+		log.Printf("event=websocket_outgoing_queue_full total=%d connection_id=%s user_id=%d normal_pending=%d media_pending=%d", total, c.connectionID, c.userID, len(c.outgoing), len(c.priority))
+	}
+	return false
 }
 
 func (c *Client) addSubscription(

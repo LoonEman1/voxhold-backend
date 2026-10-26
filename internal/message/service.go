@@ -42,12 +42,13 @@ func (s *Service) Create(
 		return Message{}, err
 	}
 
-	createdMessage, err := s.repository.Create(
+	createdMessage, err := s.repository.CreateIdempotent(
 		ctx,
 		serverID,
 		channelID,
 		authorUserID,
 		input.Content,
+		input.ClientMessageID,
 	)
 	if err != nil {
 		return Message{}, fmt.Errorf(

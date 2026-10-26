@@ -328,6 +328,30 @@ func main() {
 	readHandler := readstatehttp.NewHandler(readService)
 
 	diagnosticsRepository := diagnosticsSqlite.NewRepository(db)
+	maintenanceContext, stopMaintenance := context.WithCancel(context.Background())
+	var maintenanceWorker sync.WaitGroup
+	maintenanceWorker.Add(1)
+	safego.Go("storage/maintenance", func() {
+		defer maintenanceWorker.Done()
+		timer := time.NewTicker(time.Minute)
+		defer timer.Stop()
+		for {
+			ctx, cancel := context.WithTimeout(maintenanceContext, 2*time.Second)
+			if err := diagnosticsRepository.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
+				log.Printf("diagnostic cleanup: %v", err)
+			}
+			if err := messageRepository.PruneChanges(ctx); err != nil && maintenanceContext.Err() == nil {
+				log.Printf("message journal cleanup: %v", err)
+			}
+			cancel()
+			select {
+			case <-maintenanceContext.Done():
+				return
+			case <-timer.C:
+			}
+		}
+	})
+	defer func() { stopMaintenance(); maintenanceWorker.Wait() }()
 	diagnosticsService := diagnostics.NewService(diagnosticsRepository)
 	diagnosticsHandler := diagnosticshttp.NewHandler(diagnosticsService)
 

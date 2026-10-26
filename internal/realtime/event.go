@@ -49,7 +49,8 @@ type OutgoingEvent struct {
 }
 
 type AuthenticateData struct {
-	Token string `json:"token"`
+	Token       string `json:"token"`
+	MessageSync bool   `json:"message_sync,omitempty"`
 }
 
 type ReadyData struct {
@@ -84,13 +85,14 @@ type MessageAuthorData struct {
 }
 
 type MessageCreatedData struct {
-	ID        int64             `json:"id"`
-	ChannelID int64             `json:"channel_id"`
-	Author    MessageAuthorData `json:"author"`
-	Content   string            `json:"content"`
-	CreatedAt int64             `json:"created_at"`
-	EditedAt  *int64            `json:"edited_at"`
-	Revision  int64             `json:"revision"`
+	ClientMessageID string            `json:"client_message_id,omitempty"`
+	ID              int64             `json:"id"`
+	ChannelID       int64             `json:"channel_id"`
+	Author          MessageAuthorData `json:"author"`
+	Content         string            `json:"content"`
+	CreatedAt       int64             `json:"created_at"`
+	EditedAt        *int64            `json:"edited_at"`
+	Revision        int64             `json:"revision"`
 }
 
 type ServerMemberRemovedData struct {

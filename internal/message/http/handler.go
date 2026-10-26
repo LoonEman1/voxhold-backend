@@ -12,6 +12,7 @@ import (
 )
 
 type Service interface {
+	Sync(ctx context.Context, serverID, channelID, userID int64, after *int64) (message.SyncPage, error)
 	Create(
 		ctx context.Context,
 		serverID int64,
@@ -99,6 +100,7 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
+	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/messages/sync", requireAuth(http.HandlerFunc(h.sync)))
 	mux.Handle(
 		"POST /api/v1/servers/{serverID}/channels/{channelID}/messages",
 		requireAuth(http.HandlerFunc(h.create)),
@@ -146,7 +148,8 @@ func (h *Handler) RegisterRoutes(
 }
 
 type createRequest struct {
-	Content string `json:"content"`
+	Content         string `json:"content"`
+	ClientMessageID string `json:"client_message_id,omitempty"`
 }
 
 type updateRequest struct {
@@ -194,12 +197,17 @@ func (h *Handler) create(
 		channelID,
 		userID,
 		message.CreateInput{
-			Content: request.Content,
+			Content:         request.Content,
+			ClientMessageID: request.ClientMessageID,
 		},
 	)
 	if err != nil {
 		switch {
-		case errors.Is(err, message.ErrContentRequired),
+		case errors.Is(err, message.ErrIdempotencyConflict):
+			httpapi.WriteError(w, http.StatusConflict, message.ErrIdempotencyConflict.Error())
+		case errors.Is(err, message.ErrMessageNotFound):
+			httpapi.WriteError(w, http.StatusGone, "the original message was deleted")
+		case errors.Is(err, message.ErrClientMessageIDInvalid), errors.Is(err, message.ErrContentRequired),
 			errors.Is(err, message.ErrContentTooLong):
 
 			httpapi.WriteError(

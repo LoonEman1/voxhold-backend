@@ -76,7 +76,7 @@ func TestP2PStreamSignalingOnlyAllowsPublisherViewerPair(t *testing.T) {
 	); err != ErrStreamP2PRelation {
 		t.Fatalf("outsider signaling unexpectedly accepted: %v", err)
 	}
-	drainTestEvents(publisher.Outgoing())
+	drainOutgoingEvents(publisher)
 	if err := hub.RequestStreamP2PRestart(
 		viewer,
 		publisher.ConnectionID(),
@@ -84,7 +84,8 @@ func TestP2PStreamSignalingOnlyAllowsPublisherViewerPair(t *testing.T) {
 		t.Fatalf("viewer restart request rejected: %v", err)
 	}
 	select {
-	case event := <-publisher.Outgoing():
+	case <-publisher.OutgoingReady():
+		event, _ := publisher.PopOutgoing()
 		viewerData, ok := event.Data.(StreamViewerData)
 		if event.Type != EventStreamP2PRestart || !ok ||
 			viewerData.ConnectionID != viewer.ConnectionID() ||
@@ -251,15 +252,5 @@ func TestP2PRejectsHDRRenditions(t *testing.T) {
 		[]StreamRenditionData{hdr},
 	); err != ErrStreamRenditionsInvalid {
 		t.Fatalf("P2P HDR returned %v", err)
-	}
-}
-
-func drainTestEvents(events <-chan OutgoingEvent) {
-	for {
-		select {
-		case <-events:
-		default:
-			return
-		}
 	}
 }

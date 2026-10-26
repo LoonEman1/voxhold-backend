@@ -6,13 +6,14 @@ type Author struct {
 }
 
 type Message struct {
-	ID        int64
-	ChannelID int64
-	Author    Author
-	Content   string
-	CreatedAt int64
-	EditedAt  *int64
-	Revision  int64
+	ClientMessageID string
+	ID              int64
+	ChannelID       int64
+	Author          Author
+	Content         string
+	CreatedAt       int64
+	EditedAt        *int64
+	Revision        int64
 }
 
 type Page struct {

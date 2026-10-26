@@ -406,6 +406,9 @@ func (h *Handler) connect(
 		serverIDs,
 	)
 
+	if authentication.MessageSync {
+		client.EnableMessageSync()
+	}
 	if !h.hub.Register(client) {
 		_ = connection.Close(
 			websocket.StatusInternalError,
@@ -612,6 +615,12 @@ func (h *Handler) writeLoop(
 ) error {
 	pingTicker := time.NewTicker(pingInterval)
 	defer pingTicker.Stop()
+	defer func() {
+		stats := client.QueueStats()
+		if stats.Resyncs > 0 || stats.Coalesced > 0 {
+			log.Printf("event=websocket_queue_summary connection_id=%s user_id=%d high_watermark=%d coalesced=%d resyncs=%d", client.ConnectionID(), client.UserID(), stats.HighWatermark, stats.Coalesced, stats.Resyncs)
+		}
+	}()
 
 	for {
 		select {
@@ -625,7 +634,11 @@ func (h *Handler) writeLoop(
 
 			return nil
 
-		case event := <-client.Outgoing():
+		case <-client.OutgoingReady():
+			event, ok := client.PopOutgoing()
+			if !ok {
+				continue
+			}
 			writeContext, cancel :=
 				context.WithTimeout(
 					ctx,

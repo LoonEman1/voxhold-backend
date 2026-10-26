@@ -24,8 +24,9 @@ func (p *MessageEventPublisher) PublishMessageCreated(
 		OutgoingEvent{
 			Type: EventMessageCreated,
 			Data: MessageCreatedData{
-				ID:        value.ID,
-				ChannelID: value.ChannelID,
+				ClientMessageID: value.ClientMessageID,
+				ID:              value.ID,
+				ChannelID:       value.ChannelID,
 				Author: MessageAuthorData{
 					UserID:   value.Author.UserID,
 					Username: value.Author.Username,
