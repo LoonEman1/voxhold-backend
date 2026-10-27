@@ -20,6 +20,10 @@ def main():
     tag = "v" + version
     event, ref = os.environ["GITHUB_EVENT_NAME"], os.environ["GITHUB_REF"]
     sha = os.environ["GITHUB_SHA"]
+    if event == "pull_request" and os.environ.get("GITHUB_BASE_REF") == "main":
+        head = os.environ.get("GITHUB_HEAD_REF", "")
+        if head != "dev" and not head.startswith("codex/hotfix/"):
+            raise SystemExit("Feature PRs must target dev; main accepts dev release PRs or codex/hotfix/ branches")
     release = False
     eligible = event in ("push", "workflow_dispatch") and (ref == "refs/heads/main" or ref.startswith("refs/tags/"))
     if eligible:
