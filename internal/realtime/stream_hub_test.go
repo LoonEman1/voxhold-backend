@@ -224,11 +224,11 @@ func TestStreamRejectsInvalidRenditionsAndMissingSDRFallback(t *testing.T) {
 	if _, err := hub.StartStreamWithRenditions(
 		publisher, 10, 100, StreamModeServer, StreamCodecVP9, false,
 		[]StreamRenditionData{hdrOnly},
-	); err != nil {
-		t.Fatal(err)
+	); err != ErrStreamRenditionsInvalid {
+		t.Fatalf("HDR-only stream accepted: %v", err)
 	}
-	if _, err := hub.WatchStream(viewer, 10, 100); err != ErrStreamRenditionUnavailable {
-		t.Fatalf("viewer without SDR fallback returned %v", err)
+	if _, err := hub.WatchStream(viewer, 10, 100); err != ErrStreamUnavailable {
+		t.Fatalf("invalid stream left live state: %v", err)
 	}
 }
 

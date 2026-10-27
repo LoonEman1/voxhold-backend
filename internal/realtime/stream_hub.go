@@ -1,6 +1,9 @@
 package realtime
 
-import "errors"
+import (
+	"errors"
+	"voxhold-backend/internal/streamcontract"
+)
 
 var (
 	ErrStreamVoiceRequired = errors.New(
@@ -227,21 +230,14 @@ func normalizeStreamRenditions(
 		return nil, false
 	}
 	result := cloneStreamRenditions(values)
-	seenIDs := make(map[string]struct{}, len(result))
-	seenRanges := make(map[StreamDynamicRange]struct{}, len(result))
-	for _, value := range result {
-		if !validStreamRenditionID(value.ID) || !validStreamRendition(value) {
-			return nil, false
-		}
-		if _, exists := seenIDs[value.ID]; exists {
-			return nil, false
-		}
-		if _, exists := seenRanges[value.DynamicRange]; exists {
-			return nil, false
-		}
-		seenIDs[value.ID] = struct{}{}
-		seenRanges[value.DynamicRange] = struct{}{}
+	converted := make([]streamcontract.Rendition, len(result))
+	for i, v := range result {
+		converted[i] = streamcontract.Rendition{ID: v.ID, Codec: string(v.Codec), Profile: v.Profile, DynamicRange: string(v.DynamicRange), BitDepth: v.BitDepth, ColorPrimaries: string(v.ColorPrimaries), Transfer: string(v.Transfer), Matrix: string(v.Matrix)}
 	}
+	if !streamcontract.ValidRenditions(converted) {
+		return nil, false
+	}
+
 	return result, true
 }
 
@@ -265,53 +261,6 @@ func legacySDRStreamRendition(codec StreamCodec) StreamRenditionData {
 		Transfer:       StreamTransferBT709,
 		Matrix:         StreamMatrixBT709,
 	}
-}
-
-func validStreamRenditionID(value string) bool {
-	if len(value) == 0 || len(value) > 32 {
-		return false
-	}
-	for _, character := range value {
-		if (character < 'a' || character > 'z') &&
-			(character < '0' || character > '9') &&
-			character != '-' && character != '_' {
-
-			return false
-		}
-	}
-	return true
-}
-
-func validStreamRendition(value StreamRenditionData) bool {
-	if !validStreamCodec(value.Codec) || len(value.Profile) > 32 {
-		return false
-	}
-	switch value.DynamicRange {
-	case StreamDynamicRangeSDR:
-		return value.BitDepth == 8 &&
-			value.ColorPrimaries == StreamColorPrimariesBT709 &&
-			value.Transfer == StreamTransferBT709 &&
-			value.Matrix == StreamMatrixBT709
-	case StreamDynamicRangeHDR10:
-		return validHDRStreamCodecProfile(value.Codec, value.Profile) &&
-			value.BitDepth == 10 &&
-			value.ColorPrimaries == StreamColorPrimariesBT2020 &&
-			value.Transfer == StreamTransferPQ &&
-			value.Matrix == StreamMatrixBT2020NCL
-	case StreamDynamicRangeHLG:
-		return validHDRStreamCodecProfile(value.Codec, value.Profile) &&
-			value.BitDepth == 10 &&
-			value.ColorPrimaries == StreamColorPrimariesBT2020 &&
-			value.Transfer == StreamTransferHLG &&
-			value.Matrix == StreamMatrixBT2020NCL
-	default:
-		return false
-	}
-}
-
-func validHDRStreamCodecProfile(codec StreamCodec, profile string) bool {
-	return (codec == StreamCodecAV1 && profile == "main10") ||
-		(codec == StreamCodecVP9 && profile == "2")
 }
 
 func onlySDRStreamRenditions(values []StreamRenditionData) bool {
