@@ -47,8 +47,9 @@ var (
 )
 
 type CreateInput struct {
-	Content         string
-	ClientMessageID string
+	Content          string
+	ClientMessageID  string
+	ReplyToMessageID *int64
 }
 
 func (i CreateInput) Normalize() CreateInput {
@@ -58,6 +59,9 @@ func (i CreateInput) Normalize() CreateInput {
 }
 
 func (i CreateInput) Validate() error {
+	if i.ReplyToMessageID != nil && *i.ReplyToMessageID <= 0 {
+		return ErrReplyInvalid
+	}
 	if len(i.ClientMessageID) > 64 {
 		return ErrClientMessageIDInvalid
 	}

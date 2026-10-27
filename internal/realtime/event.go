@@ -1,6 +1,9 @@
 package realtime
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"voxhold-backend/internal/message"
+)
 
 const ProtocolVersion = 6
 
@@ -87,14 +90,16 @@ type MessageAuthorData struct {
 }
 
 type MessageCreatedData struct {
-	ClientMessageID string            `json:"client_message_id,omitempty"`
-	ID              int64             `json:"id"`
-	ChannelID       int64             `json:"channel_id"`
-	Author          MessageAuthorData `json:"author"`
-	Content         string            `json:"content"`
-	CreatedAt       int64             `json:"created_at"`
-	EditedAt        *int64            `json:"edited_at"`
-	Revision        int64             `json:"revision"`
+	ClientMessageID string                    `json:"client_message_id,omitempty"`
+	ID              int64                     `json:"id"`
+	ChannelID       int64                     `json:"channel_id"`
+	Author          MessageAuthorData         `json:"author"`
+	Content         string                    `json:"content"`
+	CreatedAt       int64                     `json:"created_at"`
+	EditedAt        *int64                    `json:"edited_at"`
+	Revision        int64                     `json:"revision"`
+	Reply           *message.ReplyReference   `json:"reply,omitempty"`
+	Forward         *message.ForwardReference `json:"forward,omitempty"`
 }
 
 type ServerMemberRemovedData struct {

@@ -2,8 +2,8 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -33,6 +33,12 @@ func (r *Repository) Create(
 }
 
 func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, authorUserID int64, content, clientMessageID string) (message.Message, error) {
+	return r.CreateReferenced(ctx, serverID, channelID, authorUserID, message.CreateInput{Content: content, ClientMessageID: clientMessageID}, nil)
+}
+
+func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, authorUserID int64, input message.CreateInput, forward *message.ForwardInput) (message.Message, error) {
+	content, clientMessageID := input.Content, input.ClientMessageID
+	kind, contentHash := requestHash(input, forward)
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return message.Message{}, fmt.Errorf(
@@ -65,35 +71,69 @@ func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, 
 		return message.Message{}, err
 	}
 	if clientMessageID != "" {
-		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
-		var original string
+		var original, originalKind string
 		var existingID sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT content_hash, message_id FROM message_send_keys
-			WHERE channel_id = ? AND author_user_id = ? AND client_message_id = ?`, channelID, authorUserID, clientMessageID).Scan(&original, &existingID)
+		err := tx.QueryRowContext(ctx, `SELECT content_hash, message_id, request_kind FROM message_send_keys
+			WHERE channel_id = ? AND author_user_id = ? AND client_message_id = ?`, channelID, authorUserID, clientMessageID).Scan(&original, &existingID, &originalKind)
 		if err == nil {
-			if original != contentHash {
+			if original != contentHash || originalKind != kind {
 				return message.Message{}, message.ErrIdempotencyConflict
 			}
 			if !existingID.Valid {
 				return message.Message{}, message.ErrMessageNotFound
 			}
 			value, err := findMessage(ctx, tx, channelID, existingID.Int64)
+			if err != nil {
+				return value, err
+			}
+			if err = hydrateInteractions(ctx, tx, authorUserID, []*message.Message{&value}); err != nil {
+				return value, err
+			}
 			value.ClientMessageID = clientMessageID
 			value.Replayed = true
-			return value, err
+			return value, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return message.Message{}, fmt.Errorf("find send key: %w", err)
 		}
 	}
 
+	var reply *message.ReplyReference
+	var replyID any
+	if input.ReplyToMessageID != nil {
+		target, err := findMessage(ctx, tx, channelID, *input.ReplyToMessageID)
+		if errors.Is(err, message.ErrMessageNotFound) {
+			return message.Message{}, message.ErrReplyInvalid
+		}
+		if err != nil {
+			return message.Message{}, err
+		}
+		replyID = target.ID
+		reply = &message.ReplyReference{MessageID: target.ID, Author: target.Author, Content: target.Content, Revision: target.Revision}
+	}
+	var forwarded *message.ForwardReference
+	var forwardData any
+	if forward != nil {
+		content, forwarded, err = forwardSnapshot(ctx, tx, authorUserID, *forward)
+		if err != nil {
+			return message.Message{}, err
+		}
+		encoded, err := json.Marshal(forwarded)
+		if err != nil {
+			return message.Message{}, err
+		}
+		forwardData = string(encoded)
+	}
 	const query = `
 	INSERT INTO messages (
 		channel_id,
 		author_user_id,
-		content
+		content,
+        reply_to_message_id,
+        reply_to_original_id,
+        forward_data
 	)
-	VALUES (?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?)
 	RETURNING
 		id,
 		channel_id,
@@ -116,6 +156,7 @@ func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, 
 		channelID,
 		authorUserID,
 		content,
+		replyID, replyID, forwardData,
 	).Scan(
 		&createdMessage.ID,
 		&createdMessage.ChannelID,
@@ -131,9 +172,13 @@ func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, 
 		)
 	}
 
+	createdMessage.Reply = reply
+	createdMessage.Forward = forwarded
+	createdMessage.Reactions = []message.Reaction{}
+	createdMessage.ReactionsRevision = createdMessage.Revision
 	if clientMessageID != "" {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO message_send_keys(channel_id, author_user_id, client_message_id, content_hash, message_id)
-			VALUES(?, ?, ?, ?, ?)`, channelID, authorUserID, clientMessageID, fmt.Sprintf("%x", sha256.Sum256([]byte(content))), createdMessage.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO message_send_keys(channel_id, author_user_id, client_message_id, content_hash, message_id, request_kind)
+			VALUES(?, ?, ?, ?, ?, ?)`, channelID, authorUserID, clientMessageID, contentHash, createdMessage.ID, kind); err != nil {
 			return message.Message{}, fmt.Errorf("store send key: %w", err)
 		}
 		createdMessage.ClientMessageID = clientMessageID
@@ -268,6 +313,9 @@ func (r *Repository) ListByChannelID(
 		)
 	}
 
+	if err := hydrateInteractions(ctx, tx, userID, messagePointers(messages)); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf(
 			"commit list messages transaction: %w",
@@ -308,6 +356,12 @@ func (r *Repository) Update(
 		return message.Message{}, err
 	}
 
+	var forwardedData sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT forward_data FROM messages WHERE id=? AND channel_id=?`, messageID, channelID).Scan(&forwardedData); err == nil && forwardedData.Valid {
+		return message.Message{}, message.ErrForwardEdit
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return message.Message{}, err
+	}
 	const query = `
 	UPDATE messages
 	SET
@@ -365,6 +419,9 @@ func (r *Repository) Update(
 		)
 	}
 
+	if err := hydrateInteractions(ctx, tx, userID, []*message.Message{&updatedMessage}); err != nil {
+		return message.Message{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return message.Message{}, fmt.Errorf(
 			"commit update message transaction: %w",
@@ -544,6 +601,9 @@ func (r *Repository) Pin(
 		)
 	}
 
+	if err := hydrateInteractions(ctx, tx, userID, []*message.Message{&pinnedMessage.Message}); err != nil {
+		return message.PinnedMessage{}, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return message.PinnedMessage{}, false, fmt.Errorf(
 			"commit pin message transaction: %w",
@@ -723,6 +783,9 @@ func (r *Repository) ListPinned(
 		)
 	}
 
+	if err := hydrateInteractions(ctx, tx, userID, pinPointers(values)); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf(
 			"commit list pinned messages transaction: %w",

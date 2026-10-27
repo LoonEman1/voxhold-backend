@@ -1,0 +1,12 @@
+DROP TRIGGER message_reaction_delete;
+DROP TRIGGER message_reaction_insert;
+DROP TRIGGER message_reaction_scope;
+DROP TABLE message_reactions;
+DROP TRIGGER messages_reply_edited;
+DROP TRIGGER messages_reply_deleted;
+DROP TRIGGER messages_reply_scope;
+DROP INDEX idx_messages_reply_target;
+ALTER TABLE messages DROP COLUMN forward_data;
+ALTER TABLE messages DROP COLUMN reply_to_original_id;
+ALTER TABLE messages DROP COLUMN reply_to_message_id;
+ALTER TABLE message_send_keys DROP COLUMN request_kind;

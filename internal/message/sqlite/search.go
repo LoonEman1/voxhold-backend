@@ -123,6 +123,9 @@ func (r *Repository) Search(
 		)
 	}
 
+	if err := hydrateInteractions(ctx, tx, userID, searchPointers(results)); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf(
 			"commit search messages transaction: %w",
@@ -208,6 +211,9 @@ func (r *Repository) GetContext(
 	messages = append(messages, target)
 	messages = append(messages, newer...)
 
+	if err := hydrateInteractions(ctx, tx, userID, messagePointers(messages)); err != nil {
+		return message.Context{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return message.Context{}, fmt.Errorf(
 			"commit message context transaction: %w",

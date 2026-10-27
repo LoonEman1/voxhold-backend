@@ -100,6 +100,10 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
+	mux.Handle("POST /api/v1/servers/{serverID}/channels/{channelID}/messages/forward", requireAuth(http.HandlerFunc(h.forward)))
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		mux.Handle(method+" /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/reactions/{emoji}", requireAuth(http.HandlerFunc(h.reactions)))
+	}
 	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/messages/sync", requireAuth(http.HandlerFunc(h.sync)))
 	mux.Handle(
 		"POST /api/v1/servers/{serverID}/channels/{channelID}/messages",
@@ -148,8 +152,9 @@ func (h *Handler) RegisterRoutes(
 }
 
 type createRequest struct {
-	Content         string `json:"content"`
-	ClientMessageID string `json:"client_message_id,omitempty"`
+	Content          string `json:"content"`
+	ClientMessageID  string `json:"client_message_id,omitempty"`
+	ReplyToMessageID *int64 `json:"reply_to_message_id,omitempty"`
 }
 
 type updateRequest struct {
@@ -197,8 +202,9 @@ func (h *Handler) create(
 		channelID,
 		userID,
 		message.CreateInput{
-			Content:         request.Content,
-			ClientMessageID: request.ClientMessageID,
+			Content:          request.Content,
+			ClientMessageID:  request.ClientMessageID,
+			ReplyToMessageID: request.ReplyToMessageID,
 		},
 	)
 	if err != nil {
@@ -207,7 +213,7 @@ func (h *Handler) create(
 			httpapi.WriteError(w, http.StatusConflict, message.ErrIdempotencyConflict.Error())
 		case errors.Is(err, message.ErrMessageNotFound):
 			httpapi.WriteError(w, http.StatusGone, "the original message was deleted")
-		case errors.Is(err, message.ErrClientMessageIDInvalid), errors.Is(err, message.ErrContentRequired),
+		case errors.Is(err, message.ErrReplyInvalid), errors.Is(err, message.ErrClientMessageIDInvalid), errors.Is(err, message.ErrContentRequired),
 			errors.Is(err, message.ErrContentTooLong):
 
 			httpapi.WriteError(
@@ -588,7 +594,7 @@ func writeMessageOperationError(
 		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
 
 	case errors.Is(err, message.ErrForbidden),
-		errors.Is(err, message.ErrEditForbidden),
+		errors.Is(err, message.ErrEditForbidden), errors.Is(err, message.ErrForwardEdit),
 		errors.Is(err, message.ErrDeleteForbidden),
 		errors.Is(err, message.ErrPinForbidden):
 
