@@ -113,6 +113,8 @@ func (c *Client) replaceChannelAccess(ids map[int64]struct{}) {
 func (c *Client) filterChannelEvent(event OutgoingEvent) (OutgoingEvent, bool) {
 	var id int64
 	switch data := event.Data.(type) {
+	case interface{ EventChannelID() int64 }:
+		id = data.EventChannelID()
 	case ChannelData:
 		id = data.ID
 	case ChannelDeletedData:

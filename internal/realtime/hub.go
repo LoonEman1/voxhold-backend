@@ -136,6 +136,17 @@ func NewHub() *Hub {
 	}
 }
 
+// ConnectedUserIDs snapshots accounts once, regardless of their number of tabs.
+func (h *Hub) ConnectedUserIDs() []int64 {
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	ids := make([]int64, 0, len(h.clientsByUser))
+	for id := range h.clientsByUser {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // CloseReasonServerShutdown marks connections closed by a server restart.
 // The WebSocket layer sends it with 1012 (Service Restart) so clients
 // reconnect and restore voice instead of treating it as an auth failure.

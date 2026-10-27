@@ -79,6 +79,7 @@ func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, 
 			}
 			value, err := findMessage(ctx, tx, channelID, existingID.Int64)
 			value.ClientMessageID = clientMessageID
+			value.Replayed = true
 			return value, err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {

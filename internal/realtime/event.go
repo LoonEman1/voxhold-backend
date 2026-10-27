@@ -31,9 +31,11 @@ const (
 	EventChannelReadSnapshot EventType = "channel.read_snapshot"
 	EventChannelRead         EventType = "channel.read"
 
-	EventMessageCreated EventType = "message.created"
-	EventMessageUpdated EventType = "message.updated"
-	EventMessageDeleted EventType = "message.deleted"
+	EventMessageCreated              EventType = "message.created"
+	EventMessageUpdated              EventType = "message.updated"
+	EventMessageDeleted              EventType = "message.deleted"
+	EventNotificationMessage         EventType = "notification.message"
+	EventNotificationSettingsUpdated EventType = "notification.settings_updated"
 )
 
 type IncomingEvent struct {

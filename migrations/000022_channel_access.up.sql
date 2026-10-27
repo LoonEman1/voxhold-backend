@@ -7,6 +7,7 @@ CREATE TABLE channel_user_grants (
     PRIMARY KEY (channel_id, user_id),
     FOREIGN KEY (server_id, user_id) REFERENCES server_members(server_id, user_id) ON DELETE CASCADE
 );
+CREATE INDEX idx_channel_user_grants_member ON channel_user_grants(server_id, user_id);
 CREATE TRIGGER channel_user_grant_scope BEFORE INSERT ON channel_user_grants
 WHEN NOT EXISTS (SELECT 1 FROM channels WHERE id = NEW.channel_id AND server_id = NEW.server_id)
 BEGIN SELECT RAISE(ABORT, 'channel grant server mismatch'); END;

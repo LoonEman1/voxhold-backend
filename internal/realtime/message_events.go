@@ -5,7 +5,13 @@ import "voxhold-backend/internal/message"
 var _ message.EventPublisher = (*MessageEventPublisher)(nil)
 
 type MessageEventPublisher struct {
-	hub *Hub
+	hub       *Hub
+	onCreated func(message.Message)
+}
+
+// SetCreatedListener is configured before accepting requests.
+func (p *MessageEventPublisher) SetCreatedListener(listener func(message.Message)) {
+	p.onCreated = listener
 }
 
 func NewMessageEventPublisher(
@@ -38,6 +44,9 @@ func (p *MessageEventPublisher) PublishMessageCreated(
 			},
 		},
 	)
+	if !value.Replayed && p.onCreated != nil {
+		p.onCreated(value)
+	}
 }
 
 func (p *MessageEventPublisher) PublishMessageUpdated(

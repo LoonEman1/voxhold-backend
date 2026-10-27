@@ -19,6 +19,7 @@ import (
 	"voxhold-backend/internal/cors"
 	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
+	"voxhold-backend/internal/notifications"
 	"voxhold-backend/internal/recordings"
 	"voxhold-backend/internal/safego"
 	"voxhold-backend/internal/voice"
@@ -315,6 +316,19 @@ func main() {
 			realtimeHub,
 		)
 
+	notificationService := notifications.NewService(db, realtimeHub.ConnectedUserIDs,
+		func(userID int64, event notifications.Event) {
+			realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventNotificationMessage, Data: event})
+		},
+		func(userID int64, value notifications.Settings) {
+			realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventNotificationSettingsUpdated, Data: value})
+		},
+	)
+	messageEventPublisher.SetCreatedListener(func(value messageDomain.Message) {
+		if err := notificationService.Deliver(value); err != nil {
+			log.Printf("deliver message notification: %v", err)
+		}
+	})
 	messageRepository := messageSqlite.NewRepository(db)
 
 	messageService := messageDomain.NewService(
@@ -407,6 +421,7 @@ func main() {
 	)
 	avatarHandler.RegisterRoutes(mux, accountHandler.RequireAuth)
 	recordingHandler.RegisterRoutes(mux, accountHandler.RequireAuth)
+	notificationService.RegisterRoutes(mux, accountHandler.RequireAuth)
 
 	messageHandler.RegisterRoutes(
 		mux,
