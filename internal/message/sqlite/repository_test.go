@@ -120,12 +120,14 @@ func openMessageTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("create schema: %v", err)
 	}
 
-	migration, err := os.ReadFile("../../../migrations/000022_channel_access.up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(migration)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"000020_message_sync.up.sql", "000022_channel_access.up.sql", "000024_message_interactions.up.sql"} {
+		migration, err := os.ReadFile("../../../migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return db
 }

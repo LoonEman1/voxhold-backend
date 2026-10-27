@@ -25,6 +25,9 @@ func NewMessageEventPublisher(
 func (p *MessageEventPublisher) PublishMessageCreated(
 	value message.Message,
 ) {
+	if value.Replayed {
+		return
+	}
 	p.hub.Publish(
 		value.ChannelID,
 		OutgoingEvent{
@@ -41,6 +44,7 @@ func (p *MessageEventPublisher) PublishMessageCreated(
 				CreatedAt: value.CreatedAt,
 				EditedAt:  value.EditedAt,
 				Revision:  value.Revision,
+				Reply:     value.Reply, Forward: value.Forward,
 			},
 		},
 	)
@@ -127,5 +131,6 @@ func newMessageData(
 		CreatedAt: value.CreatedAt,
 		EditedAt:  value.EditedAt,
 		Revision:  value.Revision,
+		Reply:     value.Reply, Forward: value.Forward,
 	}
 }

@@ -8,14 +8,18 @@ type authorResponse struct {
 }
 
 type messageResponse struct {
-	ClientMessageID string         `json:"client_message_id,omitempty"`
-	ID              int64          `json:"id"`
-	ChannelID       int64          `json:"channel_id"`
-	Author          authorResponse `json:"author"`
-	Content         string         `json:"content"`
-	CreatedAt       int64          `json:"created_at"`
-	EditedAt        *int64         `json:"edited_at"`
-	Revision        int64          `json:"revision"`
+	ClientMessageID   string                    `json:"client_message_id,omitempty"`
+	ID                int64                     `json:"id"`
+	ChannelID         int64                     `json:"channel_id"`
+	Author            authorResponse            `json:"author"`
+	Content           string                    `json:"content"`
+	CreatedAt         int64                     `json:"created_at"`
+	EditedAt          *int64                    `json:"edited_at"`
+	Revision          int64                     `json:"revision"`
+	Reply             *message.ReplyReference   `json:"reply,omitempty"`
+	Forward           *message.ForwardReference `json:"forward,omitempty"`
+	Reactions         []message.Reaction        `json:"reactions"`
+	ReactionsRevision int64                     `json:"reactions_revision"`
 }
 
 func newMessageResponse(
@@ -33,6 +37,7 @@ func newMessageResponse(
 		CreatedAt: value.CreatedAt,
 		EditedAt:  value.EditedAt,
 		Revision:  value.Revision,
+		Reply:     value.Reply, Forward: value.Forward, Reactions: value.Reactions, ReactionsRevision: value.ReactionsRevision,
 	}
 }
 
