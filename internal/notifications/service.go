@@ -169,7 +169,7 @@ func (s *Service) Deliver(value message.Message) error {
 		if err = rows.Scan(&id, &username, &role, &mode, &event.ServerID, &event.ChannelName, &event.ServerName); err != nil {
 			break
 		}
-		event.Mentioned = targets.Matches(id, username, role)
+		event.Mentioned = value.Forward == nil && (targets.Matches(id, username, role) || value.Reply != nil && !value.Reply.Deleted && value.Reply.Author.UserID == id)
 		if mode != All && !event.Mentioned {
 			continue
 		}

@@ -97,6 +97,9 @@ func (r *Repository) Sync(ctx context.Context, serverID, channelID, userID int64
 			page.Cursor = last
 		}
 	}
+	if err := hydrateInteractions(ctx, tx, userID, messagePointers(page.Messages)); err != nil {
+		return page, err
+	}
 	if err := tx.Commit(); err != nil {
 		return page, err
 	}

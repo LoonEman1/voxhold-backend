@@ -3,6 +3,7 @@ package realtime
 import (
 	"fmt"
 	"strings"
+	"voxhold-backend/internal/message"
 )
 
 const EventChannelSyncRequired EventType = "channel.sync_required"
@@ -64,6 +65,12 @@ func (c *Client) enqueueLocked(event OutgoingEvent) bool {
 	if key := replacementKey(event); key != "" {
 		for index, queued := range c.outgoing {
 			if replacementKey(queued) == key {
+				if previous, ok := queued.Data.(message.ReactionsData); ok {
+					if next, ok := event.Data.(message.ReactionsData); ok && next.Revision < previous.Revision {
+						c.queueCoalesced++
+						return true
+					}
+				}
 				if previous, ok := queued.Data.(ChannelReadData); ok {
 					if next := event.Data.(ChannelReadData); next.LastReadMessageID < previous.LastReadMessageID {
 						c.queueCoalesced++
@@ -169,6 +176,8 @@ func replacementKey(event OutgoingEvent) string {
 		}
 	}
 	switch value := event.Data.(type) {
+	case message.ReactionsData:
+		return fmt.Sprintf("reactions/%d", value.MessageID)
 	case PresenceUpdatedData:
 		if event.Type == EventPresenceUpdated {
 			return fmt.Sprintf("presence/%d/%d", value.ServerID, value.UserID)
@@ -186,6 +195,10 @@ func eventMessageChannel(event OutgoingEvent) int64 {
 		return 0
 	}
 	switch event.Type {
+	case EventMessageReactionsChanged:
+		if value, ok := event.Data.(message.ReactionsData); ok {
+			return value.ChannelID
+		}
 	case EventMessageCreated, EventMessageUpdated:
 		if value, ok := event.Data.(MessageCreatedData); ok {
 			return value.ChannelID

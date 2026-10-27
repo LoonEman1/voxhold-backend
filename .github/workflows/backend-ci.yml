@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [main, dev]
+    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
 
@@ -134,7 +134,7 @@ jobs:
 
   publish:
     name: Publish Docker image
-    if: needs.release-plan.outputs.release == 'true'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.release-plan.outputs.release == 'true'
     needs: [release-plan, test, test-race, test-leaks]
     runs-on: ubuntu-latest
 
@@ -186,7 +186,7 @@ jobs:
 
   release:
     name: Create GitHub release
-    if: needs.release-plan.outputs.release == 'true'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.release-plan.outputs.release == 'true'
     needs: [release-plan, publish]
     runs-on: ubuntu-latest
 

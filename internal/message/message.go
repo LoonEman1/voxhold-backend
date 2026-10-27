@@ -1,21 +1,25 @@
 package message
 
 type Author struct {
-	UserID   int64
-	Username string
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
 }
 
 type Message struct {
 	// Replayed send keys acknowledge the original message without alerting again.
-	Replayed        bool
-	ClientMessageID string
-	ID              int64
-	ChannelID       int64
-	Author          Author
-	Content         string
-	CreatedAt       int64
-	EditedAt        *int64
-	Revision        int64
+	Replayed          bool
+	ClientMessageID   string
+	ID                int64
+	ChannelID         int64
+	Author            Author
+	Content           string
+	CreatedAt         int64
+	EditedAt          *int64
+	Revision          int64
+	Reply             *ReplyReference
+	Forward           *ForwardReference
+	Reactions         []Reaction
+	ReactionsRevision int64
 }
 
 type Page struct {

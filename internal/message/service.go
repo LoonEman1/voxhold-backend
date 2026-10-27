@@ -42,14 +42,17 @@ func (s *Service) Create(
 		return Message{}, err
 	}
 
-	createdMessage, err := s.repository.CreateIdempotent(
-		ctx,
-		serverID,
-		channelID,
-		authorUserID,
-		input.Content,
-		input.ClientMessageID,
-	)
+	var createdMessage Message
+	var err error
+	if input.ReplyToMessageID != nil {
+		if repo, ok := s.repository.(InteractionRepository); ok {
+			createdMessage, err = repo.CreateReferenced(ctx, serverID, channelID, authorUserID, input, nil)
+		} else {
+			return Message{}, ErrReplyInvalid
+		}
+	} else {
+		createdMessage, err = s.repository.CreateIdempotent(ctx, serverID, channelID, authorUserID, input.Content, input.ClientMessageID)
+	}
 	if err != nil {
 		return Message{}, fmt.Errorf(
 			"create message: %w",
