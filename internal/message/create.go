@@ -47,7 +47,8 @@ var (
 )
 
 type CreateInput struct {
-	Content string
+	Content         string
+	ClientMessageID string
 }
 
 func (i CreateInput) Normalize() CreateInput {
@@ -57,6 +58,14 @@ func (i CreateInput) Normalize() CreateInput {
 }
 
 func (i CreateInput) Validate() error {
+	if len(i.ClientMessageID) > 64 {
+		return ErrClientMessageIDInvalid
+	}
+	for _, char := range i.ClientMessageID {
+		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-' || char == '_') {
+			return ErrClientMessageIDInvalid
+		}
+	}
 	if i.Content == "" {
 		return ErrContentRequired
 	}

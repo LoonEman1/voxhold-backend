@@ -18,6 +18,8 @@ var (
 	ErrRegistrationLinkTooLong = errors.New("invite links that allow registration cannot live longer than 24 hours")
 	ErrLinkMaxUsesInvalid      = errors.New("invite link max uses must be between 1 and 1000")
 	ErrRegistrationLimitNeeded = errors.New("invite links that allow registration must have a use limit")
+	ErrLinkNotFound            = errors.New("invite link not found")
+	ErrLinkPaginationInvalid   = errors.New("invalid invite link pagination")
 )
 
 type CreateLinkInput struct {
@@ -68,4 +70,15 @@ type LinkPreview struct {
 	MaxUses           *int
 	UseCount          int
 	AllowRegistration bool
+}
+
+type ListLinksInput struct {
+	BeforeID *int64
+	Limit    int
+}
+
+type LinkPage struct {
+	Links        []InviteLink
+	NextBeforeID *int64
+	HasMore      bool
 }

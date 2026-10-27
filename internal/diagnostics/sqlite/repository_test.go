@@ -44,6 +44,14 @@ func TestRepositoryStoresListsAndPrunesDiagnostics(t *testing.T) {
 		level TEXT NOT NULL,
 		details_json TEXT NOT NULL
 	);
+	CREATE TABLE client_diagnostic_storage (id INTEGER PRIMARY KEY, event_count INTEGER NOT NULL);
+	INSERT INTO client_diagnostic_storage VALUES (1, 0);
+	CREATE TRIGGER diagnostic_storage_insert AFTER INSERT ON client_diagnostic_events BEGIN
+	 UPDATE client_diagnostic_storage SET event_count = event_count + 1;
+	END;
+	CREATE TRIGGER diagnostic_storage_delete AFTER DELETE ON client_diagnostic_events BEGIN
+	 UPDATE client_diagnostic_storage SET event_count = event_count - 1;
+	END;
 	INSERT INTO users (id, username) VALUES (1, 'owner');
 	INSERT INTO server_members (server_id, user_id, role) VALUES (10, 1, 'owner');
 	`
@@ -81,6 +89,9 @@ func TestRepositoryStoresListsAndPrunesDiagnostics(t *testing.T) {
 	}
 	if accepted != 2 {
 		t.Fatalf("accepted = %d, want 2", accepted)
+	}
+	if err := repository.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 
 	var oldCount int

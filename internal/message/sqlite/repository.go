@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -28,6 +29,10 @@ func (r *Repository) Create(
 	authorUserID int64,
 	content string,
 ) (message.Message, error) {
+	return r.CreateIdempotent(ctx, serverID, channelID, authorUserID, content, "")
+}
+
+func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, authorUserID int64, content, clientMessageID string) (message.Message, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return message.Message{}, fmt.Errorf(
@@ -57,6 +62,27 @@ func (r *Repository) Create(
 		channelID,
 	); err != nil {
 		return message.Message{}, err
+	}
+	if clientMessageID != "" {
+		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+		var original string
+		var existingID sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT content_hash, message_id FROM message_send_keys
+			WHERE channel_id = ? AND author_user_id = ? AND client_message_id = ?`, channelID, authorUserID, clientMessageID).Scan(&original, &existingID)
+		if err == nil {
+			if original != contentHash {
+				return message.Message{}, message.ErrIdempotencyConflict
+			}
+			if !existingID.Valid {
+				return message.Message{}, message.ErrMessageNotFound
+			}
+			value, err := findMessage(ctx, tx, channelID, existingID.Int64)
+			value.ClientMessageID = clientMessageID
+			return value, err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return message.Message{}, fmt.Errorf("find send key: %w", err)
+		}
 	}
 
 	const query = `
@@ -103,6 +129,13 @@ func (r *Repository) Create(
 		)
 	}
 
+	if clientMessageID != "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO message_send_keys(channel_id, author_user_id, client_message_id, content_hash, message_id)
+			VALUES(?, ?, ?, ?, ?)`, channelID, authorUserID, clientMessageID, fmt.Sprintf("%x", sha256.Sum256([]byte(content))), createdMessage.ID); err != nil {
+			return message.Message{}, fmt.Errorf("store send key: %w", err)
+		}
+		createdMessage.ClientMessageID = clientMessageID
+	}
 	if err := tx.Commit(); err != nil {
 		return message.Message{}, fmt.Errorf(
 			"commit create message transaction: %w",

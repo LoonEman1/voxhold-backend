@@ -3,6 +3,7 @@ package realtime
 import (
 	"slices"
 	"sync"
+	"time"
 	"voxhold-backend/internal/keylock"
 )
 
@@ -103,8 +104,10 @@ type Hub struct {
 	clientsBySession    map[[32]byte]map[*Client]struct{}
 	clientsByConnection map[string]*Client
 
-	presenceMu sync.RWMutex
-	presence   map[int64]map[int64]int
+	presenceMu         sync.RWMutex
+	presence           map[int64]map[int64]int
+	lastSeenSaver      func(userID, at int64)
+	presenceBroadcasts keylock.Set
 
 	mediaTransitions keylock.Set
 	voice            *voiceState
@@ -578,17 +581,58 @@ func (h *Hub) broadcastPresence(
 	userID int64,
 	status PresenceStatus,
 ) {
-	h.broadcastToClients(
-		h.clientsForServer(serverID),
-		OutgoingEvent{
-			Type: EventPresenceUpdated,
-			Data: PresenceUpdatedData{
-				ServerID: serverID,
-				UserID:   userID,
-				Status:   status,
-			},
+	unlock := h.presenceBroadcasts.Lock(userID)
+	currentStatus := func() PresenceStatus {
+		h.presenceMu.RLock()
+		defer h.presenceMu.RUnlock()
+		if h.presence[serverID][userID] > 0 {
+			return PresenceOnline
+		}
+		return PresenceOffline
+	}
+	if currentStatus() != status {
+		unlock()
+		return
+	}
+	lastSeenAt := time.Now().Unix()
+	h.clientsMu.RLock()
+	save := h.lastSeenSaver
+	h.clientsMu.RUnlock()
+	if save != nil {
+		save(userID, lastSeenAt)
+	}
+	event := OutgoingEvent{
+		Type: EventPresenceUpdated,
+		Data: PresenceUpdatedData{
+			ServerID:   serverID,
+			UserID:     userID,
+			Status:     status,
+			LastSeenAt: &lastSeenAt,
 		},
-	)
+	}
+	// Persistence can overlap a quick reconnect. Serialize emission and recheck
+	// the current state so a delayed offline event cannot hide an online user.
+	var failed []*Client
+	if currentStatus() == status {
+		for _, client := range h.clientsForServer(serverID) {
+			if !client.enqueue(event) {
+				failed = append(failed, client)
+			}
+		}
+	}
+	unlock()
+	// Queue cleanup may itself emit presence; never recurse under the key lock.
+	for _, client := range failed {
+		h.Unregister(client)
+	}
+}
+
+// SetLastSeenSaver persists only presence transitions, never individual media
+// events or heartbeats. The callback runs without any hub lock held.
+func (h *Hub) SetLastSeenSaver(save func(userID, at int64)) {
+	h.clientsMu.Lock()
+	h.lastSeenSaver = save
+	h.clientsMu.Unlock()
 }
 
 func (h *Hub) broadcastToClients(

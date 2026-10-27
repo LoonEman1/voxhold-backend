@@ -33,7 +33,7 @@ func TestQueueStreamStateErrorReportsRenditionFailures(t *testing.T) {
 			if err := queueStreamStateError(client, "request", test.err); err != nil {
 				t.Fatal(err)
 			}
-			event := <-client.Outgoing()
+			event, _ := client.PopOutgoing()
 			data, ok := event.Data.(realtime.ErrorData)
 			if !ok || event.Type != realtime.EventError ||
 				data.Code != test.code || data.Message != test.message {

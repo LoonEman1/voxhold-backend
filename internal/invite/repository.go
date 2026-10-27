@@ -7,6 +7,8 @@ import (
 )
 
 type Repository interface {
+	ListActiveLinks(ctx context.Context, serverID, userID int64, beforeID *int64, limit int) ([]InviteLink, error)
+	RevokeLink(ctx context.Context, serverID, linkID, userID int64) error
 	CreateDirect(
 		ctx context.Context,
 		serverID int64,

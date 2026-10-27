@@ -3,6 +3,8 @@ package message
 import "context"
 
 type Repository interface {
+	CreateIdempotent(ctx context.Context, serverID, channelID, userID int64, content, clientMessageID string) (Message, error)
+	Sync(ctx context.Context, serverID, channelID, userID int64, after *int64) (SyncPage, error)
 	Create(
 		ctx context.Context,
 		serverID int64,

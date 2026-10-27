@@ -11,6 +11,8 @@ import (
 )
 
 type Service interface {
+	ListMemberIDs(ctx context.Context, serverID, channelID, userID int64) ([]int64, error)
+
 	Create(
 		ctx context.Context,
 		serverID int64,
@@ -54,6 +56,7 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
+	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/members", requireAuth(http.HandlerFunc(h.listMembers)))
 	mux.Handle(
 		"POST /api/v1/servers/{serverID}/channels",
 		requireAuth(http.HandlerFunc(h.create)),

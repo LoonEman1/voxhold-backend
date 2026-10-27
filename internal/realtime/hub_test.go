@@ -312,13 +312,11 @@ func nextOutgoingEvent(
 ) OutgoingEvent {
 	t.Helper()
 
-	select {
-	case event := <-client.Outgoing():
-		return event
-	default:
+	event, ok := client.PopOutgoing()
+	if !ok {
 		t.Fatal("expected outgoing event")
-		return OutgoingEvent{}
 	}
+	return event
 }
 
 func assertNoOutgoingEvent(
@@ -327,19 +325,14 @@ func assertNoOutgoingEvent(
 ) {
 	t.Helper()
 
-	select {
-	case event := <-client.Outgoing():
+	if event, ok := client.PopOutgoing(); ok {
 		t.Fatalf("unexpected outgoing event: %s", event.Type)
-	default:
 	}
 }
 
 func drainOutgoingEvents(client *Client) {
 	for {
-		select {
-		case <-client.Outgoing():
-			continue
-		default:
+		if _, ok := client.PopOutgoing(); !ok {
 			return
 		}
 	}

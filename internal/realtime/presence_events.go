@@ -22,7 +22,8 @@ type PresenceSnapshotData struct {
 }
 
 type PresenceUpdatedData struct {
-	ServerID int64          `json:"server_id"`
-	UserID   int64          `json:"user_id"`
-	Status   PresenceStatus `json:"status"`
+	ServerID   int64          `json:"server_id"`
+	UserID     int64          `json:"user_id"`
+	Status     PresenceStatus `json:"status"`
+	LastSeenAt *int64         `json:"last_seen_at,omitempty"`
 }

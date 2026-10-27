@@ -184,6 +184,10 @@ SBOM and provenance, and create a GitHub Release.
 
 ## Documentation
 
+- [Active invitation links and early revocation](docs/invite-links.md)
+
+- [Channel synchronization, send retries and event queues](docs/client-reliability.md)
+
 - [Contributing and release workflow](CONTRIBUTING.md)
 - [Operational security](docs/security.md)
 - [Security policy and vulnerability reporting](SECURITY.md)

@@ -8,21 +8,23 @@ type authorResponse struct {
 }
 
 type messageResponse struct {
-	ID        int64          `json:"id"`
-	ChannelID int64          `json:"channel_id"`
-	Author    authorResponse `json:"author"`
-	Content   string         `json:"content"`
-	CreatedAt int64          `json:"created_at"`
-	EditedAt  *int64         `json:"edited_at"`
-	Revision  int64          `json:"revision"`
+	ClientMessageID string         `json:"client_message_id,omitempty"`
+	ID              int64          `json:"id"`
+	ChannelID       int64          `json:"channel_id"`
+	Author          authorResponse `json:"author"`
+	Content         string         `json:"content"`
+	CreatedAt       int64          `json:"created_at"`
+	EditedAt        *int64         `json:"edited_at"`
+	Revision        int64          `json:"revision"`
 }
 
 func newMessageResponse(
 	value message.Message,
 ) messageResponse {
 	return messageResponse{
-		ID:        value.ID,
-		ChannelID: value.ChannelID,
+		ClientMessageID: value.ClientMessageID,
+		ID:              value.ID,
+		ChannelID:       value.ChannelID,
 		Author: authorResponse{
 			UserID:   value.Author.UserID,
 			Username: value.Author.Username,

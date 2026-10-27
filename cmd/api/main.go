@@ -283,6 +283,13 @@ func main() {
 	inviteHandler := invitehttp.NewHandler(inviteService)
 
 	profileRepository := profileSqlite.NewRepository(db)
+	realtimeHub.SetLastSeenSaver(func(userID, at int64) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := profileRepository.RecordLastSeen(ctx, userID, at); err != nil {
+			log.Printf("persist last seen: %v", err)
+		}
+	})
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
 	avatarHandler := avatar.NewHandler(db, profileService, func(userID int64, version *string) {
@@ -328,6 +335,30 @@ func main() {
 	readHandler := readstatehttp.NewHandler(readService)
 
 	diagnosticsRepository := diagnosticsSqlite.NewRepository(db)
+	maintenanceContext, stopMaintenance := context.WithCancel(context.Background())
+	var maintenanceWorker sync.WaitGroup
+	maintenanceWorker.Add(1)
+	safego.Go("storage/maintenance", func() {
+		defer maintenanceWorker.Done()
+		timer := time.NewTicker(time.Minute)
+		defer timer.Stop()
+		for {
+			ctx, cancel := context.WithTimeout(maintenanceContext, 2*time.Second)
+			if err := diagnosticsRepository.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
+				log.Printf("diagnostic cleanup: %v", err)
+			}
+			if err := messageRepository.PruneChanges(ctx); err != nil && maintenanceContext.Err() == nil {
+				log.Printf("message journal cleanup: %v", err)
+			}
+			cancel()
+			select {
+			case <-maintenanceContext.Done():
+				return
+			case <-timer.C:
+			}
+		}
+	})
+	defer func() { stopMaintenance(); maintenanceWorker.Wait() }()
 	diagnosticsService := diagnostics.NewService(diagnosticsRepository)
 	diagnosticsHandler := diagnosticshttp.NewHandler(diagnosticsService)
 

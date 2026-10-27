@@ -13,6 +13,8 @@ import (
 )
 
 type Service interface {
+	ListActiveLinks(ctx context.Context, serverID, userID int64, input invite.ListLinksInput) (invite.LinkPage, error)
+	RevokeLink(ctx context.Context, serverID, linkID, userID int64) error
 	CreateDirect(
 		ctx context.Context,
 		serverID int64,
@@ -70,6 +72,8 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
+	mux.Handle("GET /api/v1/servers/{serverID}/invite-links", requireAuth(http.HandlerFunc(h.listLinks)))
+	mux.Handle("DELETE /api/v1/servers/{serverID}/invite-links/{linkID}", requireAuth(http.HandlerFunc(h.revokeLink)))
 	mux.Handle(
 		"POST /api/v1/servers/{serverID}/invites",
 		requireAuth(http.HandlerFunc(h.createDirect)),

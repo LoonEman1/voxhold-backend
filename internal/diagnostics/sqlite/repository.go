@@ -31,14 +31,6 @@ func (r *Repository) InsertBatch(
 	defer func() { _ = tx.Rollback() }()
 
 	cutoff := time.Now().Add(-diagnostics.Retention).Unix()
-	if _, err := tx.ExecContext(
-		ctx,
-		"DELETE FROM client_diagnostic_events WHERE created_at < ?",
-		cutoff,
-	); err != nil {
-		return 0, fmt.Errorf("prune expired client diagnostics: %w", err)
-	}
-
 	var currentCount int
 	if err := tx.QueryRowContext(
 		ctx,
@@ -56,6 +48,19 @@ func (r *Repository) InsertBatch(
 		remaining = 0
 	}
 	accepted := min(len(input.Events), remaining)
+	// An exact trigger-maintained count avoids scanning all retained rows on
+	// every upload. Eviction is bounded by the incoming batch size.
+	var stored int
+	if err := tx.QueryRowContext(ctx, "SELECT event_count FROM client_diagnostic_storage WHERE id = 1").Scan(&stored); err != nil {
+		return 0, fmt.Errorf("read diagnostic storage count: %w", err)
+	}
+	if excess := stored + accepted - diagnostics.MaxStoredEvents; excess > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM client_diagnostic_events WHERE id IN (
+			SELECT id FROM client_diagnostic_events ORDER BY created_at, id LIMIT ?
+		)`, excess); err != nil {
+			return 0, fmt.Errorf("make diagnostic storage space: %w", err)
+		}
+	}
 	if accepted > 0 {
 		statement, err := tx.PrepareContext(ctx, `
 		INSERT INTO client_diagnostic_events (
@@ -94,24 +99,18 @@ func (r *Repository) InsertBatch(
 		}
 	}
 
-	if _, err := tx.ExecContext(
-		ctx,
-		`DELETE FROM client_diagnostic_events
-		 WHERE id IN (
-			SELECT id
-			FROM client_diagnostic_events
-			ORDER BY created_at DESC, id DESC
-			LIMIT -1 OFFSET ?
-		 )`,
-		diagnostics.MaxStoredEvents,
-	); err != nil {
-		return 0, fmt.Errorf("enforce client diagnostic row limit: %w", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit diagnostic batch: %w", err)
 	}
 	return accepted, nil
+}
+
+// Cleanup keeps each write transaction small and runs outside request handling.
+func (r *Repository) Cleanup(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM client_diagnostic_events WHERE id IN (
+		SELECT id FROM client_diagnostic_events WHERE created_at < ? ORDER BY created_at, id LIMIT 500
+	)`, time.Now().Add(-diagnostics.Retention).Unix())
+	return err
 }
 
 func (r *Repository) List(

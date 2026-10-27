@@ -422,6 +422,14 @@ func (r *Repository) CheckAccess(
 	channelID int64,
 	userID int64,
 ) error {
+	return checkAccess(ctx, r.db, serverID, channelID, userID)
+}
+
+type accessQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func checkAccess(ctx context.Context, db accessQueryer, serverID, channelID, userID int64) error {
 	const query = `
 	SELECT
 		EXISTS (
@@ -441,7 +449,7 @@ func (r *Repository) CheckAccess(
 	var channelExists bool
 	var userIsMember bool
 
-	if err := r.db.QueryRowContext(
+	if err := db.QueryRowContext(
 		ctx,
 		query,
 		channelID,
