@@ -50,6 +50,18 @@ func TestStreamSessionRestartsICEAfterFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = peer.Close() })
 
+	// Wait for the real initial Connected callback to finish before injecting
+	// Failed. Otherwise a late initial Connected legitimately cancels the
+	// synthetic recovery and makes this fixture intermittently fail in CI.
+	value := manager.session(connectionID)
+	connected := make(chan struct{})
+	var connectedOnce sync.Once
+	value.peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		value.handleConnectionState(state)
+		if state == webrtc.PeerConnectionStateConnected {
+			connectedOnce.Do(func() { close(connected) })
+		}
+	})
 	initialOffer := sink.offer(connectionID)
 	acceptTestOffer(t, manager, peer, connectionID, initialOffer)
 	initialUfrag := iceUfrag(initialOffer)
@@ -57,7 +69,11 @@ func TestStreamSessionRestartsICEAfterFailure(t *testing.T) {
 		t.Fatal("initial offer has no ICE ufrag")
 	}
 
-	value := manager.session(connectionID)
+	select {
+	case <-connected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("initial publisher connection did not complete")
+	}
 	value.recovery.Stop()
 	value.recovery = webrtcrecovery.New(webrtcrecovery.Policy{
 		RetryDelay:  time.Second,
