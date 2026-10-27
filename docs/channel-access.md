@@ -31,6 +31,9 @@ and ordinary broadcasts. Queued messages, snapshots and subsequent events are
 filtered per recipient. Revocation removes subscriptions and closes voice and
 stream sessions. A signalling gate covers SFU creation, preventing a delayed join
 from recreating media after revocation. Loading errors fail closed and reconnect.
+The same gate covers member removal, server deletion and channel deletion.
+Removing membership or a server reloads cached permissions and purges queued
+channel content before cleanup broadcasts are emitted.
 
 `channels.changed` includes only `server_id`, allowing clients to refresh without
 revealing hidden channel IDs/names. The frontend refreshes its roster, clears

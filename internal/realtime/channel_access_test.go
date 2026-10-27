@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"voxhold-backend/internal/channel"
 	channelsqlite "voxhold-backend/internal/channel/sqlite"
@@ -15,6 +16,77 @@ import (
 type accessCloser struct {
 	mu  sync.Mutex
 	ids map[string]bool
+}
+
+func TestAccessRemovalWaitsForMediaSetup(t *testing.T) {
+	for name, revoke := range map[string]func(*Hub){
+		"membership": func(h *Hub) { h.RevokeUserFromServer(2, 1) },
+		"server":     func(h *Hub) { h.RevokeServer(1) },
+		"channel":    func(h *Hub) { h.RemoveChannel(1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			hub := NewHub()
+			defer hub.Close()
+			release := sync.OnceFunc(hub.LockChannelOperation())
+			defer release()
+			done := make(chan struct{})
+			go func() {
+				revoke(hub)
+				close(done)
+			}()
+			select {
+			case <-done:
+				t.Fatal("revocation completed before pending media setup")
+			case <-time.After(30 * time.Millisecond):
+			}
+			release()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("revocation did not finish")
+			}
+		})
+	}
+}
+
+func TestServerRevocationPurgesCachedAccessAndQueuedContent(t *testing.T) {
+	for _, wholeServer := range []bool{false, true} {
+		t.Run(map[bool]string{false: "membership", true: "server"}[wholeServer], func(t *testing.T) {
+			db := testdb.Open(t)
+			hub := NewHub()
+			defer hub.Close()
+			hub.SetChannelAccessLoader(channelsqlite.NewRepository(db).AccessibleChannelIDs)
+			member := NewClient(2, "member", []int64{1})
+			if !hub.Register(member) {
+				t.Fatal("register")
+			}
+			member.enqueue(OutgoingEvent{Type: EventMessageCreated, Data: MessageCreatedData{ChannelID: 2, Content: "private queued"}})
+			query := "DELETE FROM server_members WHERE server_id=1 AND user_id=2"
+			if wholeServer {
+				query = "DELETE FROM servers WHERE id=1"
+			}
+			if _, err := db.Exec(query); err != nil {
+				t.Fatal(err)
+			}
+			if wholeServer {
+				hub.RevokeServer(1)
+			} else {
+				hub.RevokeUserFromServer(2, 1)
+			}
+			if member.canAccessChannel(2) {
+				t.Error("cached access survived revocation")
+			}
+			for {
+				event, ok := member.PopOutgoing()
+				if !ok {
+					break
+				}
+				if event.Type == EventMessageCreated {
+					t.Error("private content survived revocation")
+				}
+			}
+		})
+	}
 }
 
 func TestAccessLoaderFailureClosesConnectionUntilPermissionsCanBeLoaded(t *testing.T) {

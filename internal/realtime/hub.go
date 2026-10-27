@@ -330,6 +330,8 @@ func (h *Hub) RevokeUserFromServer(
 	if userID <= 0 || serverID <= 0 {
 		return
 	}
+	h.channelAccessMu.Lock()
+	defer h.channelAccessMu.Unlock()
 
 	serverClients := h.clientsForServer(serverID)
 
@@ -338,6 +340,7 @@ func (h *Hub) RevokeUserFromServer(
 		h.clientsByUser[userID],
 	)
 	h.clientsMu.RUnlock()
+	failed := h.reloadChannelAccess(userClients)
 
 	h.broadcastToClients(
 		append(serverClients, userClients...),
@@ -351,7 +354,14 @@ func (h *Hub) RevokeUserFromServer(
 	)
 
 	for _, client := range userClients {
+		if failed[client.UserID()] {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			h.Unregister(client)
+			continue
+		}
+		unlock := h.mediaTransitions.Lock(client.UserID())
 		h.leaveVoiceForServer(client, serverID)
+		unlock()
 		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
@@ -364,8 +374,11 @@ func (h *Hub) RevokeServer(serverID int64) {
 	if serverID <= 0 {
 		return
 	}
+	h.channelAccessMu.Lock()
+	defer h.channelAccessMu.Unlock()
 
 	clients := h.clientsForServer(serverID)
+	failed := h.reloadChannelAccess(clients)
 
 	h.broadcastToClients(
 		clients,
@@ -378,6 +391,11 @@ func (h *Hub) RevokeServer(serverID int64) {
 	)
 
 	for _, client := range clients {
+		if failed[client.UserID()] {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			h.Unregister(client)
+			continue
+		}
 		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
@@ -804,6 +822,8 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	if channelID <= 0 {
 		return
 	}
+	h.channelAccessMu.Lock()
+	defer h.channelAccessMu.Unlock()
 
 	h.roomsMu.Lock()
 	room := h.rooms[channelID]

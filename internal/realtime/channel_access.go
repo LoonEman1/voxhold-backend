@@ -44,18 +44,7 @@ func (h *Hub) RefreshChannelAccess(serverID int64) {
 	h.channelAccessMu.Lock()
 	defer h.channelAccessMu.Unlock()
 	clients := h.clientsForServer(serverID)
-	permissions := make(map[int64]map[int64]struct{})
-	failed := make(map[int64]bool)
-	for _, client := range clients {
-		ids, loaded := permissions[client.UserID()]
-		if !loaded {
-			var err error
-			ids, err = h.loadChannelAccess(client.UserID())
-			failed[client.UserID()] = err != nil
-			permissions[client.UserID()] = ids
-		}
-		client.replaceChannelAccess(ids)
-	}
+	failed := h.reloadChannelAccess(clients)
 	for _, client := range clients {
 		if failed[client.UserID()] {
 			// Reconnect fetches a fresh snapshot after a transient database error.
@@ -79,6 +68,24 @@ func (h *Hub) RefreshChannelAccess(serverID int64) {
 	}
 	// No hidden channel IDs or names are sent to unauthorized members.
 	h.PublishToServer(serverID, OutgoingEvent{Type: EventChannelsChanged, Data: ServerDeletedData{ServerID: serverID}})
+}
+
+// Caller holds channelAccessMu exclusively. Install every client's policy before
+// emitting cleanup events, which can include snapshots of other participants.
+func (h *Hub) reloadChannelAccess(clients []*Client) map[int64]bool {
+	permissions := make(map[int64]map[int64]struct{})
+	failed := make(map[int64]bool)
+	for _, client := range clients {
+		ids, loaded := permissions[client.UserID()]
+		if !loaded {
+			var err error
+			ids, err = h.loadChannelAccess(client.UserID())
+			failed[client.UserID()] = err != nil
+			permissions[client.UserID()] = ids
+		}
+		client.replaceChannelAccess(ids)
+	}
+	return failed
 }
 
 func (c *Client) canAccessChannel(channelID int64) bool {
