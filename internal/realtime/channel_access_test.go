@@ -18,6 +18,46 @@ type accessCloser struct {
 	ids map[string]bool
 }
 
+func TestBatchAccessDeduplicatesTabsAndFailsClosed(t *testing.T) {
+	h := NewHub()
+	defer h.Close()
+	first, second := NewClient(2, "one", []int64{1}), NewClient(2, "two", []int64{1})
+	h.Register(first)
+	h.Register(second)
+	first.enqueue(OutgoingEvent{Type: EventMessageCreated, Data: MessageCreatedData{ChannelID: 2, Content: "private"}})
+	calls := 0
+	h.SetChannelAccessBatchLoader(func(ids []int64) (map[int64]map[int64]struct{}, error) {
+		calls++
+		if len(ids) != 1 || ids[0] != 2 {
+			t.Errorf("users were not deduplicated: %v", ids)
+		}
+		return nil, errors.New("unavailable")
+	})
+	h.RefreshChannelAccess(1)
+	if calls != 1 {
+		t.Fatalf("batch calls: %d", calls)
+	}
+	for _, client := range []*Client{first, second} {
+		if client.canAccessChannel(2) {
+			t.Fatal("loader error failed open")
+		}
+		select {
+		case <-client.Done():
+		default:
+			t.Fatal("failed client stayed connected")
+		}
+		for {
+			event, ok := client.PopOutgoing()
+			if !ok {
+				break
+			}
+			if event.Type == EventMessageCreated {
+				t.Fatal("queued private content retained")
+			}
+		}
+	}
+}
+
 func TestAccessRemovalWaitsForMediaSetup(t *testing.T) {
 	for name, revoke := range map[string]func(*Hub){
 		"membership": func(h *Hub) { h.RevokeUserFromServer(2, 1) },

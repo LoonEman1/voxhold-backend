@@ -3,9 +3,17 @@ package realtime
 import (
 	"log"
 	"slices"
+	"time"
+	"voxhold-backend/internal/telemetry"
 
 	"voxhold-backend/internal/recordings"
 )
+
+// SetChannelAccessBatchLoader is configured together with the single-user
+// loader used at registration, before connections are accepted.
+func (h *Hub) SetChannelAccessBatchLoader(loader func([]int64) (map[int64]map[int64]struct{}, error)) {
+	h.channelAccessBatchLoader = loader
+}
 
 const EventChannelsChanged EventType = "channels.changed"
 
@@ -38,7 +46,9 @@ func (h *Hub) loadChannelAccess(userID int64) (map[int64]struct{}, error) {
 }
 
 func (h *Hub) RefreshChannelAccess(serverID int64) {
-	if h.channelAccessLoader == nil {
+	start := time.Now()
+	defer func() { telemetry.Observe(telemetry.ACLRefresh, time.Since(start), false) }()
+	if h.channelAccessLoader == nil && h.channelAccessBatchLoader == nil {
 		return
 	}
 	h.channelAccessMu.Lock()
@@ -75,6 +85,29 @@ func (h *Hub) RefreshChannelAccess(serverID int64) {
 func (h *Hub) reloadChannelAccess(clients []*Client) map[int64]bool {
 	permissions := make(map[int64]map[int64]struct{})
 	failed := make(map[int64]bool)
+	if h.channelAccessBatchLoader != nil {
+		ids := make([]int64, 0, len(clients))
+		seen := make(map[int64]bool)
+		for _, client := range clients {
+			if !seen[client.UserID()] {
+				seen[client.UserID()] = true
+				ids = append(ids, client.UserID())
+			}
+		}
+		loaded, err := h.channelAccessBatchLoader(ids)
+		if err != nil {
+			log.Printf("load channel permission batch: %v", err)
+		}
+		for _, client := range clients {
+			policy := loaded[client.UserID()]
+			if err != nil || policy == nil {
+				policy = map[int64]struct{}{}
+			}
+			failed[client.UserID()] = err != nil
+			client.replaceChannelAccess(policy)
+		}
+		return failed
+	}
 	for _, client := range clients {
 		ids, loaded := permissions[client.UserID()]
 		if !loaded {

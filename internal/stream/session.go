@@ -10,7 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"voxhold-backend/internal/mediahandshake"
 	"voxhold-backend/internal/safego"
+	"voxhold-backend/internal/telemetry"
 	"voxhold-backend/internal/webrtcrecovery"
 
 	"github.com/pion/rtcp"
@@ -240,10 +242,12 @@ type session struct {
 	keyframeGates    map[string]*keyframeGate
 
 	negotiationMu      sync.Mutex
+	offerStarted       time.Time
 	negotiationPending bool
 	iceRestartPending  bool
 	pendingCandidates  []ICECandidate
 	closeOnce          sync.Once
+	handshake          *mediahandshake.Deadline
 	recovery           *webrtcrecovery.Controller
 	recoveryActive     atomic.Bool
 }
@@ -293,6 +297,7 @@ func newSession(
 	if sink, ok := manager.sink.(interface{ SessionFailureHandler(string) func(string) }); ok {
 		value.onFailure = sink.SessionFailureHandler(connectionID)
 	}
+	value.handshake = mediahandshake.New(func(reason string) { manager.failSession(value, reason) })
 	return value
 }
 
@@ -446,7 +451,7 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPR
 		// ENOBUFS); the packet still reached every other viewer. Leaving the
 		// loop would end this rendition for the whole room, so only a failed
 		// read from the publisher stops forwarding.
-		_ = local.WriteRTP(packet)
+		_ = telemetry.Forward(telemetry.StreamRTP, func() error { return local.WriteRTP(packet) })
 	}
 }
 
@@ -490,18 +495,18 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 	if s.role != sessionViewer {
 		return nil
 	}
-	tracks := s.room.trackSnapshot(s.selectedRenditionID)
-	// A PeerConnection without media sections produces an SDP answer without
-	// ICE credentials in browsers. Wait for the publisher's first RTP track;
-	// forwardTrack will call synchronizeViewers again as soon as it arrives.
-	if len(tracks) == 0 {
-		return nil
-	}
-
 	s.negotiationMu.Lock()
 	if s.closed.Load() {
 		s.negotiationMu.Unlock()
 		return ErrSessionNotFound
+	}
+	tracks := s.room.trackSnapshot(s.selectedRenditionID)
+	// A PeerConnection without media sections produces an SDP answer without
+	// ICE credentials in browsers. Wait for the publisher's first RTP track;
+	// forwardTrack will call synchronizeViewers again as soon as it arrives.
+	if len(tracks) == 0 && len(s.peer.GetTransceivers()) == 0 {
+		s.negotiationMu.Unlock()
+		return nil
 	}
 
 	desired := make(map[string]roomTrack, len(tracks))
@@ -564,7 +569,7 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 		})
 	}
 
-	if !changed && !force {
+	if !changed && !force && !s.negotiationPending && !s.iceRestartPending {
 		s.negotiationMu.Unlock()
 		return nil
 	}
@@ -574,7 +579,7 @@ func (s *session) synchronizeViewerTracks(force bool) error {
 		return nil
 	}
 
-	sdp, err := s.createOfferLocked(false)
+	sdp, err := s.createOfferLocked(s.iceRestartPending)
 	s.negotiationMu.Unlock()
 	if err != nil {
 		return err
@@ -606,6 +611,9 @@ func (s *session) createOfferLocked(restartICE bool) (string, error) {
 	}
 
 	s.negotiationPending = false
+	s.iceRestartPending = false
+	s.offerStarted = time.Now()
+	s.handshake.Offer()
 	return offer.SDP, nil
 }
 
@@ -645,9 +653,12 @@ func (s *session) acceptAnswer(sdp string) error {
 		s.pendingCandidates...,
 	)
 	if err == nil {
-		s.negotiationPending = false
-		s.iceRestartPending = false
 		s.pendingCandidates = nil
+		if !s.offerStarted.IsZero() {
+			telemetry.Observe(telemetry.StreamAnswer, time.Since(s.offerStarted), false)
+			s.offerStarted = time.Time{}
+		}
+		s.handshake.Answer()
 	}
 	s.negotiationMu.Unlock()
 	if err != nil {
@@ -659,11 +670,11 @@ func (s *session) acceptAnswer(sdp string) error {
 			return err
 		}
 	}
+	if (pending || restartPending) && s.role == sessionViewer {
+		return s.synchronizeViewerTracks(false)
+	}
 	if restartPending {
 		return s.restartICE()
-	}
-	if pending && s.role == sessionViewer {
-		return s.synchronizeViewerTracks(false)
 	}
 	return nil
 }
@@ -728,6 +739,7 @@ func candidateMatchesRemoteDescription(
 func (s *session) close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
+		s.handshake.Stop()
 		s.recoveryActive.Store(false)
 		s.recovery.Stop()
 		_ = s.peer.Close()
@@ -739,6 +751,7 @@ func (s *session) handleConnectionState(
 ) {
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
+		s.handshake.Stop()
 		s.recovery.Stop()
 		if s.recoveryActive.Swap(false) {
 			total := streamRecoverySucceededTotal.Add(1)

@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +22,7 @@ import (
 	"voxhold-backend/internal/notifications"
 	"voxhold-backend/internal/recordings"
 	"voxhold-backend/internal/safego"
+	"voxhold-backend/internal/telemetry"
 	"voxhold-backend/internal/voice"
 
 	accounthttp "voxhold-backend/internal/account/http"
@@ -94,49 +95,17 @@ func main() {
 	// a public deployment does not create TURN allocations per media
 	// session. Legacy WEBRTC_ICE_* act as fallbacks, keeping deployments
 	// written before the split working unchanged.
-	firstNonEmpty := func(values ...string) string {
-		for _, value := range values {
-			if value != "" {
-				return value
-			}
-		}
-		return ""
+	clientICE, err := resolveICE("WEBRTC_CLIENT_ICE_", os.LookupEnv)
+	if err != nil {
+		log.Fatal("invalid client ICE configuration: ", err)
 	}
-	splitICEURLs := func(raw string) []string {
-		urls := make([]string, 0, 4)
-		for _, part := range strings.Split(raw, ",") {
-			if trimmed := strings.TrimSpace(part); trimmed != "" {
-				urls = append(urls, trimmed)
-			}
-		}
-		return urls
+	serverICE, err := resolveICE("WEBRTC_SERVER_ICE_", os.LookupEnv)
+	if err != nil {
+		log.Fatal("invalid server ICE configuration: ", err)
 	}
-
-	clientICEUsername := firstNonEmpty(
-		os.Getenv("WEBRTC_CLIENT_ICE_USERNAME"),
-		os.Getenv("WEBRTC_ICE_USERNAME"),
-	)
-	clientICECredential := firstNonEmpty(
-		os.Getenv("WEBRTC_CLIENT_ICE_CREDENTIAL"),
-		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
-	)
-	clientICEURLs := splitICEURLs(firstNonEmpty(
-		os.Getenv("WEBRTC_CLIENT_ICE_SERVERS"),
-		os.Getenv("WEBRTC_ICE_SERVERS"),
-	))
-
-	serverICEUsername := firstNonEmpty(
-		os.Getenv("WEBRTC_SERVER_ICE_USERNAME"),
-		os.Getenv("WEBRTC_ICE_USERNAME"),
-	)
-	serverICECredential := firstNonEmpty(
-		os.Getenv("WEBRTC_SERVER_ICE_CREDENTIAL"),
-		os.Getenv("WEBRTC_ICE_CREDENTIAL"),
-	)
-	serverICEServers := firstNonEmpty(
-		os.Getenv("WEBRTC_SERVER_ICE_SERVERS"),
-		os.Getenv("WEBRTC_ICE_SERVERS"),
-	)
+	clientICEURLs := splitICEURLs(clientICE.servers)
+	clientICEUsername, clientICECredential := clientICE.username, clientICE.credential
+	serverICEServers, serverICEUsername, serverICECredential := serverICE.servers, serverICE.username, serverICE.credential
 
 	realtimeHub := realtimeDomain.NewHub()
 	recordingQuota := recordings.DefaultQuotaBytes
@@ -242,6 +211,21 @@ func main() {
 		realtimeDomain.NewInviteEventPublisher(realtimeHub)
 
 	userRepository := accountSqlite.NewUserRepository(db)
+	diagnosticServer, diagnosticListener, err := telemetry.Listen(os.Getenv("DIAGNOSTICS_LISTEN_ADDR"), func() any {
+		return map[string]any{"metrics": telemetry.Snapshot(), "db": db.Stats(), "voice": voiceManager.Stats(), "stream": streamManager.Stats(), "realtime": realtimeHub.Stats(), "goroutines": runtime.NumGoroutine()}
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if diagnosticServer != nil {
+		safego.Go("diagnostics/http", func() {
+			if err := diagnosticServer.Serve(diagnosticListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("diagnostics server: %v", err)
+			}
+		})
+		defer diagnosticServer.Close()
+	}
+
 	sessionRepository := accountSqlite.NewSessionRepository(db)
 	inviteRegistrationRepository :=
 		accountSqlite.NewInviteRegistrationRepository(db)
@@ -273,6 +257,7 @@ func main() {
 		channelEventPublisher,
 	)
 	realtimeHub.SetChannelAccessLoader(channelRepository.AccessibleChannelIDs)
+	realtimeHub.SetChannelAccessBatchLoader(channelRepository.AccessibleChannelIDsForUsers)
 	channelHandler := channelhttp.NewHandler(channelService)
 
 	inviteRepository := inviteSqlite.NewRepository(db)
@@ -366,6 +351,11 @@ func main() {
 				log.Printf("message journal cleanup: %v", err)
 			}
 			cancel()
+			sessionCtx, cancelSessions := context.WithTimeout(maintenanceContext, 2*time.Second)
+			if _, err := sessionRepository.DeleteExpired(sessionCtx, time.Now().Unix(), 256); err != nil && maintenanceContext.Err() == nil {
+				log.Printf("expired session cleanup: %v", err)
+			}
+			cancelSessions()
 			select {
 			case <-maintenanceContext.Done():
 				return

@@ -12,7 +12,7 @@ import (
 	"voxhold-backend/internal/storage"
 )
 
-func Open(t *testing.T) *sql.DB {
+func Open(t testing.TB) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -23,7 +23,7 @@ func Open(t *testing.T) *sql.DB {
 }
 
 // OpenFile exercises the production WAL pool and transaction configuration.
-func OpenFile(t *testing.T) *sql.DB {
+func OpenFile(t testing.TB) *sql.DB {
 	t.Helper()
 	t.Setenv("DATABASE_PATH", filepath.Join(t.TempDir(), "test.db"))
 	db, err := storage.Open()
@@ -33,7 +33,7 @@ func OpenFile(t *testing.T) *sql.DB {
 	return prepare(t, db)
 }
 
-func prepare(t *testing.T, db *sql.DB) *sql.DB {
+func prepare(t testing.TB, db *sql.DB) *sql.DB {
 	t.Helper()
 	t.Cleanup(func() { _ = db.Close() })
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {

@@ -94,10 +94,11 @@ func (r *room) snapshot() []*Client {
 }
 
 type Hub struct {
-	channelAccessMu     sync.RWMutex
-	channelAccessLoader func(int64) (map[int64]struct{}, error)
-	roomsMu             sync.RWMutex
-	rooms               map[int64]*room
+	channelAccessMu          sync.RWMutex
+	channelAccessLoader      func(int64) (map[int64]struct{}, error)
+	channelAccessBatchLoader func([]int64) (map[int64]map[int64]struct{}, error)
+	roomsMu                  sync.RWMutex
+	rooms                    map[int64]*room
 
 	clientsMu           sync.RWMutex
 	closed              bool
@@ -693,6 +694,7 @@ func (h *Hub) broadcastToClients(
 		len(clients),
 	)
 	deliveredCount := 0
+	var failed []*Client
 
 	for _, client := range clients {
 		if _, exists := delivered[client]; exists {
@@ -702,13 +704,16 @@ func (h *Hub) broadcastToClients(
 		delivered[client] = struct{}{}
 
 		if !client.enqueue(event) {
-			h.Unregister(client)
+			failed = append(failed, client)
 			continue
 		}
 
 		deliveredCount++
 	}
 
+	for _, client := range failed {
+		h.Unregister(client)
+	}
 	return deliveredCount
 }
 
@@ -751,18 +756,20 @@ func (h *Hub) Publish(
 		return 0
 	}
 
-	clients := room.snapshot()
+	// A room snapshot is already unique; keep the ordinary publish path free
+	// of the deduplication map used by broadcasts to merged recipient lists.
 	delivered := 0
-
-	for _, client := range clients {
+	var failed []*Client
+	for _, client := range room.snapshot() {
 		if client.enqueue(event) {
 			delivered++
-			continue
+		} else {
+			failed = append(failed, client)
 		}
-
+	}
+	for _, client := range failed {
 		h.Unregister(client)
 	}
-
 	return delivered
 }
 
@@ -887,4 +894,18 @@ func (h *Hub) getOrCreateRoom(
 	h.rooms[channelID] = room
 
 	return room
+}
+
+func (h *Hub) Stats() map[string]int {
+	h.clientsMu.RLock()
+	clients := clientSetSnapshot(h.clients)
+	h.clientsMu.RUnlock()
+	result := map[string]int{"clients": len(clients), "queue_overflow_total": int(websocketQueueFullTotal.Load())}
+	for _, client := range clients {
+		stats := client.QueueStats()
+		result["queued_normal"] += stats.NormalPending
+		result["queued_media"] += stats.MediaPending
+		result["queue_high_watermark"] = max(result["queue_high_watermark"], stats.HighWatermark)
+	}
+	return result
 }

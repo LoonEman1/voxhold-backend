@@ -14,6 +14,21 @@ func NewSessionRepository(db *sql.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
+// DeleteExpired limits each writer transaction and uses idx_sessions_expires_at.
+// Expiration matches authentication: a session expiring at now is no longer active.
+func (r *SessionRepository) DeleteExpired(ctx context.Context, now int64, limit int) (int64, error) {
+	if limit < 1 || limit > 1000 {
+		return 0, fmt.Errorf("session cleanup batch must be between 1 and 1000")
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE id IN (
+		SELECT id FROM sessions WHERE expires_at <= ? ORDER BY expires_at, id LIMIT ?
+	)`, now, limit)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (r *SessionRepository) Create(
 	ctx context.Context,
 	userID int64,

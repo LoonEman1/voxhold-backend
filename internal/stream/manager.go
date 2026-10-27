@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"voxhold-backend/internal/streamcontract"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
@@ -344,64 +345,12 @@ func sdrCodec(renditions []Rendition) Codec {
 	return ""
 }
 
-func validMediaRenditions(renditions []Rendition) bool {
-	if len(renditions) == 0 || len(renditions) > 2 {
-		return false
+func validMediaRenditions(values []Rendition) bool {
+	converted := make([]streamcontract.Rendition, len(values))
+	for i, v := range values {
+		converted[i] = streamcontract.Rendition{ID: v.ID, Codec: string(v.Codec), Profile: v.Profile, DynamicRange: v.DynamicRange, BitDepth: v.BitDepth, ColorPrimaries: v.ColorPrimaries, Transfer: v.Transfer, Matrix: v.Matrix}
 	}
-	ids := make(map[string]struct{}, len(renditions))
-	ranges := make(map[string]struct{}, len(renditions))
-	hasSDR := false
-	for _, value := range renditions {
-		if value.ID == "" || len(value.ID) > 32 || value.BitDepth == 0 {
-			return false
-		}
-		if _, duplicate := ids[value.ID]; duplicate {
-			return false
-		}
-		if _, duplicate := ranges[value.DynamicRange]; duplicate {
-			return false
-		}
-		ids[value.ID] = struct{}{}
-		ranges[value.DynamicRange] = struct{}{}
-		switch value.DynamicRange {
-		case "sdr":
-			hasSDR = value.BitDepth == 8 && value.ColorPrimaries == "bt709" &&
-				value.Transfer == "bt709" && value.Matrix == "bt709" &&
-				validSDRProfile(value.Codec, value.Profile)
-			if !hasSDR {
-				return false
-			}
-		case "hdr10":
-			if value.BitDepth != 10 || value.ColorPrimaries != "bt2020" ||
-				value.Transfer != "pq" || value.Matrix != "bt2020-ncl" ||
-				!validHDRProfile(value.Codec, value.Profile) {
-
-				return false
-			}
-		case "hlg":
-			if value.BitDepth != 10 || value.ColorPrimaries != "bt2020" ||
-				value.Transfer != "hlg" || value.Matrix != "bt2020-ncl" ||
-				!validHDRProfile(value.Codec, value.Profile) {
-
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return hasSDR
-}
-
-func validSDRProfile(codec Codec, profile string) bool {
-	return (codec == CodecVP8 && profile == "") ||
-		(codec == CodecVP9 && profile == "0") ||
-		(codec == CodecH264 && profile == "baseline") ||
-		(codec == CodecAV1 && profile == "main")
-}
-
-func validHDRProfile(codec Codec, profile string) bool {
-	return (codec == CodecVP9 && profile == "2") ||
-		(codec == CodecAV1 && profile == "main10")
+	return streamcontract.ValidRenditions(converted)
 }
 
 func validCodec(codec Codec) bool {
@@ -904,4 +853,19 @@ func (m *Manager) failSession(value *session, reason string) {
 	if m.leave(value.connectionID, value) {
 		value.onFailure(reason)
 	}
+}
+
+// Stats returns aggregate resource counts without SDP or connection identifiers.
+func (m *Manager) Stats() map[string]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	senders := 0
+	for _, s := range m.sessions {
+		for _, sender := range s.peer.GetSenders() {
+			if sender.Track() != nil {
+				senders++
+			}
+		}
+	}
+	return map[string]int{"rooms": len(m.rooms), "peers": len(m.sessions), "senders": senders}
 }

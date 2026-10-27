@@ -1,4 +1,32 @@
-# Voxhold 2.0.0
+# Voxhold 2.1.0
+
+Совместимый минорный релиз по результатам аудита 27 октября 2026.
+
+- Исправлены отложенные переговоры WebRTC и восстановление ICE при изменении дорожек.
+- Начальное подключение ограничено 20 секундами на SDP answer и 30 секундами на connect;
+  ожидающий publisher track зритель не отключается по этому таймеру.
+- Исправлены ротация авторизации, запоздалые 401 и координация вкладок браузера.
+- Каталог участников полностью восстанавливается после reconnect и не затирается
+  старым HTTP-ответом. Участники с доступом к каналу обновляются без кнопки «Обновить».
+- Общая валидация SDR/HDR renditions, исправление trusted IP в deploy/Caddy,
+  корректная семантика явно пустого server ICE.
+- Изоляция WebSocket fan-out от дорогого cleanup, пакетный ACL и фоновая очистка expired sessions.
+- Отдельная диагностика только на loopback, воспроизводимые Pion/UDP load smoke tests.
+- Пустая голосовая комната оформлена компактной карточкой; запись, архив и чат
+  получили отдельные понятные иконки и подписи.
+
+Backend first, then frontend. Новых миграций нет (последняя — 24).
+Для trusted IP нужно также обновить Caddyfile из Voxhold-deploy.
+Старые CLIENT/SERVER ICE-наборы целиком наследуют legacy только когда namespace
+полностью отсутствует; явно заданный пустой namespace отключает ICE для своей стороны.
+Диагностика выключена по умолчанию; DIAGNOSTICS_LISTEN_ADDR допускает только loopback IP.
+
+Validation: Linux tests with race + goroutine leak checks, go vet; frontend
+TypeScript/ESLint/unit/production build and browser UI suites; real Caddy integration;
+54 direct synthetic media scenarios. See docs/audit-2.1.ru.md for measurements,
+exact scope and remaining WAN/browser/architecture work. Production was not deployed.
+
+## 2.0.0
 
 Первый общий релиз фронтенда и бэкенда с одинаковым номером версии.
 

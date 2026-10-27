@@ -9,7 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"voxhold-backend/internal/mediahandshake"
 	"voxhold-backend/internal/safego"
+	"voxhold-backend/internal/telemetry"
 	"voxhold-backend/internal/webrtcrecovery"
 
 	"github.com/pion/webrtc/v4"
@@ -32,10 +34,12 @@ type session struct {
 	audioBitrate *audioBitrateLimiter
 
 	negotiationMu      sync.Mutex
+	offerStarted       time.Time
 	negotiationPending bool
 	iceRestartPending  bool
 	pendingCandidates  []ICECandidate
 	closeOnce          sync.Once
+	handshake          *mediahandshake.Deadline
 	recovery           *webrtcrecovery.Controller
 }
 
@@ -79,6 +83,7 @@ func newSession(
 	value.selfMute.Store(selfMute)
 	value.selfDeaf.Store(selfDeaf)
 
+	value.handshake = mediahandshake.New(func(reason string) { manager.failSession(value, reason) })
 	return value
 }
 
@@ -216,18 +221,17 @@ func (s *session) forwardAudio(
 		// listener when one binding fails (closed DTLS, transient ENOBUFS).
 		// Leaving the loop would silence this speaker for the whole channel,
 		// so only a failed read from the speaker stops forwarding.
-		_ = local.WriteRTP(packet)
+		_ = telemetry.Forward(telemetry.VoiceRTP, func() error { return local.WriteRTP(packet) })
 	}
 }
 
 func (s *session) synchronizeTracks(forceOffer bool) error {
-	tracks := s.room.trackSnapshot()
-
 	s.negotiationMu.Lock()
 	if s.closed.Load() {
 		s.negotiationMu.Unlock()
 		return nil
 	}
+	tracks := s.room.trackSnapshot()
 
 	desired := make(map[string]roomTrack, len(tracks))
 	if !s.selfDeaf.Load() {
@@ -283,7 +287,7 @@ func (s *session) synchronizeTracks(forceOffer bool) error {
 		})
 	}
 
-	if !changed && !forceOffer {
+	if !changed && !forceOffer && !s.negotiationPending && !s.iceRestartPending {
 		s.negotiationMu.Unlock()
 		return nil
 	}
@@ -294,7 +298,7 @@ func (s *session) synchronizeTracks(forceOffer bool) error {
 		return nil
 	}
 
-	sdp, err := s.createOfferLocked(false)
+	sdp, err := s.createOfferLocked(s.iceRestartPending)
 	s.negotiationMu.Unlock()
 	if err != nil {
 		return err
@@ -317,6 +321,9 @@ func (s *session) createOfferLocked(restartICE bool) (string, error) {
 	}
 
 	s.negotiationPending = false
+	s.iceRestartPending = false
+	s.offerStarted = time.Now()
+	s.handshake.Offer()
 	return offer.SDP, nil
 }
 
@@ -353,9 +360,12 @@ func (s *session) acceptAnswer(sdp string) error {
 		s.pendingCandidates...,
 	)
 	if err == nil {
-		s.negotiationPending = false
-		s.iceRestartPending = false
 		s.pendingCandidates = nil
+		if !s.offerStarted.IsZero() {
+			telemetry.Observe(telemetry.VoiceAnswer, time.Since(s.offerStarted), false)
+			s.offerStarted = time.Time{}
+		}
+		s.handshake.Answer()
 	}
 	s.negotiationMu.Unlock()
 
@@ -369,10 +379,7 @@ func (s *session) acceptAnswer(sdp string) error {
 		}
 	}
 
-	if restartPending {
-		return s.restartICE()
-	}
-	if pending {
+	if pending || restartPending {
 		return s.synchronizeTracks(false)
 	}
 
@@ -451,6 +458,7 @@ func (s *session) addICECandidateLocked(
 func (s *session) close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
+		s.handshake.Stop()
 		s.recovery.Stop()
 		_ = s.peer.Close()
 	})
@@ -461,6 +469,7 @@ func (s *session) handleConnectionState(
 ) {
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
+		s.handshake.Stop()
 		s.recovery.Stop()
 
 	case webrtc.PeerConnectionStateDisconnected:
@@ -507,6 +516,7 @@ func (s *session) restartICE() error {
 	}
 	if s.peer.SignalingState() != webrtc.SignalingStateStable {
 		s.iceRestartPending = true
+		s.negotiationPending = true
 		s.negotiationMu.Unlock()
 		return nil
 	}
