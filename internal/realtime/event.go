@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"encoding/json"
+	"time"
 	"voxhold-backend/internal/message"
 )
 
@@ -48,6 +49,7 @@ type IncomingEvent struct {
 }
 
 type OutgoingEvent struct {
+	queuedAt  time.Time
 	RequestID string    `json:"request_id,omitempty"`
 	Type      EventType `json:"type"`
 	Data      any       `json:"data,omitempty"`
@@ -172,4 +174,11 @@ type ChannelReadSnapshotData struct {
 
 type ServerDeletedData struct {
 	ServerID int64 `json:"server_id"`
+}
+
+func (e OutgoingEvent) QueueAge() time.Duration {
+	if e.queuedAt.IsZero() {
+		return 0
+	}
+	return time.Since(e.queuedAt)
 }

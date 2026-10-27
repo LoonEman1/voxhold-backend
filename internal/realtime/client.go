@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+	"voxhold-backend/internal/telemetry"
 )
 
 const outgoingBufferSize = 128
@@ -126,6 +128,9 @@ func (c *Client) CloseReason() string {
 func (c *Client) enqueue(
 	event OutgoingEvent,
 ) bool {
+	if telemetry.Enabled() {
+		event.queuedAt = time.Now()
+	}
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
 

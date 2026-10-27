@@ -20,6 +20,7 @@ import (
 	"voxhold-backend/internal/safego"
 	serverDomain "voxhold-backend/internal/server"
 	"voxhold-backend/internal/stream"
+	"voxhold-backend/internal/telemetry"
 	"voxhold-backend/internal/voice"
 )
 
@@ -645,6 +646,8 @@ func (h *Handler) writeLoop(
 					writeTimeout,
 				)
 
+			telemetry.Observe(telemetry.WSQueue, event.QueueAge(), false)
+			writeStarted := time.Now()
 			err := wsjson.Write(
 				writeContext,
 				connection,
@@ -652,6 +655,7 @@ func (h *Handler) writeLoop(
 			)
 
 			cancel()
+			telemetry.Observe(telemetry.WSWrite, time.Since(writeStarted), err != nil)
 
 			if err != nil {
 				return err

@@ -435,3 +435,18 @@ func (m *Manager) failSession(
 		value.onFailure(reason)
 	}
 }
+
+// Stats returns aggregate resource counts without SDP or connection identifiers.
+func (m *Manager) Stats() map[string]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	senders := 0
+	for _, s := range m.sessions {
+		for _, sender := range s.peer.GetSenders() {
+			if sender.Track() != nil {
+				senders++
+			}
+		}
+	}
+	return map[string]int{"rooms": len(m.rooms), "peers": len(m.sessions), "senders": senders}
+}
