@@ -66,7 +66,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, 200, map[string]any{"recordings": records, "max_file_bytes": MaxFileBytes, "retention_seconds": int64(Retention / time.Second)})
+	httpapi.WriteJSON(w, 200, map[string]any{"recordings": records, "quota_bytes": h.service.quota.Load(), "max_file_bytes": MaxFileBytes, "retention_seconds": int64(Retention / time.Second)})
 }
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	user, ok := httpapi.AuthenticatedUserID(w, r)

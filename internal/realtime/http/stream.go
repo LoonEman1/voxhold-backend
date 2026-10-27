@@ -235,12 +235,14 @@ func (h *Handler) leaveStream(
 		"stream stopped by user",
 	)
 	if data.ChannelID == 0 {
-		return queueError(
-			client,
-			event.RequestID,
-			realtime.ErrorInvalidState,
-			"stream is not active on this connection",
-		)
+		// Closing the old peer can race a viewer's leave/watch recovery.
+		// The desired state is already reached; acknowledge the leave so the
+		// client can recreate its viewer instead of abandoning recovery.
+		return queueEvent(client, realtime.OutgoingEvent{
+			RequestID: event.RequestID,
+			Type:      realtime.EventStreamLeft,
+			Data:      data,
+		})
 	}
 
 	eventType := realtime.EventStreamLeft
