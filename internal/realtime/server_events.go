@@ -41,6 +41,7 @@ func (p *ServerEventPublisher) publishMemberChanged(
 	serverID int64,
 	member server.ServerMember,
 ) {
+	p.hub.RefreshChannelAccess(serverID)
 	p.hub.PublishToServer(
 		serverID,
 		OutgoingEvent{

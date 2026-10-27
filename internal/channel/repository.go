@@ -3,6 +3,7 @@ package channel
 import "context"
 
 type Repository interface {
+	AccessRepository
 	ListMemberIDs(ctx context.Context, serverID, channelID, userID int64) ([]int64, error)
 
 	Create(

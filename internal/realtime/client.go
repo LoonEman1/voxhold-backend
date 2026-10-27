@@ -17,9 +17,11 @@ var (
 )
 
 type Client struct {
-	connectionID string
-	userID       int64
-	sessionKey   [sha256.Size]byte
+	channelAccessMu sync.RWMutex
+	channelAccess   map[int64]struct{}
+	connectionID    string
+	userID          int64
+	sessionKey      [sha256.Size]byte
 
 	queueMu         sync.Mutex
 	outgoing        []OutgoingEvent
@@ -135,6 +137,11 @@ func (c *Client) enqueue(
 
 	c.queueMu.Lock()
 	defer c.queueMu.Unlock()
+	var allowed bool
+	event, allowed = c.filterChannelEvent(event)
+	if !allowed {
+		return true
+	}
 	accepted := c.enqueueLocked(event)
 	if accepted {
 		pending := len(c.outgoing) + len(c.priority)

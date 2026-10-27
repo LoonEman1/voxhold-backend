@@ -94,8 +94,10 @@ func (r *room) snapshot() []*Client {
 }
 
 type Hub struct {
-	roomsMu sync.RWMutex
-	rooms   map[int64]*room
+	channelAccessMu     sync.RWMutex
+	channelAccessLoader func(int64) (map[int64]struct{}, error)
+	roomsMu             sync.RWMutex
+	rooms               map[int64]*room
 
 	clientsMu           sync.RWMutex
 	closed              bool
@@ -152,6 +154,15 @@ func (h *Hub) Close() {
 }
 
 func (h *Hub) Register(client *Client) bool {
+	defer h.LockChannelOperation()()
+	if client != nil {
+		ids, err := h.loadChannelAccess(client.UserID())
+		if err != nil {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			return false
+		}
+		client.replaceChannelAccess(ids)
+	}
 	if client == nil || client.UserID() <= 0 {
 		return false
 	}
@@ -204,7 +215,8 @@ func (h *Hub) Subscribe(
 	serverID int64,
 	channelID int64,
 ) bool {
-	if client == nil || serverID <= 0 || channelID <= 0 {
+	defer h.LockChannelOperation()()
+	if client == nil || serverID <= 0 || channelID <= 0 || !client.canAccessChannel(channelID) {
 		return false
 	}
 	h.clientsMu.RLock()
@@ -405,6 +417,7 @@ func (h *Hub) AddUserToServer(
 	userID int64,
 	serverID int64,
 ) {
+	defer h.LockChannelOperation()()
 	if userID <= 0 || serverID <= 0 {
 		return
 	}
@@ -418,6 +431,13 @@ func (h *Hub) AddUserToServer(
 			continue
 		}
 
+		ids, err := h.loadChannelAccess(userID)
+		if err != nil {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			h.Unregister(client)
+			continue
+		}
+		client.replaceChannelAccess(ids)
 		becameOnline := h.incrementPresence(
 			serverID,
 			userID,

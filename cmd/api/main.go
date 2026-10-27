@@ -271,6 +271,7 @@ func main() {
 		channelRepository,
 		channelEventPublisher,
 	)
+	realtimeHub.SetChannelAccessLoader(channelRepository.AccessibleChannelIDs)
 	channelHandler := channelhttp.NewHandler(channelService)
 
 	inviteRepository := inviteSqlite.NewRepository(db)

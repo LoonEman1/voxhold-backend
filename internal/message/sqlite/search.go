@@ -64,6 +64,7 @@ func (r *Repository) Search(
 	WHERE message_search MATCH ?
 	  AND channels.server_id = ?
 	  AND channels.kind IN ('text', 'voice')
+	  AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channels.id AND a.user_id=?)
 	  AND messages.id < ?
 	ORDER BY messages.id DESC
 	LIMIT ?
@@ -74,6 +75,7 @@ func (r *Repository) Search(
 		searchQuery,
 		ftsPrefixQuery(query),
 		serverID,
+		userID,
 		cursor,
 		limit,
 	)
@@ -159,7 +161,7 @@ func (r *Repository) GetContext(
 	}
 
 	if err := requireMessageChannel(
-		ctx, tx, serverID, channelID,
+		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return message.Context{}, err
 	}

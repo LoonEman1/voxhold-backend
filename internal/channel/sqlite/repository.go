@@ -63,7 +63,8 @@ func (r *Repository) Create(
 		kind,
 		position,
 		created_by,
-		created_at
+		created_at,
+		access_restricted
 	`
 
 	var createdChannel channel.Channel
@@ -88,6 +89,7 @@ func (r *Repository) Create(
 		&createdChannel.Position,
 		&createdChannel.CreatedBy,
 		&createdChannel.CreatedAt,
+		&createdChannel.AccessRestricted,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -163,6 +165,7 @@ func (r *Repository) ListByServerID(
 		channels.position,
 		channels.created_by,
 		channels.created_at,
+		channels.access_restricted,
 		COALESCE((
 			SELECT MAX(messages.id)
 			FROM messages
@@ -170,6 +173,7 @@ func (r *Repository) ListByServerID(
 		), 0) AS last_message_id
 	FROM channels
 	WHERE channels.server_id = ?
+	  AND EXISTS (SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channels.id AND a.user_id=?)
 	ORDER BY
 		channels.position ASC,
 		channels.id ASC
@@ -179,6 +183,7 @@ func (r *Repository) ListByServerID(
 		ctx,
 		channelsQuery,
 		serverID,
+		userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -201,6 +206,7 @@ func (r *Repository) ListByServerID(
 			&value.Position,
 			&value.CreatedBy,
 			&value.CreatedAt,
+			&value.AccessRestricted,
 			&value.LastMessageID,
 		); err != nil {
 			return nil, fmt.Errorf(
@@ -255,7 +261,8 @@ func (r *Repository) Update(
 		kind,
 		position,
 		created_by,
-		created_at
+		created_at,
+		access_restricted
 	`
 
 	var updatedChannel channel.Channel
@@ -278,6 +285,7 @@ func (r *Repository) Update(
 		&updatedChannel.Position,
 		&updatedChannel.CreatedBy,
 		&updatedChannel.CreatedAt,
+		&updatedChannel.AccessRestricted,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -352,7 +360,8 @@ func (r *Repository) Delete(
 		kind,
 		position,
 		created_by,
-		created_at
+		created_at,
+		access_restricted
 	`
 
 	var deletedChannel channel.Channel
@@ -374,6 +383,7 @@ func (r *Repository) Delete(
 		&deletedChannel.Position,
 		&deletedChannel.CreatedBy,
 		&deletedChannel.CreatedAt,
+		&deletedChannel.AccessRestricted,
 	)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -440,8 +450,8 @@ func checkAccess(ctx context.Context, db accessQueryer, serverID, channelID, use
 		),
 		EXISTS (
 			SELECT 1
-			FROM server_members
-			WHERE server_id = ?
+			FROM channel_accessible_members
+			WHERE channel_id = ?
 			  AND user_id = ?
 		)
 	`
@@ -454,7 +464,7 @@ func checkAccess(ctx context.Context, db accessQueryer, serverID, channelID, use
 		query,
 		channelID,
 		serverID,
-		serverID,
+		channelID,
 		userID,
 	).Scan(
 		&channelExists,
@@ -488,9 +498,9 @@ func (r *Repository) CheckVoiceAccess(
 		channels.kind,
 		EXISTS (
 			SELECT 1
-			FROM server_members
-			WHERE server_members.server_id = channels.server_id
-			  AND server_members.user_id = ?
+			FROM channel_accessible_members a
+			WHERE a.channel_id = channels.id
+			  AND a.user_id = ?
 		)
 	FROM channels
 	WHERE channels.id = ?

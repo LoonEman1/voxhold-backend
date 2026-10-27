@@ -60,6 +60,7 @@ func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, 
 		tx,
 		serverID,
 		channelID,
+		authorUserID,
 	); err != nil {
 		return message.Message{}, err
 	}
@@ -185,6 +186,7 @@ func (r *Repository) ListByChannelID(
 		tx,
 		serverID,
 		channelID,
+		userID,
 	); err != nil {
 		return nil, err
 	}
@@ -300,7 +302,7 @@ func (r *Repository) Update(
 	}
 
 	if err := requireMessageChannel(
-		ctx, tx, serverID, channelID,
+		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return message.Message{}, err
 	}
@@ -396,7 +398,7 @@ func (r *Repository) Delete(
 	}
 
 	if err := requireMessageChannel(
-		ctx, tx, serverID, channelID,
+		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return message.Message{}, err
 	}
@@ -475,7 +477,7 @@ func (r *Repository) Pin(
 	}
 
 	if err := requireMessageChannel(
-		ctx, tx, serverID, channelID,
+		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return message.PinnedMessage{}, false, err
 	}
@@ -580,7 +582,7 @@ func (r *Repository) Unpin(
 	}
 
 	if err := requireMessageChannel(
-		ctx, tx, serverID, channelID,
+		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return false, err
 	}
@@ -646,7 +648,7 @@ func (r *Repository) ListPinned(
 	}
 
 	if err := requireMessageChannel(
-		ctx, tx, serverID, channelID,
+		ctx, tx, serverID, channelID, userID,
 	); err != nil {
 		return nil, err
 	}
@@ -845,22 +847,25 @@ func requireMessageChannel(
 	tx *sql.Tx,
 	serverID int64,
 	channelID int64,
+	userID int64,
 ) error {
 	const query = `
-	SELECT kind
+	SELECT kind, EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channels.id AND a.user_id=?)
 	FROM channels
 	WHERE id = ?
 	  AND server_id = ?
 	`
 
 	var kind channel.Kind
+	var allowed bool
 
 	err := tx.QueryRowContext(
 		ctx,
 		query,
+		userID,
 		channelID,
 		serverID,
-	).Scan(&kind)
+	).Scan(&kind, &allowed)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return message.ErrChannelNotFound
@@ -872,6 +877,9 @@ func requireMessageChannel(
 		)
 	}
 
+	if !allowed {
+		return message.ErrForbidden
+	}
 	if kind != channel.KindText && kind != channel.KindVoice {
 		return message.ErrTextChannelRequired
 	}

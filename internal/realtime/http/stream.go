@@ -14,6 +14,7 @@ func (h *Handler) startStream(
 	client *realtime.Client,
 	event realtime.IncomingEvent,
 ) error {
+	defer h.hub.LockChannelOperation()()
 	var data realtime.StreamStartData
 	if err := json.Unmarshal(event.Data, &data); err != nil ||
 		data.ServerID <= 0 || data.ChannelID <= 0 ||
@@ -87,6 +88,7 @@ func (h *Handler) watchStream(
 	client *realtime.Client,
 	event realtime.IncomingEvent,
 ) error {
+	defer h.hub.LockChannelOperation()()
 	var data realtime.StreamWatchData
 	if err := json.Unmarshal(event.Data, &data); err != nil ||
 		data.ServerID <= 0 || data.ChannelID <= 0 {

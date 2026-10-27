@@ -130,13 +130,14 @@ type InvitationReceivedData struct {
 }
 
 type ChannelData struct {
-	ID        int64  `json:"id"`
-	ServerID  int64  `json:"server_id"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Position  int64  `json:"position"`
-	CreatedBy int64  `json:"created_by"`
-	CreatedAt int64  `json:"created_at"`
+	ID               int64  `json:"id"`
+	ServerID         int64  `json:"server_id"`
+	Name             string `json:"name"`
+	Kind             string `json:"kind"`
+	Position         int64  `json:"position"`
+	CreatedBy        int64  `json:"created_by"`
+	AccessRestricted bool   `json:"access_restricted"`
+	CreatedAt        int64  `json:"created_at"`
 }
 
 type ChannelDeletedData struct {

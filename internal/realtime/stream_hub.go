@@ -76,6 +76,9 @@ func (h *Hub) StartStreamWithRenditions(
 		return StreamData{}, ErrStreamUnavailable
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	if !client.canAccessChannel(channelID) {
+		return StreamData{}, ErrStreamVoiceRequired
+	}
 	if client == nil || (mode != StreamModeServer &&
 		mode != StreamModeP2P) || !validStreamCodec(codec) {
 
@@ -152,6 +155,9 @@ func (h *Hub) WatchStreamWithCapabilities(
 		return StreamWatchingData{}, ErrStreamUnavailable
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	if !client.canAccessChannel(channelID) {
+		return StreamWatchingData{}, ErrStreamVoiceRequired
+	}
 	if client == nil {
 		return StreamWatchingData{}, ErrStreamUnavailable
 	}

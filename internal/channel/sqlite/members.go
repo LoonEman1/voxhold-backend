@@ -14,9 +14,7 @@ func (r *Repository) ListMemberIDs(ctx context.Context, serverID, channelID, use
 	if err := checkAccess(ctx, tx, serverID, channelID, userID); err != nil {
 		return nil, err
 	}
-	// The current access policy allows every server member into every channel.
-	// Keep this query beside CheckAccess so future channel ACLs update both.
-	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM server_members WHERE server_id = ? ORDER BY user_id`, serverID)
+	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM channel_accessible_members WHERE server_id = ? AND channel_id = ? ORDER BY user_id`, serverID, channelID)
 	if err != nil {
 		return nil, err
 	}

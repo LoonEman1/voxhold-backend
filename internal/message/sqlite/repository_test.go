@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 
 	"voxhold-backend/internal/message"
@@ -119,5 +120,12 @@ func openMessageTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("create schema: %v", err)
 	}
 
+	migration, err := os.ReadFile("../../../migrations/000022_channel_access.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
 	return db
 }
