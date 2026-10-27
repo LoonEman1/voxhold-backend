@@ -86,6 +86,21 @@ func (c *Client) enqueueLocked(event OutgoingEvent) bool {
 		}
 	}
 	if len(c.outgoing) == outgoingBufferSize {
+		// Alerts are transient. A slow client keeps the newest alert per channel
+		// without letting notification traffic disconnect chat or voice.
+		if event.Type == EventNotificationMessage {
+			return true
+		}
+		for index, queued := range c.outgoing {
+			if queued.Type == EventNotificationMessage {
+				copy(c.outgoing[index:], c.outgoing[index+1:])
+				c.outgoing[len(c.outgoing)-1] = OutgoingEvent{}
+				c.outgoing = c.outgoing[:len(c.outgoing)-1]
+				break
+			}
+		}
+	}
+	if len(c.outgoing) == outgoingBufferSize {
 		// Replace queued chat deltas with an explicit durable catch-up request.
 		// Permission changes, SDP and ICE are never silently dropped.
 		for _, queued := range c.outgoing {
@@ -144,6 +159,14 @@ func (c *Client) compactChannel(channelID int64) bool {
 func replacementKey(event OutgoingEvent) string {
 	if event.RequestID != "" {
 		return ""
+	}
+	if value, ok := event.Data.(interface{ EventChannelID() int64 }); ok {
+		switch event.Type {
+		case EventNotificationMessage:
+			return fmt.Sprintf("notification/%d", value.EventChannelID())
+		case EventNotificationSettingsUpdated:
+			return fmt.Sprintf("notification-settings/%d", value.EventChannelID())
+		}
 	}
 	switch value := event.Data.(type) {
 	case PresenceUpdatedData:

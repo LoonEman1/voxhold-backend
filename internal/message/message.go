@@ -6,6 +6,8 @@ type Author struct {
 }
 
 type Message struct {
+	// Replayed send keys acknowledge the original message without alerting again.
+	Replayed        bool
 	ClientMessageID string
 	ID              int64
 	ChannelID       int64

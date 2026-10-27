@@ -94,8 +94,10 @@ func (r *room) snapshot() []*Client {
 }
 
 type Hub struct {
-	roomsMu sync.RWMutex
-	rooms   map[int64]*room
+	channelAccessMu     sync.RWMutex
+	channelAccessLoader func(int64) (map[int64]struct{}, error)
+	roomsMu             sync.RWMutex
+	rooms               map[int64]*room
 
 	clientsMu           sync.RWMutex
 	closed              bool
@@ -134,6 +136,17 @@ func NewHub() *Hub {
 	}
 }
 
+// ConnectedUserIDs snapshots accounts once, regardless of their number of tabs.
+func (h *Hub) ConnectedUserIDs() []int64 {
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	ids := make([]int64, 0, len(h.clientsByUser))
+	for id := range h.clientsByUser {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // CloseReasonServerShutdown marks connections closed by a server restart.
 // The WebSocket layer sends it with 1012 (Service Restart) so clients
 // reconnect and restore voice instead of treating it as an auth failure.
@@ -152,6 +165,15 @@ func (h *Hub) Close() {
 }
 
 func (h *Hub) Register(client *Client) bool {
+	defer h.LockChannelOperation()()
+	if client != nil {
+		ids, err := h.loadChannelAccess(client.UserID())
+		if err != nil {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			return false
+		}
+		client.replaceChannelAccess(ids)
+	}
 	if client == nil || client.UserID() <= 0 {
 		return false
 	}
@@ -204,7 +226,8 @@ func (h *Hub) Subscribe(
 	serverID int64,
 	channelID int64,
 ) bool {
-	if client == nil || serverID <= 0 || channelID <= 0 {
+	defer h.LockChannelOperation()()
+	if client == nil || serverID <= 0 || channelID <= 0 || !client.canAccessChannel(channelID) {
 		return false
 	}
 	h.clientsMu.RLock()
@@ -307,6 +330,8 @@ func (h *Hub) RevokeUserFromServer(
 	if userID <= 0 || serverID <= 0 {
 		return
 	}
+	h.channelAccessMu.Lock()
+	defer h.channelAccessMu.Unlock()
 
 	serverClients := h.clientsForServer(serverID)
 
@@ -315,6 +340,7 @@ func (h *Hub) RevokeUserFromServer(
 		h.clientsByUser[userID],
 	)
 	h.clientsMu.RUnlock()
+	failed := h.reloadChannelAccess(userClients)
 
 	h.broadcastToClients(
 		append(serverClients, userClients...),
@@ -328,7 +354,14 @@ func (h *Hub) RevokeUserFromServer(
 	)
 
 	for _, client := range userClients {
+		if failed[client.UserID()] {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			h.Unregister(client)
+			continue
+		}
+		unlock := h.mediaTransitions.Lock(client.UserID())
 		h.leaveVoiceForServer(client, serverID)
+		unlock()
 		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
@@ -341,8 +374,11 @@ func (h *Hub) RevokeServer(serverID int64) {
 	if serverID <= 0 {
 		return
 	}
+	h.channelAccessMu.Lock()
+	defer h.channelAccessMu.Unlock()
 
 	clients := h.clientsForServer(serverID)
+	failed := h.reloadChannelAccess(clients)
 
 	h.broadcastToClients(
 		clients,
@@ -355,6 +391,11 @@ func (h *Hub) RevokeServer(serverID int64) {
 	)
 
 	for _, client := range clients {
+		if failed[client.UserID()] {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			h.Unregister(client)
+			continue
+		}
 		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,
@@ -405,6 +446,7 @@ func (h *Hub) AddUserToServer(
 	userID int64,
 	serverID int64,
 ) {
+	defer h.LockChannelOperation()()
 	if userID <= 0 || serverID <= 0 {
 		return
 	}
@@ -418,6 +460,13 @@ func (h *Hub) AddUserToServer(
 			continue
 		}
 
+		ids, err := h.loadChannelAccess(userID)
+		if err != nil {
+			client.CloseWithReason(CloseReasonServerShutdown)
+			h.Unregister(client)
+			continue
+		}
+		client.replaceChannelAccess(ids)
 		becameOnline := h.incrementPresence(
 			serverID,
 			userID,
@@ -773,6 +822,8 @@ func (h *Hub) RemoveChannel(channelID int64) {
 	if channelID <= 0 {
 		return
 	}
+	h.channelAccessMu.Lock()
+	defer h.channelAccessMu.Unlock()
 
 	h.roomsMu.Lock()
 	room := h.rooms[channelID]

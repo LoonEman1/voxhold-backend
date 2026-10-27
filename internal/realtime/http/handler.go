@@ -790,6 +790,7 @@ func (h *Handler) joinVoice(
 	client *realtime.Client,
 	event realtime.IncomingEvent,
 ) error {
+	defer h.hub.LockChannelOperation()()
 	var data realtime.VoiceJoinData
 
 	if err := json.Unmarshal(event.Data, &data); err != nil {

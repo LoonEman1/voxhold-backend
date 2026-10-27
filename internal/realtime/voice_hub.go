@@ -21,6 +21,9 @@ func (h *Hub) JoinVoice(
 		return VoiceJoinedData{}, false
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	if !client.canAccessChannel(channelID) {
+		return VoiceJoinedData{}, false
+	}
 	if client == nil || serverID <= 0 || channelID <= 0 ||
 		!client.hasServer(serverID) {
 

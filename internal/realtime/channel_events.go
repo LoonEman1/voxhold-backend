@@ -47,25 +47,34 @@ func (p *ChannelEventPublisher) PublishChannelDeleted(
 	)
 
 	p.hub.RemoveChannel(value.ID)
+	p.hub.RefreshChannelAccess(value.ServerID)
 }
 
 func (p *ChannelEventPublisher) publishChannel(
 	eventType EventType,
 	value channel.Channel,
 ) {
+	if eventType == EventChannelCreated {
+		p.hub.RefreshChannelAccess(value.ServerID)
+	}
 	p.hub.PublishToServer(
 		value.ServerID,
 		OutgoingEvent{
 			Type: eventType,
 			Data: ChannelData{
-				ID:        value.ID,
-				ServerID:  value.ServerID,
-				Name:      value.Name,
-				Kind:      string(value.Kind),
-				Position:  value.Position,
-				CreatedBy: value.CreatedBy,
-				CreatedAt: value.CreatedAt,
+				ID:               value.ID,
+				ServerID:         value.ServerID,
+				Name:             value.Name,
+				Kind:             string(value.Kind),
+				Position:         value.Position,
+				CreatedBy:        value.CreatedBy,
+				CreatedAt:        value.CreatedAt,
+				AccessRestricted: value.AccessRestricted,
 			},
 		},
 	)
+}
+
+func (p *ChannelEventPublisher) PublishChannelAccessChanged(serverID, channelID int64) {
+	p.hub.RefreshChannelAccess(serverID)
 }

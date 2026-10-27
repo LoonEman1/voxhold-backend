@@ -17,12 +17,13 @@ func (k Kind) IsValid() bool {
 }
 
 type Channel struct {
-	ID            int64
-	ServerID      int64
-	Name          string
-	Kind          Kind
-	Position      int64
-	CreatedBy     int64
-	CreatedAt     int64
-	LastMessageID int64
+	ID               int64
+	ServerID         int64
+	Name             string
+	Kind             Kind
+	Position         int64
+	CreatedBy        int64
+	CreatedAt        int64
+	AccessRestricted bool
+	LastMessageID    int64
 }

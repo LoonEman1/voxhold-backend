@@ -1,0 +1,2 @@
+DROP TRIGGER channel_notification_scope;
+DROP TABLE channel_notification_settings;

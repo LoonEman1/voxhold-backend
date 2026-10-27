@@ -177,7 +177,7 @@ func (s *Service) Get(ctx context.Context, id string, userID int64) (Record, err
 	if !validID(id) {
 		return Record{}, ErrNotFound
 	}
-	return scan(s.db.QueryRowContext(ctx, `SELECT `+columns+` FROM channel_recordings r JOIN users u ON u.id=r.owner_user_id WHERE r.id=? AND r.expires_at>? AND EXISTS(SELECT 1 FROM server_members m JOIN users viewer ON viewer.id=m.user_id WHERE m.server_id=r.server_id AND m.user_id=? AND viewer.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=viewer.id))`, id, s.now().Unix(), userID))
+	return scan(s.db.QueryRowContext(ctx, `SELECT `+columns+` FROM channel_recordings r JOIN users u ON u.id=r.owner_user_id WHERE r.id=? AND r.expires_at>? AND EXISTS(SELECT 1 FROM server_members m JOIN users viewer ON viewer.id=m.user_id WHERE m.server_id=r.server_id AND m.user_id=? AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=r.channel_id AND a.user_id=m.user_id) AND viewer.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=viewer.id))`, id, s.now().Unix(), userID))
 }
 func (s *Service) List(ctx context.Context, serverID, userID int64) ([]Record, error) {
 	var allowed bool
@@ -187,7 +187,7 @@ func (s *Service) List(ctx context.Context, serverID, userID int64) ([]Record, e
 	if !allowed {
 		return nil, ErrNotFound
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+columns+` FROM channel_recordings r JOIN users u ON u.id=r.owner_user_id WHERE r.server_id=? AND r.expires_at>? ORDER BY CASE WHEN r.status='recording' THEN 0 ELSE 1 END,r.created_at DESC,r.id DESC LIMIT 100`, serverID, s.now().Unix())
+	rows, err := s.db.QueryContext(ctx, `SELECT `+columns+` FROM channel_recordings r JOIN users u ON u.id=r.owner_user_id WHERE r.server_id=? AND r.expires_at>? AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=r.channel_id AND a.user_id=?) ORDER BY CASE WHEN r.status='recording' THEN 0 ELSE 1 END,r.created_at DESC,r.id DESC LIMIT 100`, serverID, s.now().Unix(), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (s *Service) Start(ctx context.Context, serverID, channelID, userID int64, 
 	}
 	id := hex.EncodeToString(idBytes[:])
 	now := s.now()
-	result, err := s.db.ExecContext(ctx, `INSERT INTO channel_recordings(id,server_id,channel_id,owner_user_id,status,mime_type,updated_at,expires_at) SELECT ?,?,?,?,'recording',?,?,? WHERE EXISTS(SELECT 1 FROM channels c JOIN server_members m ON m.server_id=c.server_id WHERE c.id=? AND c.server_id=? AND c.kind='voice' AND m.user_id=?) AND (SELECT count(*) FROM channel_recordings WHERE status='recording')<20`, id, serverID, channelID, userID, mime, now.UnixMilli(), now.Add(Retention+2*time.Minute).Unix(), channelID, serverID, userID)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO channel_recordings(id,server_id,channel_id,owner_user_id,status,mime_type,updated_at,expires_at) SELECT ?,?,?,?,'recording',?,?,? WHERE EXISTS(SELECT 1 FROM channels c JOIN server_members m ON m.server_id=c.server_id WHERE c.id=? AND c.server_id=? AND c.kind='voice' AND m.user_id=? AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=c.id AND a.user_id=m.user_id)) AND (SELECT count(*) FROM channel_recordings WHERE status='recording')<20`, id, serverID, channelID, userID, mime, now.UnixMilli(), now.Add(Retention+2*time.Minute).Unix(), channelID, serverID, userID)
 	s.mu.Unlock()
 	if err != nil {
 		var constraint *sqlite.Error

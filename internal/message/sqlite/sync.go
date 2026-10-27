@@ -21,7 +21,7 @@ func (r *Repository) Sync(ctx context.Context, serverID, channelID, userID int64
 	if _, err := requireServerMember(ctx, tx, serverID, userID); err != nil {
 		return message.SyncPage{}, err
 	}
-	if err := requireMessageChannel(ctx, tx, serverID, channelID); err != nil {
+	if err := requireMessageChannel(ctx, tx, serverID, channelID, userID); err != nil {
 		return message.SyncPage{}, err
 	}
 	page := message.SyncPage{Messages: []message.Message{}, DeletedIDs: []int64{}}

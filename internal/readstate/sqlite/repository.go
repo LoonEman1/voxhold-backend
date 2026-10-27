@@ -143,6 +143,7 @@ func (r *Repository) ListByUserID(
 		ON server_members.server_id = channels.server_id
 		AND server_members.user_id = channel_reads.user_id
 	WHERE channel_reads.user_id = ?
+	  AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channel_reads.channel_id AND a.user_id=channel_reads.user_id)
 	ORDER BY
 		channels.server_id ASC,
 		channel_reads.channel_id ASC
@@ -191,6 +192,7 @@ func (r *Repository) ListByChannelID(
 		ON server_members.server_id = ?
 		AND server_members.user_id = channel_reads.user_id
 	WHERE channel_reads.channel_id = ?
+	  AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channel_reads.channel_id AND a.user_id=channel_reads.user_id)
 	ORDER BY channel_reads.user_id ASC
 	`
 
@@ -312,9 +314,10 @@ func requireMessageChannelMember(
 		channels.kind,
 		EXISTS (
 			SELECT 1
-			FROM server_members
-			WHERE server_members.server_id = ?
-			  AND server_members.user_id = ?
+			FROM channel_accessible_members a
+			WHERE a.channel_id = channels.id
+			  AND a.server_id = ?
+			  AND a.user_id = ?
 		)
 	FROM channels
 	WHERE channels.id = ?
