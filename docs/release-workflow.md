@@ -15,6 +15,9 @@ Both repositories follow the same flow:
    An unchanged/released `VERSION` never overwrites an existing release.
 6. Deploy the backend and its migrations before the matching frontend. Verify
    health, database integrity and the application before removing old backups.
+7. After a release, synchronize `main` back into `dev` through a reviewed PR.
+   Use a merge commit for this maintenance PR too: strict branch checks must see
+   the released main commit in dev's ancestry. This PR does not publish a release.
 
 `main` is stable; `dev` collects reviewed changes and does not publish releases.
 Both branches require PRs and successful CI. Force pushes and branch deletion are
@@ -41,6 +44,10 @@ Hotfixes start from `main`, bump the patch version and use reviewed PRs into
 Для выпуска: изменения проходят через `dev`, затем релизные PR в `main` с новым
 `VERSION`. После зелёного CI образы, теги и релизы создаются автоматически.
 Промежуточные слияния в `dev` ничего не публикуют.
+
+После выпуска синхронизируйте `main` обратно в `dev` отдельным PR с merge commit.
+Служебную синхронизацию не squash-мержить: это сохраняет историю релиза и позволяет
+следующим PR проходить строгую проверку актуальности ветки.
 
 ## Runtime goroutine leak checks (backend)
 
