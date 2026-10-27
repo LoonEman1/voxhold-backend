@@ -283,6 +283,13 @@ func main() {
 	inviteHandler := invitehttp.NewHandler(inviteService)
 
 	profileRepository := profileSqlite.NewRepository(db)
+	realtimeHub.SetLastSeenSaver(func(userID, at int64) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := profileRepository.RecordLastSeen(ctx, userID, at); err != nil {
+			log.Printf("persist last seen: %v", err)
+		}
+	})
 	profileService := profileDomain.NewService(profileRepository)
 	profileHandler := profilehttp.NewHandler(profileService)
 	avatarHandler := avatar.NewHandler(db, profileService, func(userID int64, version *string) {

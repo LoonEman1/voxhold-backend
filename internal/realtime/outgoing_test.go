@@ -2,6 +2,33 @@ package realtime
 
 import "testing"
 
+func TestQueueTriesOtherChannelsWhenFirstCompactionDoesNotFreeSpace(t *testing.T) {
+	client := NewClient(1, "session", []int64{1})
+	client.EnableMessageSync()
+	client.addSubscription(1, 2)
+	client.addSubscription(1, 3)
+	client.Send(OutgoingEvent{Type: EventMessageCreated, Data: MessageCreatedData{ChannelID: 2}})
+	for i := 1; i < outgoingBufferSize; i++ {
+		client.Send(OutgoingEvent{Type: EventMessageCreated, Data: MessageCreatedData{ChannelID: 3}})
+	}
+	if !client.Send(OutgoingEvent{Type: EventServerMemberRemoved}) {
+		t.Fatal("a compactable second channel must leave room for the permission change")
+	}
+	critical := 0
+	for {
+		event, ok := client.PopOutgoing()
+		if !ok {
+			break
+		}
+		if event.Type == EventServerMemberRemoved {
+			critical++
+		}
+	}
+	if critical != 1 {
+		t.Fatal(critical)
+	}
+}
+
 func TestChatBurstResyncPreservesVoiceAndCriticalSignaling(t *testing.T) {
 	hub := NewHub()
 	client := NewClient(1, "session", []int64{1})

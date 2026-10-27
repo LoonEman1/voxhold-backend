@@ -20,6 +20,18 @@ func NewService(
 	}
 }
 
+// ListMemberIDs returns users permitted to read/join the channel, including
+// offline members. Presence and current voice attendance are separate concerns.
+func (s *Service) ListMemberIDs(ctx context.Context, serverID, channelID, userID int64) ([]int64, error) {
+	if serverID <= 0 || channelID <= 0 {
+		return nil, ErrNotFound
+	}
+	if userID <= 0 {
+		return nil, ErrForbidden
+	}
+	return s.repository.ListMemberIDs(ctx, serverID, channelID, userID)
+}
+
 func (s *Service) Create(
 	ctx context.Context,
 	serverID int64,

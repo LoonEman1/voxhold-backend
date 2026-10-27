@@ -96,7 +96,11 @@ func (c *Client) enqueueLocked(event OutgoingEvent) bool {
 				if candidate == channelID {
 					return true
 				}
-				break
+				// Replacing one delta with one marker may not free a slot.
+				// Keep searching other channels before rejecting a critical event.
+				if len(c.outgoing) < outgoingBufferSize {
+					break
+				}
 			}
 		}
 	}
