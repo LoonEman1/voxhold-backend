@@ -50,17 +50,18 @@ func hydrateInteractions(ctx context.Context, tx *sql.Tx, userID int64, values [
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.reply_to_original_id,r.id,r.author_user_id,u.username,r.content,r.revision,m.forward_data,m.revision
+	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.reply_to_original_id,r.id,r.author_user_id,u.username,r.content,r.revision,m.forward_data,m.revision,m.thread_root_id,(SELECT count(*) FROM messages comments WHERE comments.thread_root_id=m.id)
  FROM messages m LEFT JOIN messages r ON r.id=m.reply_to_message_id AND r.channel_id=m.channel_id
  LEFT JOIN users u ON u.id=r.author_user_id WHERE m.id IN (SELECT value FROM json_each(?))`, string(encoded))
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var id, revision int64
+		var id, revision, commentCount int64
+		var threadRoot sql.NullInt64
 		var original, target, author, targetRevision sql.NullInt64
 		var username, content, forward sql.NullString
-		if err = rows.Scan(&id, &original, &target, &author, &username, &content, &targetRevision, &forward, &revision); err != nil {
+		if err = rows.Scan(&id, &original, &target, &author, &username, &content, &targetRevision, &forward, &revision, &threadRoot, &commentCount); err != nil {
 			break
 		}
 		var reply *message.ReplyReference
@@ -74,6 +75,12 @@ func hydrateInteractions(ctx context.Context, tx *sql.Tx, userID int64, values [
 			}
 		}
 		for _, value := range byID[id] {
+			value.ThreadRootID = nil
+			if threadRoot.Valid {
+				id := threadRoot.Int64
+				value.ThreadRootID = &id
+			}
+			value.CommentCount = commentCount
 			value.Reply = reply
 			value.Forward = forwarded
 			value.ReactionsRevision = revision

@@ -9,7 +9,7 @@ import (
 var (
 	ErrNameRequired      = errors.New("channel name is required")
 	ErrNameTooLong       = errors.New("channel name must not exceed 64 characters")
-	ErrKindInvalid       = errors.New("channel kind must be text or voice")
+	ErrKindInvalid       = errors.New("channel kind must be text, voice or news")
 	ErrVoiceRequired     = errors.New("voice channel is required")
 	ErrForbidden         = errors.New("not allowed to create channel")
 	ErrNameAlreadyExists = errors.New("channel name already exists")

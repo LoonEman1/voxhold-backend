@@ -8,6 +8,8 @@ type authorResponse struct {
 }
 
 type messageResponse struct {
+	ThreadRootID      *int64                    `json:"thread_root_id,omitempty"`
+	CommentCount      int64                     `json:"comment_count"`
 	ClientMessageID   string                    `json:"client_message_id,omitempty"`
 	ID                int64                     `json:"id"`
 	ChannelID         int64                     `json:"channel_id"`
@@ -27,8 +29,9 @@ func newMessageResponse(
 ) messageResponse {
 	return messageResponse{
 		ClientMessageID: value.ClientMessageID,
-		ID:              value.ID,
-		ChannelID:       value.ChannelID,
+		ThreadRootID:    value.ThreadRootID, CommentCount: value.CommentCount,
+		ID:        value.ID,
+		ChannelID: value.ChannelID,
 		Author: authorResponse{
 			UserID:   value.Author.UserID,
 			Username: value.Author.Username,

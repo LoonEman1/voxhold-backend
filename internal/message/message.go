@@ -20,6 +20,8 @@ type Message struct {
 	Forward           *ForwardReference
 	Reactions         []Reaction
 	ReactionsRevision int64
+	ThreadRootID      *int64
+	CommentCount      int64
 }
 
 type Page struct {

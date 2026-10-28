@@ -134,5 +134,17 @@ func openChannelTestDB(t *testing.T) *sql.DB {
 	if _, err := db.Exec(string(migration)); err != nil {
 		t.Fatal(err)
 	}
+
+	if _, err := db.Exec(`CREATE TABLE channel_reads(channel_id INTEGER,user_id INTEGER,last_read_message_id INTEGER);
+        CREATE TABLE channel_notifications(channel_id INTEGER,user_id INTEGER,message_id INTEGER);`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err = os.ReadFile("../../../migrations/000025_news_channels.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
 	return db
 }

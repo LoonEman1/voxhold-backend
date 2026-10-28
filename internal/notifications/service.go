@@ -94,6 +94,13 @@ func (s *Service) Get(ctx context.Context, serverID, channelID, userID int64) (S
 		return Settings{}, err
 	}
 	value := Settings{ServerID: serverID, ChannelID: channelID, Mode: Mentions}
+	var news bool
+	if err := tx.QueryRowContext(ctx, `SELECT is_news FROM channels WHERE id=?`, channelID).Scan(&news); err != nil {
+		return Settings{}, err
+	}
+	if news {
+		value.Mode = All
+	}
 	err = tx.QueryRowContext(ctx, `SELECT mode FROM channel_notification_settings WHERE channel_id=? AND user_id=?`, channelID, userID).Scan(&value.Mode)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Settings{}, err
@@ -126,33 +133,31 @@ func (s *Service) Set(ctx context.Context, serverID, channelID, userID int64, mo
 	return value, nil
 }
 
-// Deliver targets connected accounts only, independently of their active channel.
-// It performs one indexed query, releases the rows before publishing, and never
-// expands private-channel delivery beyond the shared channel access policy.
+// Deliver persists eligible alerts for online and offline accounts, then sends
+// transient previews to connected accounts. Counts survive reconnects and use
+// exactly the same mentions/reply/forward rules as live notifications.
 func (s *Service) Deliver(value message.Message) error {
-	if value.Replayed || s.online == nil || s.publish == nil {
+	if value.Replayed {
 		return nil
-	}
-	online := s.online()
-	if len(online) == 0 || len(online) == 1 && online[0] == value.Author.UserID {
-		return nil
-	}
-	encoded, err := json.Marshal(online)
-	if err != nil {
-		return err
 	}
 	targets := mentions.Parse(value.Content)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `SELECT a.user_id,u.username,m.role,COALESCE(n.mode,'mentions'),c.server_id,c.name,s.name
- FROM json_each(?) online
- JOIN channel_accessible_members a ON a.user_id=CAST(online.value AS INTEGER) AND a.channel_id=?
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT a.user_id,u.username,m.role,COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END),c.server_id,c.name,s.name
+ FROM channel_accessible_members a
  JOIN channels c ON c.id=a.channel_id AND c.kind='text'
  JOIN servers s ON s.id=c.server_id
  JOIN server_members m ON m.server_id=c.server_id AND m.user_id=a.user_id
  JOIN users u ON u.id=a.user_id
  LEFT JOIN channel_notification_settings n ON n.channel_id=c.id AND n.user_id=a.user_id
- WHERE a.user_id<>? AND COALESCE(n.mode,'mentions')<>'none'`, string(encoded), value.ChannelID, value.Author.UserID)
+ WHERE a.channel_id=? AND a.user_id<>? AND u.deleted_at IS NULL
+   AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=u.id)
+   AND COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END)<>'none'`, value.ChannelID, value.Author.UserID)
 	if err != nil {
 		return fmt.Errorf("notification recipients: %w", err)
 	}
@@ -161,6 +166,7 @@ func (s *Service) Deliver(value message.Message) error {
 		event  Event
 	}
 	deliveries := make([]delivery, 0)
+	ids := make([]int64, 0)
 	for rows.Next() {
 		var id int64
 		var username, role string
@@ -170,12 +176,14 @@ func (s *Service) Deliver(value message.Message) error {
 			break
 		}
 		event.Mentioned = value.Forward == nil && (targets.Matches(id, username, role) || value.Reply != nil && !value.Reply.Deleted && value.Reply.Author.UserID == id)
-		if mode != All && !event.Mentioned {
+		// A busy discussion should not ping all subscribers of a news feed.
+		if (mode != All || value.ThreadRootID != nil) && !event.Mentioned {
 			continue
 		}
 		event.ChannelID = value.ChannelID
 		event.Message = Preview{ID: value.ID, Author: Author{UserID: value.Author.UserID, Username: value.Author.Username}, Content: value.Content, CreatedAt: value.CreatedAt}
 		deliveries = append(deliveries, delivery{id, event})
+		ids = append(ids, id)
 	}
 	if err == nil {
 		err = rows.Err()
@@ -184,8 +192,33 @@ func (s *Service) Deliver(value message.Message) error {
 	if err != nil {
 		return err
 	}
-	for _, item := range deliveries {
-		s.publish(item.userID, item.event)
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	// SELECT also avoids resurrecting alerts for a concurrently removed message.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO channel_notifications(channel_id,server_id,user_id,message_id)
+       SELECT c.id,c.server_id,CAST(j.value AS INTEGER),m.id FROM json_each(?) j
+       JOIN messages m ON m.id=? JOIN channels c ON c.id=m.channel_id AND c.id=?
+       WHERE m.id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=c.id AND r.user_id=CAST(j.value AS INTEGER)),0)
+       ON CONFLICT DO NOTHING`, string(encoded), value.ID, value.ChannelID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	online := map[int64]bool{}
+	if s.online != nil {
+		for _, id := range s.online() {
+			online[id] = true
+		}
+	}
+	if s.publish != nil {
+		for _, item := range deliveries {
+			if online[item.userID] {
+				s.publish(item.userID, item.event)
+			}
+		}
 	}
 	return nil
 }
