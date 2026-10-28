@@ -101,7 +101,9 @@ func randomID() string {
 }
 func validID(id string) bool {
 	v, err := hex.DecodeString(id)
-	return err == nil && len(v) == 16 && len(id) == 32
+	// Canonical IDs also keep SQLite's case-sensitive keys consistent with
+	// case-insensitive filesystems: a case variant must never replace a file.
+	return err == nil && len(v) == 16 && len(id) == 32 && id == strings.ToLower(id)
 }
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("PUT /api/v1/channels/{channelID}/attachments/{attachmentID}", auth(http.HandlerFunc(s.upload)))
