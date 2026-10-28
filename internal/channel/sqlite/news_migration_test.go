@@ -33,7 +33,7 @@ func TestNewsMigrationRollbackPreservesPostsAndExistingACL(t *testing.T) {
 	if _, err := messages.CreateReferenced(ctx, 1, news.ID, 2, message.CreateInput{Content: "Removed on rollback", ReplyToMessageID: &post.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"000026_notification_counters.down.sql", "000025_news_channels.down.sql", "000025_news_channels.up.sql", "000026_notification_counters.up.sql"} {
+	for _, name := range []string{"000030_attachments.down.sql", "000029_conversations.down.sql", "000028_threads_inbox.down.sql", "000027_custom_roles.down.sql", "000026_notification_counters.down.sql", "000025_news_channels.down.sql", "000025_news_channels.up.sql", "000026_notification_counters.up.sql", "000027_custom_roles.up.sql", "000028_threads_inbox.up.sql", "000029_conversations.up.sql", "000030_attachments.up.sql"} {
 		data, err := os.ReadFile("../../../migrations/" + name)
 		if err != nil {
 			t.Fatal(err)

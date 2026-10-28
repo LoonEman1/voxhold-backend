@@ -10,6 +10,16 @@ type Service struct {
 	events     EventPublisher
 }
 
+func (s *Service) CheckStreamAccess(ctx context.Context, serverID, channelID, userID int64) error {
+	repo, ok := s.repository.(interface {
+		CheckStreamAccess(context.Context, int64, int64, int64) error
+	})
+	if !ok {
+		return ErrForbidden
+	}
+	return repo.CheckStreamAccess(ctx, serverID, channelID, userID)
+}
+
 func NewService(
 	repository Repository,
 	events EventPublisher,

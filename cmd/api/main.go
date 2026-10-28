@@ -15,7 +15,9 @@ import (
 	"time"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/antiabuse"
+	"voxhold-backend/internal/attachments"
 	"voxhold-backend/internal/avatar"
+	"voxhold-backend/internal/community"
 	"voxhold-backend/internal/cors"
 	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
@@ -300,6 +302,16 @@ func main() {
 		realtimeDomain.NewMessageEventPublisher(
 			realtimeHub,
 		)
+	realtimeHub.SetRolePermissionLoader(func(serverID, userID int64) (int, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		var bits int
+		err := db.QueryRowContext(ctx, `SELECT permissions FROM member_permissions WHERE server_id=? AND user_id=?`, serverID, userID).Scan(&bits)
+		return bits, err
+	})
+	communityService := community.New(db, realtimeHub.RefreshRolePermissions, func(userID int64, event string, value any) {
+		realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventType(event), Data: value})
+	})
 
 	notificationService := notifications.NewService(db, realtimeHub.ConnectedUserIDs,
 		func(userID int64, event notifications.Event) {
@@ -310,6 +322,9 @@ func main() {
 		},
 	)
 	messageEventPublisher.SetCreatedListener(func(value messageDomain.Message) {
+		if err := communityService.RecordThread(value); err != nil {
+			log.Printf("follow thread: %v", err)
+		}
 		if err := notificationService.Deliver(value); err != nil {
 			log.Printf("deliver message notification: %v", err)
 		}
@@ -324,6 +339,31 @@ func main() {
 	messageHandler := messagehttp.NewHandler(
 		messageService,
 	)
+	attachmentService, err := attachments.New(db, recordingService, func(cid, conversationID int64) {
+		if conversationID > 0 {
+			rows, err := db.Query(`SELECT user_id FROM conversation_members WHERE conversation_id=?`, conversationID)
+			if err != nil {
+				return
+			}
+			var ids []int64
+			for rows.Next() {
+				var id int64
+				if rows.Scan(&id) == nil {
+					ids = append(ids, id)
+				}
+			}
+			rows.Close()
+			for _, id := range ids {
+				realtimeHub.PublishToUser(id, realtimeDomain.OutgoingEvent{Type: "attachments.changed", Data: map[string]int64{"conversation_id": conversationID}})
+			}
+			return
+		}
+		realtimeHub.Publish(cid, realtimeDomain.OutgoingEvent{Type: "attachments.changed", Data: map[string]int64{"channel_id": cid}})
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer attachmentService.Close()
 
 	readEventPublisher :=
 		realtimeDomain.NewReadEventPublisher(realtimeHub)
@@ -346,6 +386,9 @@ func main() {
 			ctx, cancel := context.WithTimeout(maintenanceContext, 2*time.Second)
 			if err := diagnosticsRepository.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
 				log.Printf("diagnostic cleanup: %v", err)
+			}
+			if err := attachmentService.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
+				log.Printf("attachment cleanup: %v", err)
 			}
 			if err := messageRepository.PruneChanges(ctx); err != nil && maintenanceContext.Err() == nil {
 				log.Printf("message journal cleanup: %v", err)
@@ -386,6 +429,8 @@ func main() {
 	)
 
 	mux := http.NewServeMux()
+	communityService.RegisterRoutes(mux, accountHandler.RequireAuth)
+	attachmentService.RegisterRoutes(mux, accountHandler.RequireAuth)
 	accountHandler.RegisterRoutes(mux)
 	webrtcConfigHandler.RegisterRoutes(
 		mux,

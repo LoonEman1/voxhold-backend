@@ -94,6 +94,7 @@ func (r *room) snapshot() []*Client {
 }
 
 type Hub struct {
+	rolePermissions          func(serverID, userID int64) (int, error)
 	channelAccessMu          sync.RWMutex
 	channelAccessLoader      func(int64) (map[int64]struct{}, error)
 	channelAccessBatchLoader func([]int64) (map[int64]map[int64]struct{}, error)

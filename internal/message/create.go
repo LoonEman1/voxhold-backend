@@ -47,6 +47,8 @@ var (
 )
 
 type CreateInput struct {
+	AttachmentIDs    []string
+	ThreadRootID     *int64
 	Content          string
 	ClientMessageID  string
 	ReplyToMessageID *int64
@@ -54,11 +56,20 @@ type CreateInput struct {
 
 func (i CreateInput) Normalize() CreateInput {
 	i.Content = strings.TrimSpace(i.Content)
+	if i.Content == "" && len(i.AttachmentIDs) > 0 {
+		i.Content = "\U0001f4ce"
+	}
 
 	return i
 }
 
 func (i CreateInput) Validate() error {
+	if i.ThreadRootID != nil && *i.ThreadRootID <= 0 {
+		return ErrReplyInvalid
+	}
+	if len(i.AttachmentIDs) > 10 {
+		return ErrReplyInvalid
+	}
 	if i.ReplyToMessageID != nil && *i.ReplyToMessageID <= 0 {
 		return ErrReplyInvalid
 	}
@@ -70,7 +81,7 @@ func (i CreateInput) Validate() error {
 			return ErrClientMessageIDInvalid
 		}
 	}
-	if i.Content == "" {
+	if i.Content == "" && len(i.AttachmentIDs) == 0 {
 		return ErrContentRequired
 	}
 

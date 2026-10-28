@@ -146,5 +146,14 @@ func openChannelTestDB(t *testing.T) *sql.DB {
 	if _, err := db.Exec(string(migration)); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"000027_custom_roles.up.sql", "000028_threads_inbox.up.sql"} {
+		data, err := os.ReadFile("../../../migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(string(data)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return db
 }

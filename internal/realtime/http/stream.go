@@ -1,6 +1,7 @@
 package realtimehttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -30,6 +31,13 @@ func (h *Handler) startStream(
 		)
 	}
 
+	if checker, ok := h.channelAccess.(interface {
+		CheckStreamAccess(context.Context, int64, int64, int64) error
+	}); ok {
+		if err := checker.CheckStreamAccess(context.Background(), data.ServerID, data.ChannelID, client.UserID()); err != nil {
+			return queueError(client, event.RequestID, realtime.ErrorForbidden, "stream permission denied")
+		}
+	}
 	streamData, err := h.hub.StartStreamWithRenditions(
 		client,
 		data.ServerID,

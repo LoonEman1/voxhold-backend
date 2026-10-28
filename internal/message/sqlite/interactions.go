@@ -112,7 +112,10 @@ func hydrateInteractions(ctx context.Context, tx *sql.Tx, userID int64, values [
 		err = rows.Err()
 	}
 	rows.Close()
-	return err
+	if err != nil {
+		return err
+	}
+	return hydrateAttachments(ctx, tx, values)
 }
 
 func requireInteraction(ctx context.Context, tx *sql.Tx, serverID, channelID, messageID, userID int64) error {
