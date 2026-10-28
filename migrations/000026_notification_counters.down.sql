@@ -1,0 +1,4 @@
+DROP TRIGGER channel_notification_read_update;
+DROP TRIGGER channel_notification_read_cleanup;
+DROP TRIGGER channel_notifications_scope;
+DROP TABLE channel_notifications;

@@ -8,6 +8,7 @@ import (
 )
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
+	mux.Handle("GET /api/v1/servers/{serverID}/notification-counts", auth(http.HandlerFunc(s.handleCounts)))
 	for _, method := range []string{"GET", "PUT"} {
 		mux.Handle(method+" /api/v1/servers/{serverID}/channels/{channelID}/notifications", auth(http.HandlerFunc(s.handle)))
 	}

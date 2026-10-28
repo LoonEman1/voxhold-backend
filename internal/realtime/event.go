@@ -92,6 +92,8 @@ type MessageAuthorData struct {
 }
 
 type MessageCreatedData struct {
+	ThreadRootID    *int64                    `json:"thread_root_id,omitempty"`
+	CommentCount    int64                     `json:"comment_count"`
 	ClientMessageID string                    `json:"client_message_id,omitempty"`
 	ID              int64                     `json:"id"`
 	ChannelID       int64                     `json:"channel_id"`
@@ -139,6 +141,7 @@ type InvitationReceivedData struct {
 }
 
 type ChannelData struct {
+	CommentsEnabled  bool   `json:"comments_enabled"`
 	ID               int64  `json:"id"`
 	ServerID         int64  `json:"server_id"`
 	Name             string `json:"name"`

@@ -3,6 +3,8 @@ package channelhttp
 import "voxhold-backend/internal/channel"
 
 type channelResponse struct {
+	CommentsEnabled  bool         `json:"comments_enabled"`
+	CanPublish       bool         `json:"can_publish"`
 	ID               int64        `json:"id"`
 	ServerID         int64        `json:"server_id"`
 	Name             string       `json:"name"`
@@ -14,6 +16,9 @@ type channelResponse struct {
 }
 
 type listedChannelResponse struct {
+	CommentsEnabled  bool         `json:"comments_enabled"`
+	CanPublish       bool         `json:"can_publish"`
+	UnreadCount      int64        `json:"unread_count"`
 	ID               int64        `json:"id"`
 	ServerID         int64        `json:"server_id"`
 	Name             string       `json:"name"`
@@ -27,6 +32,7 @@ type listedChannelResponse struct {
 
 func newChannelResponse(value channel.Channel) channelResponse {
 	return channelResponse{
+		CanPublish:       value.CanPublish,
 		ID:               value.ID,
 		ServerID:         value.ServerID,
 		Name:             value.Name,
@@ -35,6 +41,7 @@ func newChannelResponse(value channel.Channel) channelResponse {
 		CreatedBy:        value.CreatedBy,
 		CreatedAt:        value.CreatedAt,
 		AccessRestricted: value.AccessRestricted,
+		CommentsEnabled:  value.CommentsEnabled,
 	}
 }
 
@@ -51,7 +58,7 @@ func newChannelsResponse(
 		response = append(
 			response,
 			listedChannelResponse{
-				ID:               value.ID,
+				CanPublish: value.CanPublish, UnreadCount: value.UnreadCount, ID: value.ID,
 				ServerID:         value.ServerID,
 				Name:             value.Name,
 				Kind:             value.Kind,
@@ -60,6 +67,7 @@ func newChannelsResponse(
 				CreatedAt:        value.CreatedAt,
 				LastMessageID:    value.LastMessageID,
 				AccessRestricted: value.AccessRestricted,
+				CommentsEnabled:  value.CommentsEnabled,
 			},
 		)
 	}

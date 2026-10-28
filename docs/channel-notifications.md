@@ -11,7 +11,7 @@ text channel; they never accept a different user ID. Responses use `no-store`.
 Preference changes emit `notification.settings_updated` to that account's tabs.
 Leaving a server or deleting a channel cascades its preference rows.
 
-Committed new messages produce `notification.message` for eligible connected
+Committed new messages produce `notification.message` previews for eligible connected
 accounts, including users browsing another channel/server. One indexed query
 joins unique connected account IDs, the shared channel ACL view, current server
 roles and per-channel preferences. Sender, inaccessible channels, voice-channel
@@ -52,3 +52,5 @@ also cancel pending alerts waiting on a cross-tab lock.
 включаются отдельной кнопкой с разрешением браузера; закрытый браузер и офлайн
 push в эту версию не входят. Звук учитывает общие настройки звуков интерфейса,
 громкость и устройство вывода. В меню есть кнопка прослушивания сигнала.
+
+Migration 000026 persists eligible notifications for offline accounts as well. See [news channels and durable counters](news-channels.md) for counts, read cleanup and news-channel notification defaults.
