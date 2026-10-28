@@ -139,6 +139,8 @@ func (s *Service) Close() error { return s.root.Close() }
 
 // ApplyBudget updates the reservation ceiling after the owner's shared allocation.
 func (s *Service) ApplyBudget(quota int64) { s.quota.Store(quota) }
+
+func (s *Service) QuotaBytes() int64 { return s.quota.Load() }
 func (s *Service) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()

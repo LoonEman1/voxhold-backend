@@ -133,3 +133,26 @@ func TestInvalidImageDimensionsAndCorruption(t *testing.T) {
 		t.Fatal("accepted oversized image")
 	}
 }
+
+func TestJointStorageInitializationPreservesExistingRecordingQuota(t *testing.T) {
+	db := testdb.Open(t)
+	t.Setenv("ATTACHMENT_DIRECTORY", t.TempDir())
+	const configured = int64(1 << 30)
+	records, err := recordings.New(db, recordings.Config{Directory: t.TempDir(), QuotaBytes: configured}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer records.Close()
+	service, err := New(db, records, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	var persisted int64
+	if err = db.QueryRow(`SELECT quota_bytes FROM storage_budgets WHERE category='recordings'`).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted != configured || records.QuotaBytes() != configured {
+		t.Fatalf("operator quota was reset: persisted=%d effective=%d want=%d", persisted, records.QuotaBytes(), configured)
+	}
+}
