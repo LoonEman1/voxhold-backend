@@ -25,7 +25,7 @@ func (s *Service) Counts(ctx context.Context, serverID, userID int64) ([]Count, 
 	if !member {
 		return nil, ErrForbidden
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT c.id,(SELECT count(*) FROM channel_notifications n WHERE n.channel_id=c.id AND n.user_id=? AND n.message_id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=c.id AND r.user_id=n.user_id),0)) FROM channels c WHERE c.server_id=? AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=c.id AND a.user_id=?) ORDER BY c.id`, userID, serverID, userID)
+	rows, err := tx.QueryContext(ctx, `SELECT c.id,(SELECT count(*) FROM channel_notifications n WHERE n.channel_id=c.id AND n.user_id=? AND n.read_at IS NULL AND n.message_id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=c.id AND r.user_id=n.user_id),0)) FROM channels c WHERE c.server_id=? AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=c.id AND a.user_id=?) ORDER BY c.id`, userID, serverID, userID)
 	if err != nil {
 		return nil, err
 	}

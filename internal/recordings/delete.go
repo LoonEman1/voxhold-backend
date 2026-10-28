@@ -8,13 +8,23 @@ import (
 
 // Delete removes the server copy only. Browser copies remain under the user's control.
 func (s *Service) Delete(ctx context.Context, id string, userID int64) (Record, error) {
+	return s.delete(ctx, id, userID, false)
+}
+
+func (s *Service) DeleteForOwner(ctx context.Context, id string, userID int64) (Record, error) {
+	if err := s.requireOwner(ctx, userID); err != nil {
+		return Record{}, err
+	}
+	return s.delete(ctx, id, userID, true)
+}
+func (s *Service) delete(ctx context.Context, id string, userID int64, instanceOwner bool) (Record, error) {
 	s.mu.Lock()
 	r, err := s.Get(ctx, id, userID)
 	if err != nil {
 		s.mu.Unlock()
 		return r, err
 	}
-	if r.OwnerUserID != userID {
+	if r.OwnerUserID != userID && !instanceOwner {
 		s.mu.Unlock()
 		return r, ErrNotFound
 	}

@@ -9,6 +9,7 @@ import (
 
 	"voxhold-backend/internal/channel"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/permissions"
 	serverDomain "voxhold-backend/internal/server"
 )
 
@@ -102,6 +103,29 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 	if err != nil {
 		return message.Message{}, err
 	}
+	allowed, err := permissions.Allowed(ctx, tx, serverID, authorUserID, permissions.Publish)
+	if err != nil {
+		return message.Message{}, err
+	}
+	if !allowed {
+		return message.Message{}, message.ErrForbidden
+	}
+	if input.ThreadRootID != nil {
+		var root int64
+		if err := tx.QueryRowContext(ctx, `SELECT m.id FROM messages m JOIN channels c ON c.id=m.channel_id WHERE m.id=? AND m.channel_id=? AND m.thread_root_id IS NULL AND c.kind='text' AND (c.is_news=0 OR c.comments_enabled=1)`, *input.ThreadRootID, channelID).Scan(&root); err != nil {
+			return message.Message{}, message.ErrReplyInvalid
+		}
+		threadRoot = &root
+		if input.ReplyToMessageID != nil {
+			var valid bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE id=? AND channel_id=? AND (id=? OR thread_root_id=?))`, *input.ReplyToMessageID, channelID, root, root).Scan(&valid); err != nil {
+				return message.Message{}, err
+			}
+			if !valid {
+				return message.Message{}, message.ErrReplyInvalid
+			}
+		}
+	}
 	var reply *message.ReplyReference
 	var replyID any
 	if input.ReplyToMessageID != nil {
@@ -178,6 +202,22 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 	}
 
 	createdMessage.ThreadRootID = threadRoot
+	for _, id := range input.AttachmentIDs {
+		result, err := tx.ExecContext(ctx, `UPDATE attachments SET message_id=? WHERE id=? AND channel_id=? AND owner_user_id=? AND message_id IS NULL AND deleted_at IS NULL`, createdMessage.ID, id, channelID, authorUserID)
+		if err != nil {
+			return message.Message{}, err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return message.Message{}, err
+		}
+		if n != 1 {
+			return message.Message{}, message.ErrReplyInvalid
+		}
+	}
+	if err := hydrateAttachments(ctx, tx, []*message.Message{&createdMessage}); err != nil {
+		return message.Message{}, err
+	}
 	createdMessage.Reply = reply
 	createdMessage.Forward = forwarded
 	createdMessage.Reactions = []message.Reaction{}
@@ -363,6 +403,14 @@ func (r *Repository) Update(
 		return message.Message{}, err
 	}
 
+	allowed, err := permissions.Allowed(ctx, tx, serverID, userID, permissions.Publish)
+	if err != nil {
+		return message.Message{}, err
+	}
+	if !allowed {
+		return message.Message{}, message.ErrForbidden
+	}
+
 	var rootID *int64
 	if err := tx.QueryRowContext(ctx, `SELECT thread_root_id FROM messages WHERE id=? AND channel_id=?`, messageID, channelID).Scan(&rootID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return message.Message{}, err
@@ -486,6 +534,13 @@ func (r *Repository) Delete(
 
 	canModerate := role == serverDomain.RoleOwner ||
 		role == serverDomain.RoleAdmin
+	if !canModerate {
+		var err error
+		canModerate, err = permissions.Allowed(ctx, tx, serverID, userID, permissions.ManageMessages)
+		if err != nil {
+			return message.Message{}, err
+		}
+	}
 
 	if deletedMessage.Author.UserID != userID && !canModerate {
 		return message.Message{}, message.ErrDeleteForbidden
@@ -545,9 +600,14 @@ func (r *Repository) Pin(
 		return message.PinnedMessage{}, false, err
 	}
 
-	if role != serverDomain.RoleOwner &&
-		role != serverDomain.RoleAdmin {
-		return message.PinnedMessage{}, false, message.ErrPinForbidden
+	if role != serverDomain.RoleOwner && role != serverDomain.RoleAdmin {
+		allowed, err := permissions.Allowed(ctx, tx, serverID, userID, permissions.ManageMessages)
+		if err != nil {
+			return message.PinnedMessage{}, false, err
+		}
+		if !allowed {
+			return message.PinnedMessage{}, false, message.ErrPinForbidden
+		}
 	}
 
 	if err := requireMessageChannel(
@@ -653,9 +713,14 @@ func (r *Repository) Unpin(
 		return false, err
 	}
 
-	if role != serverDomain.RoleOwner &&
-		role != serverDomain.RoleAdmin {
-		return false, message.ErrPinForbidden
+	if role != serverDomain.RoleOwner && role != serverDomain.RoleAdmin {
+		allowed, err := permissions.Allowed(ctx, tx, serverID, userID, permissions.ManageMessages)
+		if err != nil {
+			return false, err
+		}
+		if !allowed {
+			return false, message.ErrPinForbidden
+		}
 	}
 
 	if err := requireMessageChannel(

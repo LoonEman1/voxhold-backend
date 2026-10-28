@@ -10,6 +10,7 @@ import (
 	sqliteLib "modernc.org/sqlite/lib"
 
 	"voxhold-backend/internal/channel"
+	"voxhold-backend/internal/permissions"
 	"voxhold-backend/internal/server"
 )
 
@@ -178,9 +179,10 @@ func (r *Repository) ListByServerID(
 		channels.created_at,
 		channels.access_restricted,
         channels.comments_enabled,
-        (channels.is_news=0 OR EXISTS(SELECT 1 FROM server_members m WHERE m.server_id=channels.server_id AND m.user_id=? AND m.role IN ('owner','admin'))
-          OR EXISTS(SELECT 1 FROM channel_publishers p WHERE p.channel_id=channels.id AND p.user_id=?)),
-        (SELECT count(*) FROM channel_notifications n WHERE n.channel_id=channels.id AND n.user_id=?
+        (SELECT permissions FROM member_permissions WHERE server_id=channels.server_id AND user_id=?),
+        ((SELECT (permissions & 2)<>0 FROM member_permissions WHERE server_id=channels.server_id AND user_id=?) AND (channels.is_news=0 OR EXISTS(SELECT 1 FROM server_members m WHERE m.server_id=channels.server_id AND m.user_id=? AND m.role IN ('owner','admin'))
+          OR EXISTS(SELECT 1 FROM channel_publishers p WHERE p.channel_id=channels.id AND p.user_id=?))),
+        (SELECT count(*) FROM channel_notifications n WHERE n.channel_id=channels.id AND n.user_id=? AND n.read_at IS NULL
           AND n.message_id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=channels.id AND r.user_id=n.user_id),0)),
 		COALESCE((
 			SELECT MAX(messages.id)
@@ -198,7 +200,7 @@ func (r *Repository) ListByServerID(
 	rows, err := tx.QueryContext(
 		ctx,
 		channelsQuery,
-		userID, userID, userID,
+		userID, userID, userID, userID, userID,
 		serverID,
 		userID,
 	)
@@ -225,6 +227,7 @@ func (r *Repository) ListByServerID(
 			&value.CreatedAt,
 			&value.AccessRestricted,
 			&value.CommentsEnabled,
+			&value.Permissions,
 			&value.CanPublish,
 			&value.UnreadCount,
 			&value.LastMessageID,
@@ -562,6 +565,27 @@ func (r *Repository) CheckVoiceAccess(
 	if kind != channel.KindVoice {
 		return channel.ErrVoiceRequired
 	}
+	allowed, err := permissions.Allowed(ctx, r.db, serverID, userID, permissions.Voice)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return channel.ErrForbidden
+	}
 
+	return nil
+}
+
+func (r *Repository) CheckStreamAccess(ctx context.Context, serverID, channelID, userID int64) error {
+	if err := r.CheckVoiceAccess(ctx, serverID, channelID, userID); err != nil {
+		return err
+	}
+	allowed, err := permissions.Allowed(ctx, r.db, serverID, userID, permissions.Stream)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return channel.ErrForbidden
+	}
 	return nil
 }

@@ -148,7 +148,8 @@ func (s *Service) Deliver(value message.Message) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT a.user_id,u.username,m.role,COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END),c.server_id,c.name,s.name
+	rows, err := tx.QueryContext(ctx, `SELECT a.user_id,u.username,m.role,COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END),c.server_id,c.name,s.name,
+ EXISTS(SELECT 1 FROM thread_subscriptions t WHERE t.message_id=? AND t.user_id=a.user_id AND t.following=1)
  FROM channel_accessible_members a
  JOIN channels c ON c.id=a.channel_id AND c.kind='text'
  JOIN servers s ON s.id=c.server_id
@@ -157,7 +158,7 @@ func (s *Service) Deliver(value message.Message) error {
  LEFT JOIN channel_notification_settings n ON n.channel_id=c.id AND n.user_id=a.user_id
  WHERE a.channel_id=? AND a.user_id<>? AND u.deleted_at IS NULL
    AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=u.id)
-   AND COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END)<>'none'`, value.ChannelID, value.Author.UserID)
+   AND COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END)<>'none'`, value.ThreadRootID,value.ChannelID, value.Author.UserID)
 	if err != nil {
 		return fmt.Errorf("notification recipients: %w", err)
 	}
@@ -172,12 +173,13 @@ func (s *Service) Deliver(value message.Message) error {
 		var username, role string
 		var mode Mode
 		var event Event
-		if err = rows.Scan(&id, &username, &role, &mode, &event.ServerID, &event.ChannelName, &event.ServerName); err != nil {
+		var following bool
+		if err = rows.Scan(&id, &username, &role, &mode, &event.ServerID, &event.ChannelName, &event.ServerName,&following); err != nil {
 			break
 		}
 		event.Mentioned = value.Forward == nil && (targets.Matches(id, username, role) || value.Reply != nil && !value.Reply.Deleted && value.Reply.Author.UserID == id)
 		// A busy discussion should not ping all subscribers of a news feed.
-		if (mode != All || value.ThreadRootID != nil) && !event.Mentioned {
+		if (mode != All || value.ThreadRootID != nil) && !event.Mentioned && !following {
 			continue
 		}
 		event.ChannelID = value.ChannelID

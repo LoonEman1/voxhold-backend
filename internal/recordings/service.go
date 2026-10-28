@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/time/rate"
 	"modernc.org/sqlite"
+	"voxhold-backend/internal/storagebudget"
 )
 
 const MaxFileBytes int64 = 2 << 30
@@ -135,6 +136,9 @@ func New(db *sql.DB, config Config, present func(int64, int64, int64) bool, publ
 	return s, nil
 }
 func (s *Service) Close() error { return s.root.Close() }
+
+// ApplyBudget updates the reservation ceiling after the owner's shared allocation.
+func (s *Service) ApplyBudget(quota int64) { s.quota.Store(quota) }
 func (s *Service) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -254,6 +258,8 @@ func (s *Service) Heartbeat(ctx context.Context, id string, userID int64) error 
 }
 
 func (s *Service) Stop(ctx context.Context, id string, userID, size, duration int64, localOnly bool) (Record, error) {
+	storagebudget.Mu.Lock()
+	defer storagebudget.Mu.Unlock()
 	if size < 0 || duration < 0 || duration > 24*60*60*1000 {
 		return Record{}, ErrConflict
 	}
@@ -285,6 +291,29 @@ func (s *Service) Stop(ctx context.Context, id string, userID, size, duration in
 		if used+size > s.quota.Load() {
 			s.mu.Unlock()
 			return r, ErrLimit
+		}
+		var configured bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM storage_budgets)`).Scan(&configured); err != nil {
+			s.mu.Unlock()
+			return r, err
+		}
+		if configured {
+			state, err := storagebudget.Get(ctx, s.db, s.config.Directory)
+			if err != nil {
+				s.mu.Unlock()
+				return r, err
+			}
+			managed := int64(0)
+			for _, value := range state.Categories {
+				managed += value.Used
+			}
+			if r.Status == "uploading" {
+				managed -= r.SizeBytes
+			}
+			if size > state.Capacity-managed {
+				s.mu.Unlock()
+				return r, ErrLimit
+			}
 		}
 	}
 	_, err = s.db.ExecContext(ctx, `UPDATE channel_recordings SET status=?,size_bytes=?,duration_ms=?,updated_at=max(updated_at+1,?),expires_at=? WHERE id=?`, state, size, duration, s.now().UnixMilli(), s.now().Add(Retention).Unix(), id)
@@ -337,8 +366,36 @@ func (s *Service) SetQuota(ctx context.Context, userID, quota int64) (Storage, e
 	if quota < MinQuotaBytes || quota > MaxQuotaBytes {
 		return Storage{}, ErrInvalidQuota
 	}
+	storagebudget.Mu.Lock()
+	defer storagebudget.Mu.Unlock()
+	var configured int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM storage_budgets`).Scan(&configured); err != nil {
+		return Storage{}, err
+	}
+	if configured > 0 {
+		state, err := storagebudget.Get(ctx, s.db, s.config.Directory)
+		if err != nil {
+			return Storage{}, err
+		}
+		other := state.Categories["images"].Quota + state.Categories["files"].Quota
+		if quota > state.Capacity-other {
+			return Storage{}, storagebudget.ErrBudget
+		}
+	}
 	s.mu.Lock()
-	_, err := s.db.ExecContext(ctx, `UPDATE instance_settings SET recording_quota_bytes=? WHERE id=1`, quota)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		s.mu.Unlock()
+		return Storage{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `UPDATE instance_settings SET recording_quota_bytes=? WHERE id=1`, quota)
+	if err == nil && configured > 0 {
+		_, err = tx.ExecContext(ctx, `UPDATE storage_budgets SET quota_bytes=? WHERE category='recordings'`, quota)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err == nil {
 		s.quota.Store(quota)
 	}

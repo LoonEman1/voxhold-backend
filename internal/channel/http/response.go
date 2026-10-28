@@ -16,6 +16,7 @@ type channelResponse struct {
 }
 
 type listedChannelResponse struct {
+	Permissions      int          `json:"permissions"`
 	CommentsEnabled  bool         `json:"comments_enabled"`
 	CanPublish       bool         `json:"can_publish"`
 	UnreadCount      int64        `json:"unread_count"`
@@ -58,7 +59,8 @@ func newChannelsResponse(
 		response = append(
 			response,
 			listedChannelResponse{
-				CanPublish: value.CanPublish, UnreadCount: value.UnreadCount, ID: value.ID,
+				Permissions: value.Permissions,
+				CanPublish:  value.CanPublish, UnreadCount: value.UnreadCount, ID: value.ID,
 				ServerID:         value.ServerID,
 				Name:             value.Name,
 				Kind:             value.Kind,
