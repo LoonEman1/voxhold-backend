@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/storagebudget"
 )
 
 type Handler struct {
@@ -50,6 +51,8 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 		httpapi.WriteError(w, 507, ErrLimit.Error())
 	case errors.Is(err, ErrForbidden):
 		httpapi.WriteError(w, 403, ErrForbidden.Error())
+	case errors.Is(err, storagebudget.ErrBudget):
+		httpapi.WriteError(w, 400, err.Error())
 	case errors.Is(err, ErrInvalidQuota):
 		httpapi.WriteError(w, 400, ErrInvalidQuota.Error())
 	default:

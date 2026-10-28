@@ -92,6 +92,7 @@ type MessageAuthorData struct {
 }
 
 type MessageCreatedData struct {
+	Attachments     []message.Attachment      `json:"attachments,omitempty"`
 	ThreadRootID    *int64                    `json:"thread_root_id,omitempty"`
 	CommentCount    int64                     `json:"comment_count"`
 	ClientMessageID string                    `json:"client_message_id,omitempty"`

@@ -69,7 +69,7 @@ func (r *Repository) ListComments(ctx context.Context, serverID, channelID, user
 		return nil, err
 	}
 	var valid bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages m JOIN channels c ON c.id=m.channel_id WHERE m.id=? AND c.id=? AND c.is_news=1 AND m.thread_root_id IS NULL)`, postID, channelID).Scan(&valid); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages m JOIN channels c ON c.id=m.channel_id WHERE m.id=? AND c.id=? AND c.kind='text' AND m.thread_root_id IS NULL)`, postID, channelID).Scan(&valid); err != nil {
 		return nil, err
 	}
 	if !valid {

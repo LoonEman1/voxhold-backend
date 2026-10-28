@@ -74,3 +74,32 @@ func TestOwnerDeletesMediaPreviewAndDownloadTickets(t *testing.T) {
 		t.Fatal("deleted active recording", err)
 	}
 }
+
+func TestInstanceOwnerCanCleanAnotherMembersRecording(t *testing.T) {
+	s := setup(t)
+	r, err := s.Start(ctx, 1, 1, 2, "video/webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Stop(ctx, r.ID, 2, int64(len(webm)), 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Append(ctx, r.ID, 2, 0, webm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Complete(ctx, r.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Delete(ctx, r.ID, 1); !errors.Is(err, ErrNotFound) {
+		t.Fatal("ordinary deletion must respect authorship", err)
+	}
+	if _, err = s.DeleteForOwner(ctx, r.ID, 2); !errors.Is(err, ErrForbidden) {
+		t.Fatal("member used owner cleanup", err)
+	}
+	if _, err = s.DeleteForOwner(ctx, r.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Get(ctx, r.ID, 2); !errors.Is(err, ErrNotFound) {
+		t.Fatal("server copy survived cleanup", err)
+	}
+}

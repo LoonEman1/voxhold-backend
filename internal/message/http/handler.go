@@ -153,9 +153,11 @@ func (h *Handler) RegisterRoutes(
 }
 
 type createRequest struct {
-	Content          string `json:"content"`
-	ClientMessageID  string `json:"client_message_id,omitempty"`
-	ReplyToMessageID *int64 `json:"reply_to_message_id,omitempty"`
+	AttachmentIDs    []string `json:"attachment_ids,omitempty"`
+	ThreadRootID     *int64   `json:"thread_root_id,omitempty"`
+	Content          string   `json:"content"`
+	ClientMessageID  string   `json:"client_message_id,omitempty"`
+	ReplyToMessageID *int64   `json:"reply_to_message_id,omitempty"`
 }
 
 type updateRequest struct {
@@ -206,6 +208,8 @@ func (h *Handler) create(
 			Content:          request.Content,
 			ClientMessageID:  request.ClientMessageID,
 			ReplyToMessageID: request.ReplyToMessageID,
+			ThreadRootID:     request.ThreadRootID,
+			AttachmentIDs:    request.AttachmentIDs,
 		},
 	)
 	if err != nil {

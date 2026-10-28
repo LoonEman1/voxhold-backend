@@ -18,6 +18,7 @@ func (k Kind) IsValid() bool {
 }
 
 type Channel struct {
+	Permissions      int
 	ID               int64
 	ServerID         int64
 	Name             string

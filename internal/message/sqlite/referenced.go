@@ -20,6 +20,14 @@ func requestHash(input message.CreateInput, forward *message.ForwardInput) (stri
 		kind = "reply"
 		source, _ = json.Marshal([]any{input.Content, *input.ReplyToMessageID})
 	}
+	if input.ThreadRootID != nil {
+		kind = "reply"
+		source, _ = json.Marshal(map[string]any{"type": "thread", "content": input.Content, "reply": input.ReplyToMessageID, "root": *input.ThreadRootID})
+	}
+	if len(input.AttachmentIDs) > 0 {
+		kind = "reply"
+		source, _ = json.Marshal(map[string]any{"type": "attachment", "content": input.Content, "reply": input.ReplyToMessageID, "root": input.ThreadRootID, "ids": input.AttachmentIDs})
+	}
 	return kind, fmt.Sprintf("%x", sha256.Sum256(source))
 }
 
