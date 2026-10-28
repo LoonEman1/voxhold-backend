@@ -70,6 +70,7 @@ func (p *ChannelEventPublisher) publishChannel(
 				CreatedBy:        value.CreatedBy,
 				CreatedAt:        value.CreatedAt,
 				AccessRestricted: value.AccessRestricted,
+				CommentsEnabled:  value.CommentsEnabled,
 			},
 		},
 	)

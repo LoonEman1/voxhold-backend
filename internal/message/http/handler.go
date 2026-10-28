@@ -100,6 +100,7 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
+	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/comments", requireAuth(http.HandlerFunc(h.comments)))
 	mux.Handle("POST /api/v1/servers/{serverID}/channels/{channelID}/messages/forward", requireAuth(http.HandlerFunc(h.forward)))
 	for _, method := range []string{"GET", "PUT", "DELETE"} {
 		mux.Handle(method+" /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/reactions/{emoji}", requireAuth(http.HandlerFunc(h.reactions)))

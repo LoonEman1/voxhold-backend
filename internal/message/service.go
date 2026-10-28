@@ -64,6 +64,7 @@ func (s *Service) Create(
 		createdMessage,
 	)
 
+	s.publishCommentRoot(ctx, serverID, channelID, authorUserID, createdMessage)
 	return createdMessage, nil
 }
 
@@ -197,6 +198,7 @@ func (s *Service) Delete(
 	}
 
 	s.events.PublishMessageDeleted(deletedMessage)
+	s.publishCommentRoot(ctx, serverID, channelID, userID, deletedMessage)
 
 	return nil
 }

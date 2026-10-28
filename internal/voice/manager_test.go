@@ -436,41 +436,36 @@ func newTestPeer(
 }
 
 func (p *testPeer) acceptOffer(sdp string) error {
+	answer, err := p.answerOffer(sdp)
+	if err != nil {
+		return err
+	}
+	// Deliver across the simulated transport only after releasing the client
+	// mutex. AcceptAnswer can synchronously emit a deferred offer back to this
+	// fixture; a real WebSocket never calls its own receiver under this lock.
+	return p.manager.AcceptAnswer(p.connectionID, answer)
+}
+
+func (p *testPeer) answerOffer(sdp string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	if err := p.peer.SetRemoteDescription(
-		webrtc.SessionDescription{
-			Type: webrtc.SDPTypeOffer,
-			SDP:  sdp,
-		},
-	); err != nil {
-		return fmt.Errorf("set test remote offer: %w", err)
+	if err := p.peer.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp}); err != nil {
+		return "", fmt.Errorf("set test remote offer: %w", err)
 	}
-
 	for _, candidate := range p.pendingCandidates {
 		if err := p.addICECandidateLocked(candidate); err != nil {
-			return err
+			return "", err
 		}
 	}
 	p.pendingCandidates = nil
-
 	answer, err := p.peer.CreateAnswer(nil)
 	if err != nil {
-		return fmt.Errorf("create test answer: %w", err)
+		return "", fmt.Errorf("create test answer: %w", err)
 	}
 	if err := p.peer.SetLocalDescription(answer); err != nil {
-		return fmt.Errorf("set test local answer: %w", err)
+		return "", fmt.Errorf("set test local answer: %w", err)
 	}
-
-	if err := p.manager.AcceptAnswer(
-		p.connectionID,
-		answer.SDP,
-	); err != nil {
-		return err
-	}
-
-	return nil
+	return answer.SDP, nil
 }
 
 func (p *testPeer) addICECandidate(

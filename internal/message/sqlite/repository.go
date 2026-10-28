@@ -98,6 +98,10 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 		}
 	}
 
+	threadRoot, err := requireNewsWrite(ctx, tx, channelID, authorUserID, input.ReplyToMessageID)
+	if err != nil {
+		return message.Message{}, err
+	}
 	var reply *message.ReplyReference
 	var replyID any
 	if input.ReplyToMessageID != nil {
@@ -131,9 +135,10 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 		content,
         reply_to_message_id,
         reply_to_original_id,
-        forward_data
+        forward_data,
+        thread_root_id
 	)
-	VALUES (?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 	RETURNING
 		id,
 		channel_id,
@@ -156,7 +161,7 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 		channelID,
 		authorUserID,
 		content,
-		replyID, replyID, forwardData,
+		replyID, replyID, forwardData, threadRoot,
 	).Scan(
 		&createdMessage.ID,
 		&createdMessage.ChannelID,
@@ -172,6 +177,7 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 		)
 	}
 
+	createdMessage.ThreadRootID = threadRoot
 	createdMessage.Reply = reply
 	createdMessage.Forward = forwarded
 	createdMessage.Reactions = []message.Reaction{}
@@ -258,6 +264,7 @@ func (r *Repository) ListByChannelID(
 	JOIN users
 		ON users.id = messages.author_user_id
 	WHERE messages.channel_id = ?
+	  AND messages.thread_root_id IS NULL
 	  AND messages.id < ?
 	ORDER BY messages.id DESC
 	LIMIT ?
@@ -356,6 +363,15 @@ func (r *Repository) Update(
 		return message.Message{}, err
 	}
 
+	var rootID *int64
+	if err := tx.QueryRowContext(ctx, `SELECT thread_root_id FROM messages WHERE id=? AND channel_id=?`, messageID, channelID).Scan(&rootID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return message.Message{}, err
+	}
+	if rootID == nil {
+		if _, err := requireNewsWrite(ctx, tx, channelID, userID, nil); err != nil {
+			return message.Message{}, err
+		}
+	}
 	var forwardedData sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT forward_data FROM messages WHERE id=? AND channel_id=?`, messageID, channelID).Scan(&forwardedData); err == nil && forwardedData.Valid {
 		return message.Message{}, message.ErrForwardEdit
@@ -811,7 +827,8 @@ func findMessage(
 		messages.content,
 		messages.created_at,
 		messages.edited_at,
-		messages.revision
+		messages.revision,
+messages.thread_root_id
 	FROM messages
 	JOIN users
 		ON users.id = messages.author_user_id
@@ -832,6 +849,7 @@ func findMessage(
 		&value.CreatedAt,
 		&value.EditedAt,
 		&value.Revision,
+		&value.ThreadRootID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

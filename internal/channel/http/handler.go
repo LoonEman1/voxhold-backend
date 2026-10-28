@@ -57,6 +57,8 @@ func (h *Handler) RegisterRoutes(
 	mux *http.ServeMux,
 	requireAuth func(http.Handler) http.Handler,
 ) {
+	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/news", requireAuth(http.HandlerFunc(h.news)))
+	mux.Handle("PUT /api/v1/servers/{serverID}/channels/{channelID}/news", requireAuth(http.HandlerFunc(h.news)))
 	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/access", requireAuth(http.HandlerFunc(h.access)))
 	mux.Handle("PUT /api/v1/servers/{serverID}/channels/{channelID}/access", requireAuth(http.HandlerFunc(h.access)))
 	mux.Handle("GET /api/v1/servers/{serverID}/channels/{channelID}/members", requireAuth(http.HandlerFunc(h.listMembers)))

@@ -7,6 +7,20 @@ import (
 	"voxhold-backend/internal/stream"
 )
 
+func TestLeaveStreamAcknowledgesAnAlreadyClosedViewer(t *testing.T) {
+	handler := &Handler{hub: realtime.NewHub()}
+	client := realtime.NewClient(2, "viewer", []int64{1})
+	for _, requestID := range []string{"first-leave", "retry-leave"} {
+		if err := handler.leaveStream(client, realtime.IncomingEvent{RequestID: requestID}); err != nil {
+			t.Fatal(err)
+		}
+		event, ok := client.PopOutgoing()
+		if !ok || event.Type != realtime.EventStreamLeft || event.RequestID != requestID {
+			t.Fatalf("leave must be idempotent: %+v", event)
+		}
+	}
+}
+
 func TestQueueStreamStateErrorReportsRenditionFailures(t *testing.T) {
 	tests := []struct {
 		name    string

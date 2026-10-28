@@ -33,7 +33,7 @@ func (r *Repository) Sync(ctx context.Context, serverID, channelID, userID int64
 	page.Reset = after == nil || *after < floor || *after > page.Cursor
 	if page.Reset {
 		rows, err := tx.QueryContext(ctx, `SELECT m.id, m.channel_id, m.author_user_id, u.username, m.content, m.created_at, m.edited_at, m.revision
-			FROM messages m JOIN users u ON u.id = m.author_user_id WHERE m.channel_id = ? ORDER BY m.id DESC LIMIT 51`, channelID)
+			FROM messages m JOIN users u ON u.id = m.author_user_id WHERE m.channel_id = ? AND m.thread_root_id IS NULL ORDER BY m.id DESC LIMIT 51`, channelID)
 		if err != nil {
 			return page, err
 		}

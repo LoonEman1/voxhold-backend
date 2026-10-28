@@ -30,16 +30,23 @@ func (r *Repository) Create(
 	name string,
 	kind channel.Kind,
 ) (channel.Channel, error) {
+	isNews := kind == channel.KindNews
+	storageKind := kind
+	if isNews {
+		storageKind = channel.KindText
+	}
 
 	const query = `
 	INSERT INTO channels (
 		server_id,
 		name,
 		kind,
+		is_news,
 		position,
 		created_by
 	)
 	SELECT
+		?,
 		?,
 		?,
 		?,
@@ -60,11 +67,12 @@ func (r *Repository) Create(
 		id,
 		server_id,
 		name,
-		kind,
+		CASE WHEN is_news=1 THEN 'news' ELSE kind END,
 		position,
 		created_by,
 		created_at,
-		access_restricted
+		access_restricted,
+		comments_enabled
 	`
 
 	var createdChannel channel.Channel
@@ -74,7 +82,8 @@ func (r *Repository) Create(
 		query,
 		serverID,
 		name,
-		kind,
+		storageKind,
+		isNews,
 		serverID,
 		userID,
 		serverID,
@@ -90,6 +99,7 @@ func (r *Repository) Create(
 		&createdChannel.CreatedBy,
 		&createdChannel.CreatedAt,
 		&createdChannel.AccessRestricted,
+		&createdChannel.CommentsEnabled,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -109,6 +119,7 @@ func (r *Repository) Create(
 		)
 	}
 
+	createdChannel.CanPublish = true
 	return createdChannel, nil
 }
 
@@ -161,11 +172,16 @@ func (r *Repository) ListByServerID(
 		channels.id,
 		channels.server_id,
 		channels.name,
-		channels.kind,
+		CASE WHEN channels.is_news=1 THEN 'news' ELSE channels.kind END,
 		channels.position,
 		channels.created_by,
 		channels.created_at,
 		channels.access_restricted,
+        channels.comments_enabled,
+        (channels.is_news=0 OR EXISTS(SELECT 1 FROM server_members m WHERE m.server_id=channels.server_id AND m.user_id=? AND m.role IN ('owner','admin'))
+          OR EXISTS(SELECT 1 FROM channel_publishers p WHERE p.channel_id=channels.id AND p.user_id=?)),
+        (SELECT count(*) FROM channel_notifications n WHERE n.channel_id=channels.id AND n.user_id=?
+          AND n.message_id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=channels.id AND r.user_id=n.user_id),0)),
 		COALESCE((
 			SELECT MAX(messages.id)
 			FROM messages
@@ -182,6 +198,7 @@ func (r *Repository) ListByServerID(
 	rows, err := tx.QueryContext(
 		ctx,
 		channelsQuery,
+		userID, userID, userID,
 		serverID,
 		userID,
 	)
@@ -207,6 +224,9 @@ func (r *Repository) ListByServerID(
 			&value.CreatedBy,
 			&value.CreatedAt,
 			&value.AccessRestricted,
+			&value.CommentsEnabled,
+			&value.CanPublish,
+			&value.UnreadCount,
 			&value.LastMessageID,
 		); err != nil {
 			return nil, fmt.Errorf(
@@ -258,11 +278,12 @@ func (r *Repository) Update(
 		id,
 		server_id,
 		name,
-		kind,
+		CASE WHEN is_news=1 THEN 'news' ELSE kind END,
 		position,
 		created_by,
 		created_at,
-		access_restricted
+		access_restricted,
+		comments_enabled
 	`
 
 	var updatedChannel channel.Channel
@@ -286,6 +307,7 @@ func (r *Repository) Update(
 		&updatedChannel.CreatedBy,
 		&updatedChannel.CreatedAt,
 		&updatedChannel.AccessRestricted,
+		&updatedChannel.CommentsEnabled,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -357,11 +379,12 @@ func (r *Repository) Delete(
 		id,
 		server_id,
 		name,
-		kind,
+		CASE WHEN is_news=1 THEN 'news' ELSE kind END,
 		position,
 		created_by,
 		created_at,
-		access_restricted
+		access_restricted,
+		comments_enabled
 	`
 
 	var deletedChannel channel.Channel
@@ -384,6 +407,7 @@ func (r *Repository) Delete(
 		&deletedChannel.CreatedBy,
 		&deletedChannel.CreatedAt,
 		&deletedChannel.AccessRestricted,
+		&deletedChannel.CommentsEnabled,
 	)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -495,7 +519,7 @@ func (r *Repository) CheckVoiceAccess(
 ) error {
 	const query = `
 	SELECT
-		channels.kind,
+		CASE WHEN channels.is_news=1 THEN 'news' ELSE channels.kind END,
 		EXISTS (
 			SELECT 1
 			FROM channel_accessible_members a

@@ -33,6 +33,7 @@ func (p *MessageEventPublisher) PublishMessageCreated(
 		OutgoingEvent{
 			Type: EventMessageCreated,
 			Data: MessageCreatedData{
+				ThreadRootID: value.ThreadRootID, CommentCount: value.CommentCount,
 				ClientMessageID: value.ClientMessageID,
 				ID:              value.ID,
 				ChannelID:       value.ChannelID,
@@ -121,6 +122,7 @@ func newMessageData(
 	value message.Message,
 ) MessageCreatedData {
 	return MessageCreatedData{
+		ThreadRootID: value.ThreadRootID, CommentCount: value.CommentCount,
 		ID:        value.ID,
 		ChannelID: value.ChannelID,
 		Author: MessageAuthorData{
