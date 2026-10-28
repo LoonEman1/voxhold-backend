@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 	"voxhold-backend/internal/account"
@@ -66,6 +67,9 @@ func TestUploadCompressionAuthorizationRetryQuotaAndCleanup(t *testing.T) {
 		t.Fatal(a)
 	}
 	call(2, "PUT", url, body.Bytes(), 200)
+	// A second uploader must not bypass the metadata key using a case variant
+	// of the same filesystem name (Windows and common macOS volumes).
+	call(1, "PUT", "/api/v1/channels/2/attachments/"+strings.ToUpper(id)+"?filename=overwrite.png", body.Bytes(), 400)
 	var count int
 	if err = db.QueryRow(`SELECT count(*) FROM attachments`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("retry duplicated: %d %v", count, err)
@@ -127,5 +131,28 @@ func TestInvalidImageDimensionsAndCorruption(t *testing.T) {
 	}
 	if _, _, err := compressImage(b.Bytes()); err == nil {
 		t.Fatal("accepted oversized image")
+	}
+}
+
+func TestJointStorageInitializationPreservesExistingRecordingQuota(t *testing.T) {
+	db := testdb.Open(t)
+	t.Setenv("ATTACHMENT_DIRECTORY", t.TempDir())
+	const configured = int64(1 << 30)
+	records, err := recordings.New(db, recordings.Config{Directory: t.TempDir(), QuotaBytes: configured}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer records.Close()
+	service, err := New(db, records, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	var persisted int64
+	if err = db.QueryRow(`SELECT quota_bytes FROM storage_budgets WHERE category='recordings'`).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted != configured || records.QuotaBytes() != configured {
+		t.Fatalf("operator quota was reset: persisted=%d effective=%d want=%d", persisted, records.QuotaBytes(), configured)
 	}
 }

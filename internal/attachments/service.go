@@ -68,6 +68,23 @@ func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, i
 		root.Close()
 		return nil, err
 	}
+	// The existing recording ceiling may come from the operator's environment.
+	// Preserve it when initializing joint allocations for the first time.
+	var previous sql.NullInt64
+	if err = db.QueryRow(`SELECT recording_quota_bytes FROM instance_settings WHERE id=1`).Scan(&previous); err != nil {
+		root.Close()
+		return nil, err
+	}
+	if !previous.Valid {
+		recording := state.Categories["recordings"]
+		recording.Quota = min(recordingService.QuotaBytes(), state.Capacity)
+		state.Categories["recordings"] = recording
+		for _, category := range []string{"images", "files"} {
+			value := state.Categories[category]
+			value.Quota = max(0, (state.Capacity-recording.Quota)/2)
+			state.Categories[category] = value
+		}
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		root.Close()
@@ -101,7 +118,9 @@ func randomID() string {
 }
 func validID(id string) bool {
 	v, err := hex.DecodeString(id)
-	return err == nil && len(v) == 16 && len(id) == 32
+	// Canonical IDs also keep SQLite's case-sensitive keys consistent with
+	// case-insensitive filesystems: a case variant must never replace a file.
+	return err == nil && len(v) == 16 && len(id) == 32 && id == strings.ToLower(id)
 }
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("PUT /api/v1/channels/{channelID}/attachments/{attachmentID}", auth(http.HandlerFunc(s.upload)))

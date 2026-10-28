@@ -19,6 +19,11 @@ refreshes; authenticated media objects with URL disposal; queued uploads and
 no bubbling of file drops from a closed discussion into the main channel;
 direct-message retry keys and scroll-aware read receipts; 15% overall reserve
 in addition to category limits; inclusion of recording previews in cleanup bytes.
+The final path review additionally rejects case variants of attachment IDs so
+distinct SQLite keys cannot alias a file on a case-insensitive filesystem; the
+cross-uploader HTTP regression checks the rejection before any file mutation.
+Joint-storage initialization also retains a recording quota supplied by the
+operator's environment; a regression verifies persisted and effective ceilings.
 
 The frontend has dedicated regression tests for lost send responses, file retry,
 cleanup-preview invalidation and permanent deleted-file placeholders. An isolated
