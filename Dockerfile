@@ -2,6 +2,10 @@ ARG GO_VERSION=1.27.3
 
 FROM golang:${GO_VERSION}-alpine AS builder
 
+# Keep published images portable; self-hosted builds may opt into v2.
+ARG GOAMD64=v1
+ENV GOAMD64=${GOAMD64}
+
 WORKDIR /src
 
 COPY go.mod go.sum ./

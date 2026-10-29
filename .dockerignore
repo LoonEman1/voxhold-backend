@@ -17,3 +17,6 @@ data/
 .gocache/
 
 .sqlfluff
+
+# Local diagnostics, benchmark binaries and generated task artifacts.
+output/
