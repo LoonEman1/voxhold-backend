@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 func messagePointers(values []message.Message) []*message.Message {
@@ -115,6 +116,13 @@ func hydrateInteractions(ctx context.Context, tx *sql.Tx, userID int64, values [
 	if err != nil {
 		return err
 	}
+	polls, err := message.LoadPolls(ctx, tx, userID, "channel", ids)
+	if err != nil {
+		return err
+	}
+	for _, value := range values {
+		value.Poll = polls[value.ID]
+	}
 	return hydrateAttachments(ctx, tx, values)
 }
 
@@ -133,7 +141,7 @@ func (r *Repository) SetReaction(ctx context.Context, serverID, channelID, messa
 	if !message.ValidReaction(emoji) {
 		return message.ReactionState{}, false, message.ErrReactionInvalid
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return message.ReactionState{}, false, err
 	}

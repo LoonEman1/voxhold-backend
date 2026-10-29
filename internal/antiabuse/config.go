@@ -14,6 +14,8 @@ type Config struct {
 	HTTPBurst               int
 	HTTPWritesPerSecond     int
 	HTTPWriteBurst          int
+	CallSignalsPerSecond    int
+	CallSignalBurst         int
 	AuthRequestsPerMinute   int
 	AuthBurst               int
 	InviteRequestsPerMinute int
@@ -39,6 +41,8 @@ func DefaultConfig() Config {
 		HTTPBurst:                  50,
 		HTTPWritesPerSecond:        8,
 		HTTPWriteBurst:             16,
+		CallSignalsPerSecond:       120,
+		CallSignalBurst:            240,
 		AuthRequestsPerMinute:      10,
 		AuthBurst:                  5,
 		InviteRequestsPerMinute:    20,
@@ -78,6 +82,8 @@ func ConfigFromEnv() (Config, error) {
 		{"HTTP_RATE_LIMIT_BURST", &config.HTTPBurst},
 		{"HTTP_WRITE_RATE_LIMIT_RPS", &config.HTTPWritesPerSecond},
 		{"HTTP_WRITE_RATE_LIMIT_BURST", &config.HTTPWriteBurst},
+		{"CALL_SIGNAL_RATE_LIMIT_RPS", &config.CallSignalsPerSecond},
+		{"CALL_SIGNAL_RATE_LIMIT_BURST", &config.CallSignalBurst},
 		{"AUTH_RATE_LIMIT_PER_MINUTE", &config.AuthRequestsPerMinute},
 		{"AUTH_RATE_LIMIT_BURST", &config.AuthBurst},
 		{"INVITE_RATE_LIMIT_PER_MINUTE", &config.InviteRequestsPerMinute},

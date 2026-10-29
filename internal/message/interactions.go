@@ -37,10 +37,12 @@ type ForwardReference struct {
 }
 
 type ForwardInput struct {
-	SourceServerID  int64  `json:"source_server_id"`
-	SourceChannelID int64  `json:"source_channel_id"`
-	SourceMessageID int64  `json:"source_message_id"`
-	ClientMessageID string `json:"client_message_id"`
+	SourceConversationID int64    `json:"source_conversation_id,omitempty"`
+	AttachmentIDs        []string `json:"attachment_ids,omitempty"`
+	SourceServerID       int64    `json:"source_server_id"`
+	SourceChannelID      int64    `json:"source_channel_id"`
+	SourceMessageID      int64    `json:"source_message_id"`
+	ClientMessageID      string   `json:"client_message_id"`
 }
 
 type Reaction struct {
@@ -97,17 +99,17 @@ func (s *Service) Forward(ctx context.Context, serverID, channelID, userID int64
 	if userID <= 0 {
 		return Message{}, ErrForbidden
 	}
-	if input.SourceServerID <= 0 || input.SourceChannelID <= 0 || input.SourceMessageID <= 0 {
+	if (input.SourceConversationID <= 0 && (input.SourceServerID <= 0 || input.SourceChannelID <= 0)) || input.SourceMessageID <= 0 {
 		return Message{}, ErrForwardInvalid
 	}
-	if err := (CreateInput{Content: "forward", ClientMessageID: input.ClientMessageID}).Validate(); err != nil {
+	if err := (CreateInput{Content: "forward", ClientMessageID: input.ClientMessageID, AttachmentIDs: input.AttachmentIDs}).Validate(); err != nil {
 		return Message{}, err
 	}
 	repo, ok := s.repository.(InteractionRepository)
 	if !ok {
 		return Message{}, errors.New("message interactions unavailable")
 	}
-	value, err := repo.CreateReferenced(ctx, serverID, channelID, userID, CreateInput{ClientMessageID: input.ClientMessageID}, &input)
+	value, err := repo.CreateReferenced(ctx, serverID, channelID, userID, CreateInput{ClientMessageID: input.ClientMessageID, AttachmentIDs: input.AttachmentIDs}, &input)
 	if err != nil {
 		return Message{}, err
 	}

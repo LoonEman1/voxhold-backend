@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+	"voxhold-backend/internal/audit"
+	"voxhold-backend/internal/storage"
 )
 
 type Role struct {
@@ -61,7 +63,7 @@ func (s *Service) saveRole(r *http.Request, userID int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	serverID, id := path(r, "serverID"), path(r, "roleID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +93,9 @@ func (s *Service) saveRole(r *http.Request, userID int64) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = audit.Record(r.Context(), tx, serverID, userID, "role.updated", "role", id, input.Name, input); err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -104,7 +109,7 @@ func (s *Service) rolesChanged(serverID int64) {
 }
 func (s *Service) deleteRole(r *http.Request, userID int64) (any, error) {
 	serverID := path(r, "serverID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +117,13 @@ func (s *Service) deleteRole(r *http.Request, userID int64) (any, error) {
 	if err = owner(r.Context(), tx, serverID, userID); err != nil {
 		return nil, err
 	}
-	if _, err = tx.ExecContext(r.Context(), `DELETE FROM server_roles WHERE id=? AND server_id=?`, path(r, "roleID"), serverID); err != nil {
+	var deletedName string
+	if err = tx.QueryRowContext(r.Context(), `DELETE FROM server_roles WHERE id=? AND server_id=? RETURNING name`, path(r, "roleID"), serverID).Scan(&deletedName); err == sql.ErrNoRows {
+		return map[string]bool{"ok": true}, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if err = audit.Record(r.Context(), tx, serverID, userID, "role.deleted", "role", path(r, "roleID"), deletedName, nil); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -132,7 +143,7 @@ func (s *Service) assignRoles(r *http.Request, userID int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	serverID, target := path(r, "serverID"), path(r, "userID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +177,9 @@ func (s *Service) assignRoles(r *http.Request, userID int64) (any, error) {
 		if _, err = tx.ExecContext(r.Context(), `INSERT INTO member_roles(server_id,user_id,role_id) VALUES(?,?,?)`, serverID, target, id); err != nil {
 			return nil, err
 		}
+	}
+	if err = audit.Record(r.Context(), tx, serverID, userID, "member.permissions", "user", target, "", input); err != nil {
+		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -219,7 +233,7 @@ func (s *Service) roleGrants(r *http.Request, userID int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	serverID, cid := path(r, "serverID"), path(r, "channelID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +278,9 @@ func (s *Service) roleGrants(r *http.Request, userID int64) (any, error) {
 		if _, err = tx.ExecContext(r.Context(), `INSERT INTO channel_custom_role_grants(channel_id,role_id) VALUES(?,?) ON CONFLICT DO NOTHING`, cid, id); err != nil {
 			return nil, err
 		}
+	}
+	if err = audit.Record(r.Context(), tx, serverID, userID, "channel.permissions", "channel", cid, "", input); err != nil {
+		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err

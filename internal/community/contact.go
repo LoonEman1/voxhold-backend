@@ -12,6 +12,12 @@ func CanSend(ctx context.Context, db *sql.DB, id, userID int64) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := canSendTransaction(ctx, tx, id, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func canSendTransaction(ctx context.Context, tx *sql.Tx, id, userID int64) error {
 	if err := conversationAccess(ctx, tx, id, userID); err != nil {
 		return err
 	}
@@ -34,7 +40,11 @@ func CanSend(ctx context.Context, db *sql.DB, id, userID int64) error {
 	if err != nil {
 		return err
 	}
-	if len(ids) == 0 {
+	var saved bool
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(saved_owner_id=?,0) FROM conversations WHERE id=?`, userID, id).Scan(&saved); err != nil {
+		return err
+	}
+	if len(ids) == 0 && !saved {
 		return ErrForbidden
 	}
 	for _, uid := range ids {
@@ -42,5 +52,5 @@ func CanSend(ctx context.Context, db *sql.DB, id, userID int64) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
