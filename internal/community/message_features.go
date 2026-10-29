@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 func (s *Service) SetMessages(service *message.Service, copier func(context.Context, int64, string, string, int64, string) (string, error)) {
@@ -90,7 +91,7 @@ func (s *Service) hydrateDirect(ctx context.Context, tx *sql.Tx, uid int64, valu
 	return rows.Err()
 }
 func (s *Service) favorites(r *http.Request, uid int64) (any, error) {
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +173,7 @@ func (s *Service) directReaction(r *http.Request, uid int64) (any, error) {
 	if !message.ValidReaction(emoji) {
 		return nil, ErrInvalid
 	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}

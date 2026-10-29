@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 func messagePointers(values []message.Message) []*message.Message {
@@ -140,7 +141,7 @@ func (r *Repository) SetReaction(ctx context.Context, serverID, channelID, messa
 	if !message.ValidReaction(emoji) {
 		return message.ReactionState{}, false, message.ErrReactionInvalid
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return message.ReactionState{}, false, err
 	}

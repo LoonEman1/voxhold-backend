@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 	"voxhold-backend/internal/audit"
+	"voxhold-backend/internal/storage"
 )
 
 type Role struct {
@@ -62,7 +63,7 @@ func (s *Service) saveRole(r *http.Request, userID int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	serverID, id := path(r, "serverID"), path(r, "roleID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +109,7 @@ func (s *Service) rolesChanged(serverID int64) {
 }
 func (s *Service) deleteRole(r *http.Request, userID int64) (any, error) {
 	serverID := path(r, "serverID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +143,7 @@ func (s *Service) assignRoles(r *http.Request, userID int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	serverID, target := path(r, "serverID"), path(r, "userID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +233,7 @@ func (s *Service) roleGrants(r *http.Request, userID int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	serverID, cid := path(r, "serverID"), path(r, "channelID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}

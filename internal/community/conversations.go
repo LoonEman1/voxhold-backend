@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 // Contacts are checked both on creation and on every send. A shared room is
@@ -172,7 +173,7 @@ func (s *Service) createConversation(r *http.Request, userID int64) (any, error)
 	if len(input.UserIDs) < 1 || len(input.UserIDs) > 15 || utf8.RuneCountInString(input.Name) > 64 {
 		return nil, ErrInvalid
 	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +340,7 @@ func (s *Service) createDirect(ctx context.Context, id, userID int64, input Dire
 	if input.Content == "" || utf8.RuneCountInString(input.Content) > 5120 || len(input.ClientMessageID) < 1 || len(input.ClientMessageID) > 64 {
 		return nil, ErrInvalid
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, s.db)
 	if err != nil {
 		return nil, err
 	}

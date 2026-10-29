@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata"
+	"voxhold-backend/internal/storage"
 )
 
 type ServerEvent struct {
@@ -115,7 +116,7 @@ func (s *Service) saveEvent(r *http.Request, uid int64) (any, error) {
 		return nil, ErrInvalid
 	}
 	sid, eid := path(r, "serverID"), path(r, "eventID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +163,7 @@ func (s *Service) saveEvent(r *http.Request, uid int64) (any, error) {
 }
 func (s *Service) cancelEvent(r *http.Request, uid int64) (any, error) {
 	sid, eid := path(r, "serverID"), path(r, "eventID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +182,7 @@ func (s *Service) cancelEvent(r *http.Request, uid int64) (any, error) {
 }
 func (s *Service) eventResponse(r *http.Request, uid int64) (any, error) {
 	sid, eid := path(r, "serverID"), path(r, "eventID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}

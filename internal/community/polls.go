@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 func (s *Service) vote(r *http.Request, uid int64) (any, error) {
@@ -16,7 +17,7 @@ func (s *Service) vote(r *http.Request, uid int64) (any, error) {
 	if len(input.OptionIDs) > 10 {
 		return nil, ErrInvalid
 	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
 	if err != nil {
 		return nil, err
 	}
