@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"voxhold-backend/internal/audit"
 
 	"voxhold-backend/internal/channel"
 	"voxhold-backend/internal/message"
@@ -201,6 +202,14 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 		)
 	}
 
+	if err := message.StorePoll(ctx, tx, "channel", createdMessage.ID, input.Poll); err != nil {
+		return message.Message{}, err
+	}
+	polls, err := message.LoadPolls(ctx, tx, authorUserID, "channel", []int64{createdMessage.ID})
+	if err != nil {
+		return message.Message{}, err
+	}
+	createdMessage.Poll = polls[createdMessage.ID]
 	createdMessage.ThreadRootID = threadRoot
 	for _, id := range input.AttachmentIDs {
 		result, err := tx.ExecContext(ctx, `UPDATE attachments SET message_id=? WHERE id=? AND channel_id=? AND owner_user_id=? AND message_id IS NULL AND deleted_at IS NULL`, createdMessage.ID, id, channelID, authorUserID)
@@ -567,6 +576,11 @@ func (r *Repository) Delete(
 		return message.Message{}, message.ErrMessageNotFound
 	}
 
+	if deletedMessage.Author.UserID != userID || canModerate {
+		if err := audit.Record(ctx, tx, serverID, userID, "message.deleted", "message", messageID, "", map[string]any{"channel_id": channelID, "author_user_id": deletedMessage.Author.UserID}); err != nil {
+			return message.Message{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return message.Message{}, fmt.Errorf(
 			"commit delete message transaction: %w",

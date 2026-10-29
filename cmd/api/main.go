@@ -364,6 +364,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer attachmentService.Close()
+	communityService.SetMessages(messageService, attachmentService.Copy)
+	communityContext, stopCommunity := context.WithCancel(context.Background())
+	var communityWorker sync.WaitGroup
+	communityWorker.Add(1)
+	safego.Go("community/worker", func() { defer communityWorker.Done(); communityService.Run(communityContext) })
+	defer func() { stopCommunity(); communityWorker.Wait() }()
 
 	readEventPublisher :=
 		realtimeDomain.NewReadEventPublisher(realtimeHub)

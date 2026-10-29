@@ -47,6 +47,7 @@ var (
 )
 
 type CreateInput struct {
+	Poll             *PollInput
 	AttachmentIDs    []string
 	ThreadRootID     *int64
 	Content          string
@@ -56,6 +57,9 @@ type CreateInput struct {
 
 func (i CreateInput) Normalize() CreateInput {
 	i.Content = strings.TrimSpace(i.Content)
+	if i.Content == "" && i.Poll != nil {
+		i.Content = i.Poll.Question
+	}
 	if i.Content == "" && len(i.AttachmentIDs) > 0 {
 		i.Content = "\U0001f4ce"
 	}
@@ -64,6 +68,9 @@ func (i CreateInput) Normalize() CreateInput {
 }
 
 func (i CreateInput) Validate() error {
+	if err := i.Poll.Validate(); err != nil {
+		return err
+	}
 	if i.ThreadRootID != nil && *i.ThreadRootID <= 0 {
 		return ErrReplyInvalid
 	}

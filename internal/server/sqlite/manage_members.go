@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"voxhold-backend/internal/audit"
 
 	"voxhold-backend/internal/server"
 )
@@ -119,6 +120,9 @@ func (r *Repository) UpdateMemberRole(
 		return server.ServerMember{}, false, err
 	}
 
+	if err := audit.Record(ctx, tx, serverID, requesterUserID, "member.permissions", "user", targetUserID, member.Username, map[string]any{"role": role}); err != nil {
+		return server.ServerMember{}, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return server.ServerMember{}, false, fmt.Errorf(
 			"commit update member role transaction: %w",
@@ -243,6 +247,9 @@ func (r *Repository) BanMember(
 		return fmt.Errorf("revoke banned account access: %w", err)
 	}
 
+	if err := audit.Record(ctx, tx, serverID, requesterUserID, "member.banned", "user", targetUserID, "", nil); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf(
 			"commit ban member transaction: %w",

@@ -73,6 +73,19 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 			clientIP,
 		))
 
+		// SDP/ICE bursts are media signaling, rather than message writes. Keep a
+		// separate bounded IP bucket so joining a group call cannot exhaust the
+		// ordinary API budget. The route still performs normal authentication
+		// and validates both current call memberships and session identifiers.
+		if conversationCallSignal(r) {
+			if !g.limiters.allow("http:call-signal:"+clientIP, rate.Limit(g.config.CallSignalsPerSecond), g.config.CallSignalBurst) {
+				writeRateLimitError(w, time.Second)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if !g.limiters.allow(
 			"http:all:"+clientIP,
 			rate.Limit(g.config.HTTPRequestsPerSecond),
@@ -137,6 +150,22 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func conversationCallSignal(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/conversations/")
+	if !ok {
+		return false
+	}
+	id, ok := strings.CutSuffix(rest, "/call/signal")
+	if !ok {
+		return false
+	}
+	number, err := strconv.ParseInt(id, 10, 64)
+	return err == nil && number > 0
 }
 
 func (g *Guard) AllowLogin(

@@ -8,7 +8,10 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"voxhold-backend/internal/httpapi"
+	messageDomain "voxhold-backend/internal/message"
+	"voxhold-backend/internal/storagebudget"
 )
 
 var ErrForbidden = errors.New("access denied")
@@ -16,9 +19,12 @@ var ErrInvalid = errors.New("invalid request")
 var ErrConflict = errors.New("request conflicts with existing data")
 
 type Service struct {
-	db      *sql.DB
-	changed func(int64)
-	notify  func(int64, string, any)
+	db             *sql.DB
+	messages       *messageDomain.Service
+	copyAttachment func(context.Context, int64, string, string, int64, string) (string, error)
+	workMu         sync.Mutex
+	changed        func(int64)
+	notify         func(int64, string, any)
 }
 
 func New(db *sql.DB, changed func(int64), notify func(int64, string, any)) *Service {
@@ -38,13 +44,15 @@ func (s *Service) wrap(fn endpoint) http.HandlerFunc {
 		if err != nil {
 			code, message := 500, "internal server error"
 			switch {
-			case errors.Is(err, ErrForbidden):
+			case errors.Is(err, messageDomain.ErrForbidden), errors.Is(err, ErrForbidden):
 				code, message = 403, err.Error()
-			case errors.Is(err, ErrInvalid):
+			case errors.Is(err, messageDomain.ErrPollInvalid), errors.Is(err, messageDomain.ErrClientMessageIDInvalid), errors.Is(err, messageDomain.ErrForwardInvalid), errors.Is(err, messageDomain.ErrContentRequired), errors.Is(err, messageDomain.ErrContentTooLong), errors.Is(err, messageDomain.ErrReplyInvalid), errors.Is(err, ErrInvalid):
 				code, message = 400, err.Error()
-			case errors.Is(err, ErrConflict):
+			case errors.Is(err, messageDomain.ErrIdempotencyConflict), errors.Is(err, ErrConflict):
 				code, message = 409, err.Error()
-			case errors.Is(err, sql.ErrNoRows):
+			case errors.Is(err, storagebudget.ErrBudget):
+				code, message = 507, "Недостаточно места для копирования вложения"
+			case errors.Is(err, messageDomain.ErrMessageNotFound), errors.Is(err, messageDomain.ErrChannelNotFound), errors.Is(err, sql.ErrNoRows):
 				code, message = 404, "not found"
 			default:
 				log.Printf("community %s: %v", r.Pattern, err)
@@ -106,6 +114,7 @@ func accessible(ctx context.Context, q queryer, channelID, userID int64) error {
 	return nil
 }
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
+	s.registerFeatures(mux, auth)
 	routes := map[string]endpoint{
 		"GET /api/v1/servers/{serverID}/roles":                            s.roles,
 		"POST /api/v1/servers/{serverID}/roles":                           s.saveRole,

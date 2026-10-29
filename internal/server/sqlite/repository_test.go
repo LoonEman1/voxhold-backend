@@ -260,6 +260,20 @@ func openServerTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("create schema: %v", err)
 	}
 
+	if _, err := db.Exec(`CREATE TABLE admin_audit (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+ actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+ actor_name TEXT NOT NULL, action TEXT NOT NULL,
+ target_type TEXT NOT NULL, target_id INTEGER NOT NULL, target_name TEXT NOT NULL DEFAULT '',
+ details TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL DEFAULT(unixepoch())
+);
+CREATE INDEX admin_audit_server ON admin_audit(server_id,id DESC);
+CREATE INDEX admin_audit_actor ON admin_audit(server_id,actor_user_id,id DESC);
+CREATE INDEX admin_audit_action ON admin_audit(server_id,action,id DESC);
+`); err != nil {
+		t.Fatal(err)
+	}
 	return db
 }
 

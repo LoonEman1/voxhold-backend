@@ -15,7 +15,14 @@ func requestHash(input message.CreateInput, forward *message.ForwardInput) (stri
 	kind, source := "message", []byte(input.Content)
 	if forward != nil {
 		kind = "forward"
-		source, _ = json.Marshal([]int64{forward.SourceServerID, forward.SourceChannelID, forward.SourceMessageID})
+		if forward.SourceConversationID > 0 {
+			source, _ = json.Marshal([]any{"conversation", forward.SourceConversationID, forward.SourceMessageID})
+		} else {
+			source, _ = json.Marshal([]int64{forward.SourceServerID, forward.SourceChannelID, forward.SourceMessageID})
+		}
+		if len(input.AttachmentIDs) > 0 {
+			source, _ = json.Marshal([]any{string(source), input.AttachmentIDs})
+		}
 	} else if input.ReplyToMessageID != nil {
 		kind = "reply"
 		source, _ = json.Marshal([]any{input.Content, *input.ReplyToMessageID})
@@ -24,14 +31,36 @@ func requestHash(input message.CreateInput, forward *message.ForwardInput) (stri
 		kind = "reply"
 		source, _ = json.Marshal(map[string]any{"type": "thread", "content": input.Content, "reply": input.ReplyToMessageID, "root": *input.ThreadRootID})
 	}
-	if len(input.AttachmentIDs) > 0 {
+	if len(input.AttachmentIDs) > 0 && forward == nil {
 		kind = "reply"
 		source, _ = json.Marshal(map[string]any{"type": "attachment", "content": input.Content, "reply": input.ReplyToMessageID, "root": input.ThreadRootID, "ids": input.AttachmentIDs})
+	}
+	if input.Poll != nil {
+		kind = "reply"
+		source, _ = json.Marshal([]any{string(source), input.Poll})
 	}
 	return kind, fmt.Sprintf("%x", sha256.Sum256(source))
 }
 
 func forwardSnapshot(ctx context.Context, tx *sql.Tx, userID int64, input message.ForwardInput) (string, *message.ForwardReference, error) {
+	if input.SourceConversationID > 0 {
+		var content string
+		var snapshot message.ForwardReference
+		var stored sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT m.content,m.author_user_id,u.username,m.created_at,m.forward_data FROM conversation_messages m JOIN users u ON u.id=m.author_user_id WHERE m.id=? AND m.conversation_id=? AND EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=m.conversation_id AND user_id=?)`, input.SourceMessageID, input.SourceConversationID, userID).Scan(&content, &snapshot.Author.UserID, &snapshot.Author.Username, &snapshot.CreatedAt, &stored)
+		if err == sql.ErrNoRows {
+			return "", nil, message.ErrForbidden
+		}
+		if err != nil {
+			return "", nil, err
+		}
+		if stored.Valid {
+			if err = json.Unmarshal([]byte(stored.String), &snapshot); err != nil {
+				return "", nil, err
+			}
+		}
+		return content, &snapshot, nil
+	}
 	if err := requireInteraction(ctx, tx, input.SourceServerID, input.SourceChannelID, input.SourceMessageID, userID); err != nil {
 		return "", nil, err
 	}

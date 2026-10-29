@@ -90,19 +90,27 @@ type Conversation struct {
 	Direct  bool     `json:"direct"`
 	Members []Person `json:"members"`
 	Unread  int64    `json:"unread_count"`
+	Muted   bool     `json:"muted"`
+	Saved   bool     `json:"saved"`
 }
 type Person struct {
 	ID       int64  `json:"user_id"`
 	Username string `json:"username"`
 }
 type DirectMessage struct {
-	Attachments     []message.Attachment `json:"attachments,omitempty"`
-	ID              int64                `json:"id"`
-	ConversationID  int64                `json:"conversation_id"`
-	Author          Person               `json:"author"`
-	Content         string               `json:"content"`
-	ClientMessageID string               `json:"client_message_id"`
-	CreatedAt       int64                `json:"created_at"`
+	Poll              *message.Poll             `json:"poll,omitempty"`
+	Forward           *message.ForwardReference `json:"forward,omitempty"`
+	Note              string                    `json:"note,omitempty"`
+	Reactions         []message.Reaction        `json:"reactions"`
+	Revision          int64                     `json:"revision"`
+	ReactionsRevision int64                     `json:"reactions_revision"`
+	Attachments       []message.Attachment      `json:"attachments,omitempty"`
+	ID                int64                     `json:"id"`
+	ConversationID    int64                     `json:"conversation_id"`
+	Author            Person                    `json:"author"`
+	Content           string                    `json:"content"`
+	ClientMessageID   string                    `json:"client_message_id"`
+	CreatedAt         int64                     `json:"created_at"`
 }
 
 func (s *Service) conversations(r *http.Request, userID int64) (any, error) {
@@ -111,14 +119,14 @@ func (s *Service) conversations(r *http.Request, userID int64) (any, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(r.Context(), `SELECT c.id,c.name,c.direct_key IS NOT NULL,(SELECT count(*) FROM conversation_messages m WHERE m.conversation_id=c.id AND m.id>a.last_read_id AND m.author_user_id<>?) FROM conversations c JOIN conversation_members a ON a.conversation_id=c.id WHERE a.user_id=? ORDER BY COALESCE((SELECT max(id) FROM conversation_messages WHERE conversation_id=c.id),0) DESC,c.id DESC LIMIT 200`, userID, userID)
+	rows, err := tx.QueryContext(r.Context(), `SELECT c.id,c.name,c.direct_key IS NOT NULL,a.muted,c.saved_owner_id IS NOT NULL,(SELECT count(*) FROM conversation_messages m WHERE m.conversation_id=c.id AND m.id>a.last_read_id AND m.author_user_id<>?) FROM conversations c JOIN conversation_members a ON a.conversation_id=c.id WHERE a.user_id=? ORDER BY COALESCE((SELECT max(id) FROM conversation_messages WHERE conversation_id=c.id),0) DESC,c.id DESC LIMIT 200`, userID, userID)
 	if err != nil {
 		return nil, err
 	}
 	values := []Conversation{}
 	for rows.Next() {
 		v := Conversation{Members: []Person{}}
-		if err = rows.Scan(&v.ID, &v.Name, &v.Direct, &v.Unread); err != nil {
+		if err = rows.Scan(&v.ID, &v.Name, &v.Direct, &v.Muted, &v.Saved, &v.Unread); err != nil {
 			break
 		}
 		values = append(values, v)
@@ -231,7 +239,11 @@ func (s *Service) conversationMessages(r *http.Request, userID int64) (any, erro
 			return nil, ErrInvalid
 		}
 	}
-	rows, err := tx.QueryContext(r.Context(), `SELECT m.id,m.conversation_id,m.author_user_id,u.username,m.content,m.client_message_id,m.created_at FROM conversation_messages m JOIN users u ON u.id=m.author_user_id WHERE conversation_id=? AND m.id<? ORDER BY m.id DESC LIMIT 51`, id, cursor)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len([]rune(query)) > 200 {
+		return nil, ErrInvalid
+	}
+	rows, err := tx.QueryContext(r.Context(), `SELECT m.id,m.conversation_id,m.author_user_id,u.username,m.content,m.client_message_id,m.created_at,m.note,m.revision,m.forward_data FROM conversation_messages m JOIN users u ON u.id=m.author_user_id WHERE conversation_id=? AND m.id<? AND (?='' OR voxhold_contains(m.content||' '||m.note||' '||COALESCE((SELECT group_concat(a.filename,' ') FROM attachments a WHERE a.direct_message_id=m.id),''),?)) ORDER BY m.id DESC LIMIT 51`, id, cursor, query, query)
 	if err != nil {
 		return nil, err
 	}
@@ -239,8 +251,14 @@ func (s *Service) conversationMessages(r *http.Request, userID int64) (any, erro
 	values := []DirectMessage{}
 	for rows.Next() {
 		var v DirectMessage
-		if err := rows.Scan(&v.ID, &v.ConversationID, &v.Author.ID, &v.Author.Username, &v.Content, &v.ClientMessageID, &v.CreatedAt); err != nil {
+		var forward sql.NullString
+		if err := rows.Scan(&v.ID, &v.ConversationID, &v.Author.ID, &v.Author.Username, &v.Content, &v.ClientMessageID, &v.CreatedAt, &v.Note, &v.Revision, &forward); err != nil {
 			return nil, err
+		}
+		if forward.Valid {
+			if err := json.Unmarshal([]byte(forward.String), &v.Forward); err != nil {
+				return nil, err
+			}
 		}
 		values = append(values, v)
 	}
@@ -277,20 +295,39 @@ func (s *Service) conversationMessages(r *http.Request, userID int64) (any, erro
 	if err != nil {
 		return nil, err
 	}
+	if err = s.hydrateDirect(r.Context(), tx, userID, values); err != nil {
+		return nil, err
+	}
 	more := len(values) > 50
 	if more {
 		values = values[:50]
 	}
 	return map[string]any{"messages": values, "has_more": more}, nil
 }
+
+type DirectInput struct {
+	AttachmentIDs   []string                  `json:"attachment_ids"`
+	Content         string                    `json:"content"`
+	ClientMessageID string                    `json:"client_message_id"`
+	Poll            *message.PollInput        `json:"poll,omitempty"`
+	Forward         *message.ForwardReference `json:"-"`
+}
+
 func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
-	var input struct {
-		AttachmentIDs   []string `json:"attachment_ids"`
-		Content         string   `json:"content"`
-		ClientMessageID string   `json:"client_message_id"`
-	}
+	var input DirectInput
 	if err := decode(r, &input); err != nil {
 		return nil, err
+	}
+	return s.createDirect(r.Context(), path(r, "conversationID"), userID, input)
+}
+func (s *Service) createDirect(ctx context.Context, id, userID int64, input DirectInput) (any, error) {
+	if input.Poll != nil {
+		if err := input.Poll.Validate(); err != nil {
+			return nil, ErrInvalid
+		}
+		if strings.TrimSpace(input.Content) == "" {
+			input.Content = input.Poll.Question
+		}
 	}
 	input.Content = strings.TrimSpace(input.Content)
 	if len(input.AttachmentIDs) > 10 {
@@ -302,16 +339,15 @@ func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
 	if input.Content == "" || utf8.RuneCountInString(input.Content) > 5120 || len(input.ClientMessageID) < 1 || len(input.ClientMessageID) > 64 {
 		return nil, ErrInvalid
 	}
-	id := path(r, "conversationID")
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err = conversationAccess(r.Context(), tx, id, userID); err != nil {
+	if err = conversationAccess(ctx, tx, id, userID); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(r.Context(), `SELECT user_id FROM conversation_members WHERE conversation_id=?`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id=?`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -330,12 +366,16 @@ func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(ids) < 2 {
+	var saved bool
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(saved_owner_id=?,0) FROM conversations WHERE id=?`, userID, id).Scan(&saved); err != nil {
+		return nil, err
+	}
+	if len(ids) < 2 && !saved {
 		return nil, ErrForbidden
 	}
 	for _, uid := range ids {
 		if uid != userID {
-			if err = canContact(r.Context(), tx, userID, uid); err != nil {
+			if err = canContact(ctx, tx, userID, uid); err != nil {
 				return nil, err
 			}
 		}
@@ -345,24 +385,30 @@ func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
 	v.Author.ID = userID
 	v.ClientMessageID = input.ClientMessageID
 	encoded, _ := json.Marshal([]any{input.Content, input.AttachmentIDs})
+	if input.Poll != nil || input.Forward != nil {
+		encoded, _ = json.Marshal([]any{input.Content, input.AttachmentIDs, input.Poll, input.Forward})
+	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(encoded))
 	var original string
 	replayed := false
-	err = tx.QueryRowContext(r.Context(), `SELECT id,content,created_at,request_hash FROM conversation_messages WHERE conversation_id=? AND author_user_id=? AND client_message_id=?`, id, userID, input.ClientMessageID).Scan(&v.ID, &v.Content, &v.CreatedAt, &original)
+	err = tx.QueryRowContext(ctx, `SELECT id,content,created_at,revision,request_hash FROM conversation_messages WHERE conversation_id=? AND author_user_id=? AND client_message_id=?`, id, userID, input.ClientMessageID).Scan(&v.ID, &v.Content, &v.CreatedAt, &v.Revision, &original)
 	if err == nil {
 		replayed = true
 		if original != hash {
 			return nil, ErrConflict
 		}
 	} else if err == sql.ErrNoRows {
-		err = tx.QueryRowContext(r.Context(), `INSERT INTO conversation_messages(conversation_id,author_user_id,content,client_message_id,request_hash) VALUES(?,?,?,?,?) RETURNING id,content,created_at`, id, userID, input.Content, input.ClientMessageID, hash).Scan(&v.ID, &v.Content, &v.CreatedAt)
+		err = tx.QueryRowContext(ctx, `INSERT INTO conversation_messages(conversation_id,author_user_id,content,client_message_id,request_hash,forward_data) VALUES(?,?,?,?,?,?) RETURNING id,content,created_at,revision`, id, userID, input.Content, input.ClientMessageID, hash, forwardData(input.Forward)).Scan(&v.ID, &v.Content, &v.CreatedAt, &v.Revision)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if !replayed {
+		if err = message.StorePoll(ctx, tx, "conversation", v.ID, input.Poll); err != nil {
+			return nil, ErrInvalid
+		}
 		for _, aid := range input.AttachmentIDs {
-			result, err := tx.ExecContext(r.Context(), `UPDATE attachments SET direct_message_id=? WHERE id=? AND conversation_id=? AND owner_user_id=? AND direct_message_id IS NULL AND deleted_at IS NULL`, v.ID, aid, id, userID)
+			result, err := tx.ExecContext(ctx, `UPDATE attachments SET direct_message_id=? WHERE id=? AND conversation_id=? AND owner_user_id=? AND direct_message_id IS NULL AND deleted_at IS NULL`, v.ID, aid, id, userID)
 			if err != nil {
 				return nil, err
 			}
@@ -374,7 +420,7 @@ func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
 	}
 	// Return and broadcast the same complete message as history, including on
 	// retries after the original HTTP response was lost.
-	attached, err := tx.QueryContext(r.Context(), `SELECT id,filename,mime_type,size_bytes,deleted_at IS NOT NULL FROM attachments WHERE direct_message_id=? ORDER BY id`, v.ID)
+	attached, err := tx.QueryContext(ctx, `SELECT id,filename,mime_type,size_bytes,deleted_at IS NOT NULL FROM attachments WHERE direct_message_id=? ORDER BY id`, v.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -392,15 +438,24 @@ func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = tx.QueryRowContext(r.Context(), `SELECT username FROM users WHERE id=?`, userID).Scan(&v.Author.Username); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id=?`, userID).Scan(&v.Author.Username); err != nil {
 		return nil, err
 	}
+	v.Forward = input.Forward
+	values := []DirectMessage{v}
+	if err = s.hydrateDirect(ctx, tx, userID, values); err != nil {
+		return nil, err
+	}
+	v = values[0]
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	if !replayed {
 		for _, uid := range ids {
 			s.emit(uid, "conversation.message", v)
+			if uid != userID {
+				s.notifyConversation(ctx, uid, v)
+			}
 		}
 	}
 	return v, nil

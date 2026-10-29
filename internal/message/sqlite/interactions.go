@@ -115,6 +115,13 @@ func hydrateInteractions(ctx context.Context, tx *sql.Tx, userID int64, values [
 	if err != nil {
 		return err
 	}
+	polls, err := message.LoadPolls(ctx, tx, userID, "channel", ids)
+	if err != nil {
+		return err
+	}
+	for _, value := range values {
+		value.Poll = polls[value.ID]
+	}
 	return hydrateAttachments(ctx, tx, values)
 }
 
