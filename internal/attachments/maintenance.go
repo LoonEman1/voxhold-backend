@@ -40,7 +40,13 @@ func (s *Service) Cleanup(ctx context.Context) error {
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
-		if err == nil && messageID.Valid && !deleted.Valid {
+		var scheduled bool
+		if err == nil && !messageID.Valid && !deleted.Valid {
+			if e := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduled_messages s,json_each(s.payload,'$.attachment_ids') j WHERE s.status='pending' AND j.value=?)`, id).Scan(&scheduled); e != nil {
+				return e
+			}
+		}
+		if err == nil && (messageID.Valid || scheduled) && !deleted.Valid {
 			continue
 		}
 		if err = s.root.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {

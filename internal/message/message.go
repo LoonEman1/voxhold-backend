@@ -6,6 +6,7 @@ type Author struct {
 }
 
 type Message struct {
+	Poll        *Poll `json:"poll,omitempty"`
 	Attachments []Attachment
 	// Replayed send keys acknowledge the original message without alerting again.
 	Replayed          bool

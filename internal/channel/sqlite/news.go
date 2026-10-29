@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"voxhold-backend/internal/audit"
 	"voxhold-backend/internal/channel"
 )
 
@@ -88,6 +89,9 @@ func (r *Repository) SetNews(ctx context.Context, serverID, channelID, userID in
 	value, err = readNews(ctx, tx, channelID)
 	if err != nil {
 		return value, err
+	}
+	if err := audit.Record(ctx, tx, serverID, userID, "channel.permissions", "channel", channelID, "", value); err != nil {
+		return channel.NewsSettings{}, err
 	}
 	return value, tx.Commit()
 }

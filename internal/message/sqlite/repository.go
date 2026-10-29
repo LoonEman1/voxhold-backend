@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"voxhold-backend/internal/audit"
+	"voxhold-backend/internal/storage"
 
 	"voxhold-backend/internal/channel"
 	"voxhold-backend/internal/message"
@@ -40,7 +42,7 @@ func (r *Repository) CreateIdempotent(ctx context.Context, serverID, channelID, 
 func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, authorUserID int64, input message.CreateInput, forward *message.ForwardInput) (message.Message, error) {
 	content, clientMessageID := input.Content, input.ClientMessageID
 	kind, contentHash := requestHash(input, forward)
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return message.Message{}, fmt.Errorf(
 			"begin create message transaction: %w",
@@ -201,6 +203,16 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 		)
 	}
 
+	if err := message.StorePoll(ctx, tx, "channel", createdMessage.ID, input.Poll); err != nil {
+		return message.Message{}, err
+	}
+	if input.Poll != nil {
+		polls, err := message.LoadPolls(ctx, tx, authorUserID, "channel", []int64{createdMessage.ID})
+		if err != nil {
+			return message.Message{}, err
+		}
+		createdMessage.Poll = polls[createdMessage.ID]
+	}
 	createdMessage.ThreadRootID = threadRoot
 	for _, id := range input.AttachmentIDs {
 		result, err := tx.ExecContext(ctx, `UPDATE attachments SET message_id=? WHERE id=? AND channel_id=? AND owner_user_id=? AND message_id IS NULL AND deleted_at IS NULL`, createdMessage.ID, id, channelID, authorUserID)
@@ -215,8 +227,10 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 			return message.Message{}, message.ErrReplyInvalid
 		}
 	}
-	if err := hydrateAttachments(ctx, tx, []*message.Message{&createdMessage}); err != nil {
-		return message.Message{}, err
+	if len(input.AttachmentIDs) > 0 {
+		if err := hydrateAttachments(ctx, tx, []*message.Message{&createdMessage}); err != nil {
+			return message.Message{}, err
+		}
 	}
 	createdMessage.Reply = reply
 	createdMessage.Forward = forwarded
@@ -381,7 +395,7 @@ func (r *Repository) Update(
 	userID int64,
 	content string,
 ) (message.Message, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return message.Message{}, fmt.Errorf(
 			"begin update message transaction: %w",
@@ -503,7 +517,7 @@ func (r *Repository) Delete(
 	messageID int64,
 	userID int64,
 ) (message.Message, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return message.Message{}, fmt.Errorf(
 			"begin delete message transaction: %w",
@@ -567,6 +581,11 @@ func (r *Repository) Delete(
 		return message.Message{}, message.ErrMessageNotFound
 	}
 
+	if deletedMessage.Author.UserID != userID || canModerate {
+		if err := audit.Record(ctx, tx, serverID, userID, "message.deleted", "message", messageID, "", map[string]any{"channel_id": channelID, "author_user_id": deletedMessage.Author.UserID}); err != nil {
+			return message.Message{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return message.Message{}, fmt.Errorf(
 			"commit delete message transaction: %w",
@@ -584,7 +603,7 @@ func (r *Repository) Pin(
 	messageID int64,
 	userID int64,
 ) (message.PinnedMessage, bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return message.PinnedMessage{}, false, fmt.Errorf(
 			"begin pin message transaction: %w",
@@ -697,7 +716,7 @@ func (r *Repository) Unpin(
 	messageID int64,
 	userID int64,
 ) (bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return false, fmt.Errorf(
 			"begin unpin message transaction: %w",

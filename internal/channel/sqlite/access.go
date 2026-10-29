@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"voxhold-backend/internal/audit"
 
 	"voxhold-backend/internal/channel"
 	"voxhold-backend/internal/server"
@@ -138,6 +139,9 @@ func (r *Repository) SetAccess(ctx context.Context, serverID, channelID, userID 
 	}
 	result, err := readAccess(ctx, tx, channelID)
 	if err != nil {
+		return channel.Access{}, err
+	}
+	if err := audit.Record(ctx, tx, serverID, userID, "channel.permissions", "channel", channelID, "", value); err != nil {
 		return channel.Access{}, err
 	}
 	return result, tx.Commit()

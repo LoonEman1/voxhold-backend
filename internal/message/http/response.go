@@ -8,6 +8,7 @@ type authorResponse struct {
 }
 
 type messageResponse struct {
+	Poll              *message.Poll             `json:"poll,omitempty"`
 	Attachments       []message.Attachment      `json:"attachments,omitempty"`
 	ThreadRootID      *int64                    `json:"thread_root_id,omitempty"`
 	CommentCount      int64                     `json:"comment_count"`
@@ -29,6 +30,7 @@ func newMessageResponse(
 	value message.Message,
 ) messageResponse {
 	return messageResponse{
+		Poll:            value.Poll,
 		Attachments:     value.Attachments,
 		ClientMessageID: value.ClientMessageID,
 		ThreadRootID:    value.ThreadRootID, CommentCount: value.CommentCount,

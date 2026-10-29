@@ -153,11 +153,12 @@ func (h *Handler) RegisterRoutes(
 }
 
 type createRequest struct {
-	AttachmentIDs    []string `json:"attachment_ids,omitempty"`
-	ThreadRootID     *int64   `json:"thread_root_id,omitempty"`
-	Content          string   `json:"content"`
-	ClientMessageID  string   `json:"client_message_id,omitempty"`
-	ReplyToMessageID *int64   `json:"reply_to_message_id,omitempty"`
+	Poll             *message.PollInput `json:"poll,omitempty"`
+	AttachmentIDs    []string           `json:"attachment_ids,omitempty"`
+	ThreadRootID     *int64             `json:"thread_root_id,omitempty"`
+	Content          string             `json:"content"`
+	ClientMessageID  string             `json:"client_message_id,omitempty"`
+	ReplyToMessageID *int64             `json:"reply_to_message_id,omitempty"`
 }
 
 type updateRequest struct {
@@ -210,6 +211,7 @@ func (h *Handler) create(
 			ReplyToMessageID: request.ReplyToMessageID,
 			ThreadRootID:     request.ThreadRootID,
 			AttachmentIDs:    request.AttachmentIDs,
+			Poll:             request.Poll,
 		},
 	)
 	if err != nil {
@@ -218,7 +220,7 @@ func (h *Handler) create(
 			httpapi.WriteError(w, http.StatusConflict, message.ErrIdempotencyConflict.Error())
 		case errors.Is(err, message.ErrMessageNotFound):
 			httpapi.WriteError(w, http.StatusGone, "the original message was deleted")
-		case errors.Is(err, message.ErrReplyInvalid), errors.Is(err, message.ErrClientMessageIDInvalid), errors.Is(err, message.ErrContentRequired),
+		case errors.Is(err, message.ErrPollInvalid), errors.Is(err, message.ErrReplyInvalid), errors.Is(err, message.ErrClientMessageIDInvalid), errors.Is(err, message.ErrContentRequired),
 			errors.Is(err, message.ErrContentTooLong):
 
 			httpapi.WriteError(

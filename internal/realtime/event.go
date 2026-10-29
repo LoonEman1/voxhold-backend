@@ -92,6 +92,7 @@ type MessageAuthorData struct {
 }
 
 type MessageCreatedData struct {
+	Poll            *message.Poll             `json:"poll,omitempty"`
 	Attachments     []message.Attachment      `json:"attachments,omitempty"`
 	ThreadRootID    *int64                    `json:"thread_root_id,omitempty"`
 	CommentCount    int64                     `json:"comment_count"`

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"voxhold-backend/internal/audit"
 
 	"modernc.org/sqlite"
 	sqliteLib "modernc.org/sqlite/lib"
@@ -31,6 +32,12 @@ func (r *Repository) Create(
 	name string,
 	kind channel.Kind,
 ) (channel.Channel, error) {
+	tx, beginErr := r.db.BeginTx(ctx, nil)
+	if beginErr != nil {
+		return channel.Channel{}, beginErr
+	}
+	defer tx.Rollback()
+
 	isNews := kind == channel.KindNews
 	storageKind := kind
 	if isNews {
@@ -78,7 +85,7 @@ func (r *Repository) Create(
 
 	var createdChannel channel.Channel
 
-	err := r.db.QueryRowContext(
+	err := tx.QueryRowContext(
 		ctx,
 		query,
 		serverID,
@@ -121,6 +128,12 @@ func (r *Repository) Create(
 	}
 
 	createdChannel.CanPublish = true
+	if err := audit.Record(ctx, tx, serverID, userID, "channel.created", "channel", createdChannel.ID, createdChannel.Name, nil); err != nil {
+		return channel.Channel{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return channel.Channel{}, err
+	}
 	return createdChannel, nil
 }
 
@@ -265,6 +278,12 @@ func (r *Repository) Update(
 	userID int64,
 	name string,
 ) (channel.Channel, error) {
+	tx, beginErr := r.db.BeginTx(ctx, nil)
+	if beginErr != nil {
+		return channel.Channel{}, beginErr
+	}
+	defer tx.Rollback()
+
 	const query = `
 	UPDATE channels
 	SET name = ?
@@ -291,7 +310,7 @@ func (r *Repository) Update(
 
 	var updatedChannel channel.Channel
 
-	err := r.db.QueryRowContext(
+	err := tx.QueryRowContext(
 		ctx,
 		query,
 		name,
@@ -325,7 +344,7 @@ func (r *Repository) Update(
 
 			var exists bool
 
-			if err := r.db.QueryRowContext(
+			if err := tx.QueryRowContext(
 				ctx,
 				existsQuery,
 				channelID,
@@ -358,6 +377,12 @@ func (r *Repository) Update(
 		)
 	}
 
+	if err := audit.Record(ctx, tx, serverID, userID, "channel.updated", "channel", updatedChannel.ID, updatedChannel.Name, nil); err != nil {
+		return channel.Channel{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return channel.Channel{}, err
+	}
 	return updatedChannel, nil
 }
 
@@ -367,6 +392,12 @@ func (r *Repository) Delete(
 	channelID int64,
 	userID int64,
 ) (channel.Channel, error) {
+	tx, beginErr := r.db.BeginTx(ctx, nil)
+	if beginErr != nil {
+		return channel.Channel{}, beginErr
+	}
+	defer tx.Rollback()
+
 	const query = `
 	DELETE FROM channels
 	WHERE id = ?
@@ -392,7 +423,7 @@ func (r *Repository) Delete(
 
 	var deletedChannel channel.Channel
 
-	err := r.db.QueryRowContext(
+	err := tx.QueryRowContext(
 		ctx,
 		query,
 		channelID,
@@ -420,6 +451,12 @@ func (r *Repository) Delete(
 			)
 		}
 	} else {
+		if err := audit.Record(ctx, tx, serverID, userID, "channel.deleted", "channel", deletedChannel.ID, deletedChannel.Name, nil); err != nil {
+			return channel.Channel{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return channel.Channel{}, err
+		}
 		return deletedChannel, nil
 	}
 
@@ -434,7 +471,7 @@ func (r *Repository) Delete(
 
 	var exists bool
 
-	if err := r.db.QueryRowContext(
+	if err := tx.QueryRowContext(
 		ctx,
 		existsQuery,
 		channelID,

@@ -11,6 +11,11 @@ SQLite and is distributed as a multi-platform container image.
 
 ## Features
 
+Saved messages and notes, cross-scope forwarding, scheduled messages, polls,
+server events, administrative audit and personal calls are described in
+[the community features guide](docs/community-features.md). Requires migration **000031**.
+
+
 - invite-only registration and token-based sessions;
 - server membership, roles, bans and account deletion;
 - text, voice and news channels;

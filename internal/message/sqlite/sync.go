@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	"voxhold-backend/internal/storage"
 
 	"voxhold-backend/internal/message"
 )
@@ -122,7 +123,7 @@ func (r *Repository) PruneChanges(ctx context.Context) error {
 }
 
 func (r *Repository) pruneChangeBatch(ctx context.Context) (int, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := storage.BeginWrite(ctx, r.db)
 	if err != nil {
 		return 0, err
 	}
