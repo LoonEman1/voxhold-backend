@@ -196,8 +196,12 @@ func TestReadingDoesNotDisableAutoFollowAndExplicitOptOutSurvivesReplies(t *test
 func TestDirectAttachmentScopeAtomicBindingAndRetry(t *testing.T) {
 	f := setup(t)
 	events := 0
-	f.s.notify = func(_ int64, event string, _ any) {
+	f.s.notify = func(_ int64, event string, value any) {
 		if event == "conversation.message" {
+			m := value.(DirectMessage)
+			if len(m.Attachments) != 1 || m.Attachments[0].ID != "mine" {
+				t.Errorf("event omitted attachments: %+v", m)
+			}
 			events++
 		}
 	}
@@ -219,6 +223,12 @@ func TestDirectAttachmentScopeAtomicBindingAndRetry(t *testing.T) {
 	payload["attachment_ids"] = []string{"mine"}
 	first := f.call(t, 1, "POST", "/api/v1/conversations/1/messages", payload, 200)
 	again := f.call(t, 1, "POST", "/api/v1/conversations/1/messages", payload, 200)
+	for _, response := range []map[string]json.RawMessage{first, again} {
+		var attachments []message.Attachment
+		if err := json.Unmarshal(response["attachments"], &attachments); err != nil || len(attachments) != 1 || attachments[0].ID != "mine" || attachments[0].Deleted {
+			t.Fatalf("send/retry omitted attachment metadata: %s (%v)", response["attachments"], err)
+		}
+	}
 	if string(first["id"]) != string(again["id"]) || events != 2 {
 		t.Fatal("replayed file notified twice", events)
 	}
@@ -231,5 +241,23 @@ func TestDirectAttachmentScopeAtomicBindingAndRetry(t *testing.T) {
 	messages := page.(map[string]any)["messages"].([]DirectMessage)
 	if len(messages) != 1 || len(messages[0].Attachments) != 1 || messages[0].Attachments[0].ID != "mine" {
 		t.Fatal(messages)
+	}
+}
+
+func TestDirectRetryIncludesServerDeletedAttachmentPlaceholder(t *testing.T) {
+	f := setup(t)
+	f.call(t, 1, "POST", "/api/v1/me/conversations", map[string]any{"user_ids": []int64{2}}, 200)
+	if _, err := f.db.Exec(`INSERT INTO attachments(id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes) VALUES('deleted-file',1,1,'gone.txt','text/plain','files',4)`); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"content": "caption", "client_message_id": "deleted-retry", "attachment_ids": []string{"deleted-file"}}
+	f.call(t, 1, "POST", "/api/v1/conversations/1/messages", payload, 200)
+	if _, err := f.db.Exec(`UPDATE attachments SET deleted_at=1 WHERE id='deleted-file'`); err != nil {
+		t.Fatal(err)
+	}
+	replay := f.call(t, 1, "POST", "/api/v1/conversations/1/messages", payload, 200)
+	var attachments []message.Attachment
+	if err := json.Unmarshal(replay["attachments"], &attachments); err != nil || len(attachments) != 1 || !attachments[0].Deleted || attachments[0].Filename != "gone.txt" {
+		t.Fatalf("retry lost deleted placeholder: %s (%v)", replay["attachments"], err)
 	}
 }

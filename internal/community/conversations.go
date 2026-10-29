@@ -372,6 +372,26 @@ func (s *Service) sendConversation(r *http.Request, userID int64) (any, error) {
 			}
 		}
 	}
+	// Return and broadcast the same complete message as history, including on
+	// retries after the original HTTP response was lost.
+	attached, err := tx.QueryContext(r.Context(), `SELECT id,filename,mime_type,size_bytes,deleted_at IS NOT NULL FROM attachments WHERE direct_message_id=? ORDER BY id`, v.ID)
+	if err != nil {
+		return nil, err
+	}
+	for attached.Next() {
+		var a message.Attachment
+		if err = attached.Scan(&a.ID, &a.Filename, &a.MIMEType, &a.SizeBytes, &a.Deleted); err != nil {
+			break
+		}
+		v.Attachments = append(v.Attachments, a)
+	}
+	if err == nil {
+		err = attached.Err()
+	}
+	attached.Close()
+	if err != nil {
+		return nil, err
+	}
 	if err = tx.QueryRowContext(r.Context(), `SELECT username FROM users WHERE id=?`, userID).Scan(&v.Author.Username); err != nil {
 		return nil, err
 	}
