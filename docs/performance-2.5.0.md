@@ -54,6 +54,36 @@ v3 comparison measures compiler targeting and can be smaller than normal local
 run-to-run variation. Preserve raw samples/ranges, and do not infer Selectel
 performance or voice/video capacity from these text-message scenarios.
 
+### HTTP/fanout results
+
+Medians of three samples per variant, operations/second. The primary comparison
+uses the same v1 instruction set before and after the application changes.
+
+| Scenario | Before v1 | After v1 | Application change | After v3 |
+| --- | ---: | ---: | ---: | ---: |
+| Server list | 7051.32 | 7150.47 | +1.41% | 6953.25 |
+| History (50 messages) | 1402.86 | 1418.83 | +1.14% | 1406.97 |
+| Search | 627.05 | 639.63 | +2.01% | 643.78 |
+| Write, small server | 1027.12 | 1069.48 | +4.12% | 1071.91 |
+| Write, +1,000 members | 280.83 | 953.51 | +239.53% | 984.97 |
+| Full fanout, 100 sockets | 320.21 | 354.78 | +10.80% | 353.08 |
+| Full fanout, 1,000 sockets | 88.98 | 106.11 | +19.25% | 101.97 |
+| News, 1,000 notification writes, 1 worker | 28.28 | 26.94 | -4.72% | 28.52 |
+
+The main 63 samples completed 817,087 measured requests and delivered 9,628,300
+WebSocket events with zero errors. Write/+1,000 members P95 fell from 33.76 to
+13.54 ms; full 1,000-socket fanout P95 fell from 17.51 to 12.02 ms. Read scenarios
+changed only around 1–2%, comparable to local variation. v3 had no consistent
+universal advantage over the new v1 in these workloads.
+
+The dense news case is a separate nine-sample run with one worker; no errors
+occurred. It saves 1,000 actual notification rows per message and remains around
+27–29 messages/second. Its ranges overlap (v1 before 27.87–28.52, after
+25.66–28.50), so no dense-delivery improvement is claimed. An exploratory dense
+run with eight workers hit one five-second client timeout after the change;
+that saturation run is retained separately rather than included in the zero-error
+main sample count. The unchanged timeout was not raised to conceal the limit.
+
 ## Frontend
 
 The matching frontend report documents the stressed Chromium development fixture:
