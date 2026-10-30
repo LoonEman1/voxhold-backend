@@ -77,12 +77,17 @@ changed only around 1–2%, comparable to local variation. v3 had no consistent
 universal advantage over the new v1 in these workloads.
 
 The dense news case is a separate nine-sample run with one worker; no errors
-occurred. It saves 1,000 actual notification rows per message and remains around
+occurred. Each message targets 1,000 actual notification rows and throughput remains around
 27–29 messages/second. Its ranges overlap (v1 before 27.87–28.52, after
 25.66–28.50), so no dense-delivery improvement is claimed. An exploratory dense
 run with eight workers hit one five-second client timeout after the change;
-that saturation run is retained separately rather than included in the zero-error
-main sample count. The unchanged timeout was not raised to conceal the limit.
+that exploratory run is retained separately rather than included in the zero-error
+main sample count. A subsequent three-round saturated comparison recorded 4/487
+client timeouts before-v1, 0/574 after-v1 and 2/501 after-v3. Median successful
+throughput was 17.59, 20.58 and 17.31 requests/second respectively; P95 was about
+1.6–2.0 seconds. Server logs also showed notification transaction deadlines in
+both old and new code. These overloaded samples do not establish a compiler
+speedup. The unchanged five-second client timeout was not raised to conceal the limit.
 
 ## Frontend
 
