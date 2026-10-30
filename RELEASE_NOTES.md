@@ -1,3 +1,20 @@
+# Voxhold Backend 2.5.1
+
+Исправления и небольшие улучшения от 30 октября 2026 года. Совместный выпуск
+с frontend 2.5.1. Новых миграций нет; актуальная схема — **000031**.
+
+- Планировщик проверяет активность автора в транзакции отправки; бан отменяет
+  ожидающие сообщения и не позволяет доставить восстановленное задание.
+- Список бесед поддерживает курсорную пагинацию и открытие по ID; участники
+  загружаются одним запросом на страницу.
+- Универсальные карточки HTTPS-ссылок: Open Graph, Twitter Card, HTML metadata
+  и YouTube oEmbed, с серверными миниатюрами, лимитами, кэшем и защитой от SSRF.
+- Защищённый API не передаёт токены/куки внешним сайтам и не исполняет их HTML.
+
+Rechecks scheduled authors after bans, paginates conversation lists, and adds
+bounded public-HTTPS metadata/thumbnail endpoints. No database migration.
+Deploy backend before frontend. [Details and fetch policy](docs/link-previews.md).
+
 # Voxhold Backend 2.5.0
 
 Минорный релиз от 30 октября 2026 года. Новых миграций нет; схема остаётся 000031.

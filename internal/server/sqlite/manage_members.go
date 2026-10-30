@@ -250,6 +250,9 @@ func (r *Repository) BanMember(
 	if err := audit.Record(ctx, tx, serverID, requesterUserID, "member.banned", "user", targetUserID, "", nil); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET status='cancelled',error='' WHERE user_id=? AND status IN('pending','failed')`, targetUserID); err != nil {
+		return fmt.Errorf("cancel banned account scheduled messages: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf(
 			"commit ban member transaction: %w",

@@ -85,22 +85,22 @@ Compose-файл этого репозитория предназначен дл
 ## Образы, версии и обновление
 
 Backend и [frontend](https://github.com/LoonEman1/voxhold-frontend) выпускаются
-с общим номером **2.3.0**. Для этой версии нужны миграции **000027–000030**:
+с общим номером **2.5.1**. Для этой версии нужны миграции **000027–000031**:
 роли, подписки обсуждений, личные беседы и вложения. Сначала обновляется backend
 с миграциями, затем frontend. Перед обновлением сохраните проверенную резервную копию.
 Порядок и семантика миграций: [общение и управление 2.3](docs/community-2.3.md).
 
 ```bash
-docker pull ghcr.io/looneman1/voxhold-backend:2.3.0
+docker pull ghcr.io/looneman1/voxhold-backend:2.5.1
 ```
 
-Точный тег `2.3.0` обозначает релиз; `2.3` и `latest` перемещаются при следующих
+Точный тег `2.5.1` обозначает релиз; `2.5` и `latest` перемещаются при следующих
 публикациях. OCI digest является неизменяемой ссылкой. CI публикует образы для
 `linux/amd64` и `linux/arm64` с SBOM и provenance.
 
 Изменения проходят feature PR в `dev`, затем релизный PR `dev` → `main`.
 Новый `VERSION` в успешном main CI запускает публикацию образов, аннотированного
-тега `v2.3.0` и GitHub Release. Отдельно создавать тег не требуется; существующий
+тега `v2.5.1` и GitHub Release. Отдельно создавать тег не требуется; существующий
 релиз не перезаписывается. Подробности: [общий workflow](docs/release-workflow.md)
 и [описание релизов](RELEASE_NOTES.md).
 
@@ -108,7 +108,7 @@ docker pull ghcr.io/looneman1/voxhold-backend:2.3.0
 [Voxhold deploy](https://github.com/LoonEman1/voxhold-deploy/blob/main/README.ru.md):
 
 ```bash
-./update.sh --backend-version 2.3.0 --frontend-version 2.3.0
+./update.sh --backend-version 2.5.1 --frontend-version 2.5.1
 ```
 
 Команда запускается в каталоге deploy. Его Compose выполняет миграции до старта

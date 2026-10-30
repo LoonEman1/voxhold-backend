@@ -243,6 +243,10 @@ func openServerTestDB(t *testing.T) *sql.DB {
 		banned_by_user_id INTEGER NOT NULL REFERENCES users(id),
 		created_at INTEGER NOT NULL DEFAULT (unixepoch())
 	);
+	CREATE TABLE scheduled_messages (
+		id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
+		status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT ''
+	);
 
 	INSERT INTO users (username) VALUES ('owner');
 	INSERT INTO instance_settings (id, instance_id)

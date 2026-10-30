@@ -86,13 +86,14 @@ func (s *Service) block(r *http.Request, userID int64) (any, error) {
 }
 
 type Conversation struct {
-	ID      int64    `json:"id"`
-	Name    string   `json:"name"`
-	Direct  bool     `json:"direct"`
-	Members []Person `json:"members"`
-	Unread  int64    `json:"unread_count"`
-	Muted   bool     `json:"muted"`
-	Saved   bool     `json:"saved"`
+	LastMessageID int64    `json:"last_message_id"`
+	ID            int64    `json:"id"`
+	Name          string   `json:"name"`
+	Direct        bool     `json:"direct"`
+	Members       []Person `json:"members"`
+	Unread        int64    `json:"unread_count"`
+	Muted         bool     `json:"muted"`
+	Saved         bool     `json:"saved"`
 }
 type Person struct {
 	ID       int64  `json:"user_id"`
@@ -114,53 +115,6 @@ type DirectMessage struct {
 	CreatedAt         int64                     `json:"created_at"`
 }
 
-func (s *Service) conversations(r *http.Request, userID int64) (any, error) {
-	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	rows, err := tx.QueryContext(r.Context(), `SELECT c.id,c.name,c.direct_key IS NOT NULL,a.muted,c.saved_owner_id IS NOT NULL,(SELECT count(*) FROM conversation_messages m WHERE m.conversation_id=c.id AND m.id>a.last_read_id AND m.author_user_id<>?) FROM conversations c JOIN conversation_members a ON a.conversation_id=c.id WHERE a.user_id=? ORDER BY COALESCE((SELECT max(id) FROM conversation_messages WHERE conversation_id=c.id),0) DESC,c.id DESC LIMIT 200`, userID, userID)
-	if err != nil {
-		return nil, err
-	}
-	values := []Conversation{}
-	for rows.Next() {
-		v := Conversation{Members: []Person{}}
-		if err = rows.Scan(&v.ID, &v.Name, &v.Direct, &v.Muted, &v.Saved, &v.Unread); err != nil {
-			break
-		}
-		values = append(values, v)
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	for i := range values {
-		rows, err := tx.QueryContext(r.Context(), `SELECT u.id,u.username FROM conversation_members a JOIN users u ON u.id=a.user_id WHERE a.conversation_id=? ORDER BY u.id`, values[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var p Person
-			if err = rows.Scan(&p.ID, &p.Username); err != nil {
-				break
-			}
-			values[i].Members = append(values[i].Members, p)
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
-	}
-	return values, tx.Commit()
-}
 func (s *Service) createConversation(r *http.Request, userID int64) (any, error) {
 	var input struct {
 		Name    string  `json:"name"`
@@ -345,6 +299,9 @@ func (s *Service) createDirect(ctx context.Context, id, userID int64, input Dire
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err = activeSender(ctx, tx, userID); err != nil {
+		return nil, err
+	}
 	if err = conversationAccess(ctx, tx, id, userID); err != nil {
 		return nil, err
 	}
