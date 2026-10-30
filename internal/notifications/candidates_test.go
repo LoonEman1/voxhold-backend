@@ -16,11 +16,19 @@ func TestCandidateSelectionKeepsNewsThreadAndPermissionRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	var received []int64
-	service := NewService(db, func() []int64 { return []int64{1, 2, 3} }, func(id int64, _ Event) { received = append(received, id) }, nil)
+	service := NewService(db, func(id int64) bool { return id >= 1 && id <= 3 }, func(id int64, _ Event) { received = append(received, id) }, nil)
 	value := message.Message{ID: 51, ChannelID: 2, Author: message.Author{UserID: 1, Username: "owner"}, Content: "ordinary"}
 	check := func(want ...int64) {
 		t.Helper()
 		received = nil
+		result, err := db.Exec(`INSERT INTO messages(channel_id,author_user_id,content) VALUES(2,1,?)`, value.Content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value.ID, err = result.LastInsertId()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := service.Deliver(value); err != nil {
 			t.Fatal(err)
 		}

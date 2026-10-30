@@ -331,7 +331,7 @@ func main() {
 		realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventType(event), Data: value})
 	})
 
-	notificationService := notifications.NewService(db, realtimeHub.ConnectedUserIDs,
+	notificationService := notifications.NewService(db, realtimeHub.IsUserOnline,
 		func(userID int64, event notifications.Event) {
 			realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventNotificationMessage, Data: event})
 		},
@@ -339,13 +339,18 @@ func main() {
 			realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventNotificationSettingsUpdated, Data: value})
 		},
 	)
+	notificationContext, stopNotifications := context.WithCancel(context.Background())
+	var notificationWorker sync.WaitGroup
+	notificationWorker.Add(1)
+	safego.Go("notifications/worker", func() { defer notificationWorker.Done(); notificationService.Run(notificationContext) })
+	// Registered before other producers: their deferred shutdown runs first.
+	// HTTP shutdown completes before main returns and starts unwinding defers.
+	defer func() { stopNotifications(); notificationWorker.Wait() }()
 	messageEventPublisher.SetCreatedListener(func(value messageDomain.Message) {
 		if err := communityService.RecordThread(value); err != nil {
 			log.Printf("follow thread: %v", err)
 		}
-		if err := notificationService.Deliver(value); err != nil {
-			log.Printf("deliver message notification: %v", err)
-		}
+		notificationService.Enqueue(value)
 	})
 	messageRepository := messageSqlite.NewRepository(db)
 

@@ -22,7 +22,7 @@ func TestDeliveryModesMentionsRolesAccessAndReplay(t *testing.T) {
 	}
 	recipients := []int64{}
 	events := []Event{}
-	service := NewService(db, func() []int64 { return []int64{1, 2, 3, 4, 5} }, func(id int64, event Event) {
+	service := NewService(db, func(id int64) bool { return id >= 1 && id <= 5 }, func(id int64, event Event) {
 		// Publishing may re-enter SQLite; no open rows/transaction may hold the pool.
 		var count int
 		if err := db.QueryRow(`SELECT count(*) FROM users`).Scan(&count); err != nil {
@@ -35,7 +35,11 @@ func TestDeliveryModesMentionsRolesAccessAndReplay(t *testing.T) {
 		t.Helper()
 		recipients = nil
 		events = nil
-		if err := service.Deliver(message.Message{ID: 10, ChannelID: 2, Author: message.Author{UserID: 1, Username: "owner"}, Content: content}); err != nil {
+		value, err := messagesqlite.NewRepository(db).Create(ctx, 1, 2, 1, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Deliver(value); err != nil {
 			t.Fatal(err)
 		}
 		slices.Sort(recipients)
@@ -140,7 +144,7 @@ func TestIdempotentMessageRetryOnlyAlertsOnce(t *testing.T) {
 		t.Fatal("retry metadata")
 	}
 	count := 0
-	s := NewService(db, func() []int64 { return []int64{2} }, func(int64, Event) { count++ }, nil)
+	s := NewService(db, func(id int64) bool { return id == 2 }, func(int64, Event) { count++ }, nil)
 	if err := s.Deliver(created); err != nil {
 		t.Fatal(err)
 	}

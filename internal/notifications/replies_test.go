@@ -10,8 +10,11 @@ import (
 
 func TestRepliesNotifyTheirRecipientAndForwardsDoNotRepingQuotedMentions(t *testing.T) {
 	db := testdb.Open(t)
+	if _, err := db.Exec(`INSERT INTO messages(id,channel_id,author_user_id,content) VALUES(1,2,2,'answer'),(2,2,1,'quoted <@2> <@&member>')`); err != nil {
+		t.Fatal(err)
+	}
 	var received []Event
-	service := NewService(db, func() []int64 { return []int64{1, 2} }, func(_ int64, event Event) { received = append(received, event) }, nil)
+	service := NewService(db, func(id int64) bool { return id == 1 || id == 2 }, func(_ int64, event Event) { received = append(received, event) }, nil)
 	value := message.Message{ID: 1, ChannelID: 2, Author: message.Author{UserID: 2, Username: "member"}, Content: "answer", Reply: &message.ReplyReference{MessageID: 10, Author: message.Author{UserID: 1, Username: "owner"}}}
 	if err := service.Deliver(value); err != nil {
 		t.Fatal(err)

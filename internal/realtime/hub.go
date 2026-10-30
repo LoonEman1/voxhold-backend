@@ -149,6 +149,13 @@ func (h *Hub) ConnectedUserIDs() []int64 {
 	return ids
 }
 
+// IsUserOnline checks one account without allocating an instance-wide snapshot.
+func (h *Hub) IsUserOnline(userID int64) bool {
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	return len(h.clientsByUser[userID]) > 0
+}
+
 // CloseReasonServerShutdown marks connections closed by a server restart.
 // The WebSocket layer sends it with 1012 (Service Restart) so clients
 // reconnect and restore voice instead of treating it as an auth failure.
