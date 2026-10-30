@@ -51,6 +51,9 @@ type Service struct {
 	cleanupMu      sync.Mutex
 	cleanupCursor  string
 	uploads        chan struct{}
+	imageSlots     chan struct{}
+	uploadUsersMu  sync.Mutex
+	userUploads    map[int64]int
 	plans          map[string]Plan
 	recordings     *recordings.Service
 	changed        func(int64, int64, []string)
@@ -70,7 +73,7 @@ func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, i
 		root.Close()
 		return nil, err
 	}
-	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 2), thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
+	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 8), imageSlots: make(chan struct{}, 2), userUploads: make(map[int64]int), thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
 	state, err := storagebudget.Get(context.Background(), db, dir)
 	if err != nil {
 		root.Close()
@@ -184,10 +187,17 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "upload unavailable")
 		return
 	}
+	if !s.acquireUserUpload(uid) {
+		w.Header().Set("Retry-After", "2")
+		fail(w, 429, "uploads busy; retry shortly")
+		return
+	}
+	defer s.releaseUserUpload(uid)
 	select {
 	case s.uploads <- struct{}{}:
 		defer func() { <-s.uploads }()
 	default:
+		w.Header().Set("Retry-After", "2")
 		fail(w, 429, "uploads busy; retry shortly")
 		return
 	}
@@ -250,13 +260,21 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "upload unavailable")
 			return
 		}
-		compressed, typ, err := compressImage(file)
+		compressed, typ, err := s.compressUpload(r.Context(), file)
 		closeErr := file.Close()
 		if closeErr != nil {
 			fail(w, 500, "upload unavailable")
 			return
 		}
 		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			if errors.Is(err, errImageBusy) {
+				w.Header().Set("Retry-After", "2")
+				fail(w, 429, err.Error())
+				return
+			}
 			fail(w, 400, "invalid image or image exceeds 30 megapixels")
 			return
 		}
