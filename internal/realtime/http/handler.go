@@ -648,11 +648,14 @@ func (h *Handler) writeLoop(
 
 			telemetry.Observe(telemetry.WSQueue, event.QueueAge(), false)
 			writeStarted := time.Now()
-			err := wsjson.Write(
-				writeContext,
-				connection,
-				event,
-			)
+			data, shared, err := event.SharedJSON()
+			if err == nil {
+				if shared {
+					err = connection.Write(writeContext, websocket.MessageText, data)
+				} else {
+					err = wsjson.Write(writeContext, connection, event)
+				}
+			}
 
 			cancel()
 			telemetry.Observe(telemetry.WSWrite, time.Since(writeStarted), err != nil)

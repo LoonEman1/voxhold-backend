@@ -105,11 +105,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  container:
-    name: Build Docker image
+  container-variants:
+    name: Build Docker image (${{ matrix.goamd64 }})
     if: github.event_name == 'pull_request'
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goamd64: [v1, v3]
 
     permissions:
       contents: read
@@ -126,17 +129,56 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          build-args: GOAMD64=${{ matrix.goamd64 }}
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          tags: voxhold-backend:ci-${{ matrix.goamd64 }}
+          cache-from: type=gha,scope=amd64-${{ matrix.goamd64 }}
+          cache-to: type=gha,mode=max,scope=amd64-${{ matrix.goamd64 }}
           provenance: false
           sbom: false
 
+      - name: Check image CPU requirements without database access
+        env:
+          GOAMD64: ${{ matrix.goamd64 }}
+        run: |
+          if [ "$GOAMD64" = v3 ] && ! /lib64/ld-linux-x86-64.so.2 --help | grep -Fq 'x86-64-v3 (supported, searched)'; then
+            echo 'Runner lacks v3; image was built, execution is covered on compatible hosts.'
+            exit 0
+          fi
+          docker run --rm --network none --read-only voxhold-backend:ci-$GOAMD64 voxhold --check-cpu | grep -Fx "arch=amd64 level=$GOAMD64"
+          count=$(docker run --rm --entrypoint sh voxhold-backend:ci-$GOAMD64 -c 'find /usr/local/bin -name voxhold -type f | wc -l')
+          test "$count" -eq 1
+
+  container:
+    name: Build Docker image
+    if: always() && github.event_name == 'pull_request'
+    needs: container-variants
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.container-variants.result }}" = success
+
   publish:
-    name: Publish Docker image
+    name: Publish Docker image (${{ matrix.variant }})
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.release-plan.outputs.release == 'true'
     needs: [release-plan, test, test-race, test-leaks]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: portable
+            goamd64: v1
+            platforms: linux/amd64,linux/arm64
+            suffix: ''
+          - variant: amd64-v1
+            goamd64: v1
+            platforms: linux/amd64
+            suffix: '-amd64-v1'
+          - variant: amd64-v3
+            goamd64: v3
+            platforms: linux/amd64
+            suffix: '-amd64-v3'
 
     permissions:
       contents: read
@@ -158,9 +200,9 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.release-plan.outputs.version }},priority=900
-            type=raw,value=${{ needs.release-plan.outputs.minor }},priority=800
-            type=raw,value=latest,priority=700
+            type=raw,value=${{ needs.release-plan.outputs.version }}${{ matrix.suffix }},priority=900
+            type=raw,value=${{ needs.release-plan.outputs.minor }}${{ matrix.suffix }},priority=800
+            type=raw,value=latest${{ matrix.suffix }},priority=700
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -173,14 +215,15 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
+          build-args: GOAMD64=${{ matrix.goamd64 }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
             org.opencontainers.image.licenses=AGPL-3.0-only
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
           provenance: mode=max
           sbom: true
 

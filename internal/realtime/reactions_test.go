@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"voxhold-backend/internal/channel"
@@ -48,6 +49,13 @@ func TestReactionBroadcastPersonalizesTabsAndPurgesRevokedQueues(t *testing.T) {
 		data := event.Data.(message.ReactionsData)
 		if len(data.Reactions) != 1 || data.Reactions[0].Me != (client.UserID() == 2) {
 			t.Fatalf("wrong recipient selection: %#v", data)
+		}
+		encoded, shared, err := event.SharedJSON()
+		var wire struct {
+			Data message.ReactionsData `json:"data"`
+		}
+		if err != nil || !shared || json.Unmarshal(encoded, &wire) != nil || wire.Data.Reactions[0].Me != (client.UserID() == 2) {
+			t.Fatalf("personalized encoding leaked across users: %s, %v", encoded, err)
 		}
 	}
 	if _, err = service.SetReaction(ctx, 1, 2, value.ID, 2, "❤️", true); err != nil {
