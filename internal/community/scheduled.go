@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 type Scheduled struct {
@@ -57,13 +58,17 @@ func (s *Service) validateSchedule(ctx context.Context, uid int64, v *Scheduled)
 	if v.Payload.Poll != nil && v.Payload.Poll.ClosesAt <= v.SendAt {
 		return ErrInvalid
 	}
+	return validateScheduleAttachments(ctx, s.db, uid, v)
+}
+
+func validateScheduleAttachments(ctx context.Context, q queryer, uid int64, v *Scheduled) error {
 	for _, id := range v.Payload.AttachmentIDs {
 		var valid bool
 		column := "channel_id"
 		if v.Destination.Kind == "conversation" {
 			column = "conversation_id"
 		}
-		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE id=? AND owner_user_id=? AND `+column+`=? AND message_id IS NULL AND direct_message_id IS NULL AND deleted_at IS NULL)`, id, uid, v.Destination.ID).Scan(&valid)
+		err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE id=? AND owner_user_id=? AND `+column+`=? AND message_id IS NULL AND direct_message_id IS NULL AND deleted_at IS NULL)`, id, uid, v.Destination.ID).Scan(&valid)
 		if err != nil {
 			return err
 		}
@@ -114,7 +119,21 @@ func (s *Service) schedule(r *http.Request, uid int64) (any, error) {
 	}
 	data, _ := json.Marshal(v.Payload)
 	v.Status = "pending"
-	err := s.db.QueryRowContext(r.Context(), `INSERT INTO scheduled_messages(user_id,destination_kind,destination_id,payload,send_at) VALUES(?,?,?,?,?) RETURNING id`, uid, v.Destination.Kind, v.Destination.ID, string(data), v.SendAt).Scan(&v.ID)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = activeActor(r.Context(), tx, uid); err != nil {
+		return nil, err
+	}
+	if err = validateScheduleAttachments(r.Context(), tx, uid, &v); err != nil {
+		return nil, err
+	}
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO scheduled_messages(user_id,destination_kind,destination_id,payload,send_at) VALUES(?,?,?,?,?) RETURNING id`, uid, v.Destination.Kind, v.Destination.ID, string(data), v.SendAt).Scan(&v.ID)
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err == nil {
 		s.emit(uid, "conversation.scheduled", v)
 	}
@@ -146,13 +165,27 @@ func (s *Service) reschedule(r *http.Request, uid int64) (any, error) {
 		return nil, err
 	}
 	data, _ := json.Marshal(v.Payload)
-	res, err := s.db.ExecContext(r.Context(), `UPDATE scheduled_messages SET payload=?,destination_kind=?,destination_id=?,send_at=?,status='pending',error='',attempts=0,next_attempt_at=0 WHERE id=? AND user_id=? AND status IN('pending','failed')`, string(data), v.Destination.Kind, v.Destination.ID, v.SendAt, path(r, "scheduleID"), uid)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = activeActor(r.Context(), tx, uid); err != nil {
+		return nil, err
+	}
+	if err = validateScheduleAttachments(r.Context(), tx, uid, &v); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(r.Context(), `UPDATE scheduled_messages SET payload=?,destination_kind=?,destination_id=?,send_at=?,status='pending',error='',attempts=0,next_attempt_at=0 WHERE id=? AND user_id=? AND status IN('pending','failed')`, string(data), v.Destination.Kind, v.Destination.ID, v.SendAt, path(r, "scheduleID"), uid)
 	if err != nil {
 		return nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
 		return nil, sql.ErrNoRows
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
 	}
 	v.ID = path(r, "scheduleID")
 	v.Status = "pending"
