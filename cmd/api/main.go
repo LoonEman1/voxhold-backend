@@ -406,17 +406,11 @@ func main() {
 		timer := time.NewTicker(time.Minute)
 		defer timer.Stop()
 		for {
-			ctx, cancel := context.WithTimeout(maintenanceContext, 2*time.Second)
-			if err := diagnosticsRepository.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
-				log.Printf("diagnostic cleanup: %v", err)
-			}
-			if err := attachmentService.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
-				log.Printf("attachment cleanup: %v", err)
-			}
-			if err := messageRepository.PruneChanges(ctx); err != nil && maintenanceContext.Err() == nil {
-				log.Printf("message journal cleanup: %v", err)
-			}
-			cancel()
+			runStorageMaintenance(maintenanceContext,
+				maintenanceTask{"diagnostic", 2 * time.Second, diagnosticsRepository.Cleanup},
+				maintenanceTask{"attachment", 5 * time.Second, attachmentService.Cleanup},
+				maintenanceTask{"message journal", 2 * time.Second, messageRepository.PruneChanges},
+			)
 			sessionCtx, cancelSessions := context.WithTimeout(maintenanceContext, 2*time.Second)
 			if _, err := sessionRepository.DeleteExpired(sessionCtx, time.Now().Unix(), 256); err != nil && maintenanceContext.Err() == nil {
 				log.Printf("expired session cleanup: %v", err)

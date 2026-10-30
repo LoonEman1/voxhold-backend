@@ -47,6 +47,8 @@ type Service struct {
 	root           *os.Root
 	directory      string
 	mu             sync.Mutex
+	cleanupMu      sync.Mutex
+	cleanupCursor  string
 	uploads        chan struct{}
 	plans          map[string]Plan
 	recordings     *recordings.Service
