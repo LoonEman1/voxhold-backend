@@ -616,6 +616,11 @@ func (h *Handler) writeLoop(
 ) error {
 	pingTicker := time.NewTicker(pingInterval)
 	defer pingTicker.Stop()
+	return h.writeLoopWithPings(ctx, connection, client, sessionToken, pingTicker.C)
+}
+
+func (h *Handler) writeLoopWithPings(ctx context.Context, connection *websocket.Conn, client *realtime.Client, sessionToken string, pings <-chan time.Time) error {
+	authFailures := 0
 	defer func() {
 		stats := client.QueueStats()
 		if stats.Resyncs > 0 || stats.Coalesced > 0 {
@@ -664,39 +669,30 @@ func (h *Handler) writeLoop(
 				return err
 			}
 
-		case <-pingTicker.C:
-			pingContext, cancel :=
-				context.WithTimeout(
-					ctx,
-					writeTimeout,
-				)
-
-			authenticatedUserID, err :=
-				h.authenticator.Authenticate(
-					pingContext,
-					sessionToken,
-				)
-
-			if err == nil &&
-				authenticatedUserID != client.UserID() {
-
-				err = account.ErrUnauthorized
-			}
-
-			if err == nil {
-				err = connection.Ping(pingContext)
-			}
-
+		case <-pings:
+			authContext, cancel := context.WithTimeout(ctx, writeTimeout)
+			authenticatedUserID, err := h.authenticator.Authenticate(authContext, sessionToken)
 			cancel()
-
-			if errors.Is(err, account.ErrUnauthorized) {
-				_ = connection.Close(
-					websocket.StatusPolicyViolation,
-					"session expired or revoked",
-				)
+			if errors.Is(err, account.ErrUnauthorized) || (err == nil && authenticatedUserID != client.UserID()) {
+				_ = connection.Close(websocket.StatusPolicyViolation, "session expired or revoked")
 				return nil
 			}
-
+			if err != nil {
+				authFailures++
+				if authFailures == 1 {
+					log.Printf("websocket session recheck temporarily unavailable: %v", err)
+				}
+				if authFailures >= 3 {
+					_ = connection.Close(websocket.StatusTryAgainLater, "session check temporarily unavailable")
+					return nil
+				}
+			} else {
+				authFailures = 0
+			}
+			// An authentication timeout must not consume the transport ping budget.
+			pingContext, cancel := context.WithTimeout(ctx, writeTimeout)
+			err = connection.Ping(pingContext)
+			cancel()
 			if err != nil {
 				return err
 			}
@@ -710,6 +706,8 @@ func (h *Handler) handleIncomingEvent(
 	event realtime.IncomingEvent,
 ) error {
 	switch event.Type {
+	case realtime.EventPing:
+		return queueEvent(client, realtime.OutgoingEvent{RequestID: event.RequestID, Type: realtime.EventPong})
 	case realtime.EventChannelSubscribe:
 		return h.subscribeToChannel(
 			ctx,
