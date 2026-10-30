@@ -46,7 +46,7 @@ func (s *Service) wrap(fn endpoint) http.HandlerFunc {
 			switch {
 			case errors.Is(err, messageDomain.ErrForbidden), errors.Is(err, ErrForbidden):
 				code, message = 403, err.Error()
-			case errors.Is(err, messageDomain.ErrPollInvalid), errors.Is(err, messageDomain.ErrClientMessageIDInvalid), errors.Is(err, messageDomain.ErrForwardInvalid), errors.Is(err, messageDomain.ErrContentRequired), errors.Is(err, messageDomain.ErrContentTooLong), errors.Is(err, messageDomain.ErrReplyInvalid), errors.Is(err, ErrInvalid):
+			case errors.Is(err, messageDomain.ErrPollInvalid), errors.Is(err, messageDomain.ErrClientMessageIDInvalid), errors.Is(err, messageDomain.ErrForwardInvalid), errors.Is(err, messageDomain.ErrContentRequired), errors.Is(err, messageDomain.ErrContentTooLong), errors.Is(err, messageDomain.ErrContentInvalid), errors.Is(err, messageDomain.ErrReplyInvalid), errors.Is(err, ErrInvalid):
 				code, message = 400, err.Error()
 			case errors.Is(err, messageDomain.ErrIdempotencyConflict), errors.Is(err, ErrConflict):
 				code, message = 409, err.Error()

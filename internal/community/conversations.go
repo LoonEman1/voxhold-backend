@@ -337,7 +337,7 @@ func (s *Service) createDirect(ctx context.Context, id, userID int64, input Dire
 	if input.Content == "" && len(input.AttachmentIDs) > 0 {
 		input.Content = "\U0001f4ce"
 	}
-	if input.Content == "" || utf8.RuneCountInString(input.Content) > 5120 || len(input.ClientMessageID) < 1 || len(input.ClientMessageID) > 64 {
+	if strings.ContainsRune(input.Content, '\x00') || input.Content == "" || utf8.RuneCountInString(input.Content) > 5120 || len(input.ClientMessageID) < 1 || len(input.ClientMessageID) > 64 {
 		return nil, ErrInvalid
 	}
 	tx, err := storage.BeginWrite(ctx, s.db)
