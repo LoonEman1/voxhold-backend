@@ -132,6 +132,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) htt
 		"PUT /api/v1/me/message-privacy":                                  s.privacy,
 		"PUT /api/v1/me/blocks/{userID}":                                  s.block,
 		"DELETE /api/v1/me/blocks/{userID}":                               s.block,
+		"GET /api/v1/conversations/{conversationID}":                      s.conversation,
 		"GET /api/v1/me/conversations":                                    s.conversations,
 		"POST /api/v1/me/conversations":                                   s.createConversation,
 		"GET /api/v1/conversations/{conversationID}/messages":             s.conversationMessages,

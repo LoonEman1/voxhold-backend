@@ -18,6 +18,9 @@ func CanSend(ctx context.Context, db *sql.DB, id, userID int64) error {
 	return tx.Commit()
 }
 func canSendTransaction(ctx context.Context, tx *sql.Tx, id, userID int64) error {
+	if err := activeSender(ctx, tx, userID); err != nil {
+		return err
+	}
 	if err := conversationAccess(ctx, tx, id, userID); err != nil {
 		return err
 	}
@@ -51,6 +54,20 @@ func canSendTransaction(ctx context.Context, tx *sql.Tx, id, userID int64) error
 		if err := canContact(ctx, tx, userID, uid); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Workers do not pass through HTTP authentication. Check the author in the
+// same transaction as delivery so a concurrent ban cannot leave a valid send.
+func activeSender(ctx context.Context, q queryer, userID int64) error {
+	var active bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=users.id))`, userID).Scan(&active)
+	if err != nil {
+		return err
+	}
+	if !active {
+		return ErrForbidden
 	}
 	return nil
 }
