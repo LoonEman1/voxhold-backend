@@ -43,9 +43,9 @@ func TestDiagnosticStorageBoundAndCountSurviveEvictionAndCleanup(t *testing.T) {
 	if err := repo.Cleanup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assertCount(diagnostics.MaxStoredEvents - 500)
+	assertCount(diagnostics.MaxStoredEvents - 2000)
 	if _, err := db.Exec("DELETE FROM client_diagnostic_events WHERE user_id = 1"); err != nil {
 		t.Fatal(err)
 	}
-	assertCount(diagnostics.MaxStoredEvents - 500 - diagnostics.MaxBatchEvents)
+	assertCount(diagnostics.MaxStoredEvents - 2000 - diagnostics.MaxBatchEvents)
 }

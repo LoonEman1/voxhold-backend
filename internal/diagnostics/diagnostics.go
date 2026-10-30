@@ -12,7 +12,7 @@ const (
 	Retention          = 24 * time.Hour
 	MaxBatchEvents     = 64
 	MaxDetailsBytes    = 4 * 1024
-	MaxEventsPerUser   = 10_000
+	MaxEventsPerUser   = 2_000
 	MaxStoredEvents    = 50_000
 	DefaultListLimit   = 1_000
 	MaxListLimit       = 5_000
