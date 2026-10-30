@@ -50,6 +50,7 @@ type IncomingEvent struct {
 
 type OutgoingEvent struct {
 	queuedAt  time.Time
+	encoding  *eventEncoding
 	RequestID string    `json:"request_id,omitempty"`
 	Type      EventType `json:"type"`
 	Data      any       `json:"data,omitempty"`

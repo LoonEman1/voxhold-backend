@@ -690,6 +690,7 @@ func (h *Hub) broadcastToClients(
 	clients []*Client,
 	event OutgoingEvent,
 ) int {
+	event = event.shareEncoding()
 	delivered := make(
 		map[*Client]struct{},
 		len(clients),
@@ -759,6 +760,7 @@ func (h *Hub) Publish(
 
 	// A room snapshot is already unique; keep the ordinary publish path free
 	// of the deduplication map used by broadcasts to merged recipient lists.
+	event = event.shareEncoding()
 	delivered := 0
 	var failed []*Client
 	for _, client := range room.snapshot() {

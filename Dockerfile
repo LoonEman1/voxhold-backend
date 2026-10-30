@@ -2,9 +2,9 @@ ARG GO_VERSION=1.27.3
 
 FROM golang:${GO_VERSION}-alpine AS builder
 
-# Keep published images portable; self-hosted builds may opt into v2.
+# Each image contains one CPU variant. Published portable tags use v1.
 ARG GOAMD64=v1
-ENV GOAMD64=${GOAMD64}
+ARG PGO=auto
 
 WORKDIR /src
 
@@ -12,21 +12,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 RUN mkdir -p /out && \
-    CGO_ENABLED=0 GOBIN=/out go install \
+    CGO_ENABLED=0 GOAMD64=v1 GOBIN=/out go install \
     -tags sqlite \
     github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -o /out/voxhold \
-    ./cmd/api
-
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -o /out/voxhold-bootstrap \
-    ./cmd/bootstrap
+RUN GOAMD64=${GOAMD64} PGO=${PGO} sh scripts/build-linux.sh /out
 
 
 FROM alpine:3.22
@@ -35,6 +27,7 @@ WORKDIR /app
 
 LABEL org.opencontainers.image.source="https://github.com/LoonEman1/voxhold-backend"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
+LABEL io.voxhold.cpu-check="1"
 
 RUN addgroup -S -g 10001 voxhold && \
     adduser -S -D -H -u 10001 -G voxhold voxhold && \

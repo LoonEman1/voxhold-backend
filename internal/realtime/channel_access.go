@@ -188,12 +188,15 @@ func (c *Client) filterChannelEvent(event OutgoingEvent) (OutgoingEvent, bool) {
 	case recordings.Record:
 		id = data.ChannelID
 	case VoiceSnapshotData:
+		event.encoding = nil
 		data.Participants = slices.DeleteFunc(slices.Clone(data.Participants), func(p VoiceParticipantData) bool { return !c.canAccessChannel(p.ChannelID) })
 		event.Data = data
 	case StreamSnapshotData:
+		event.encoding = nil
 		data.Streams = slices.DeleteFunc(slices.Clone(data.Streams), func(s StreamData) bool { return !c.canAccessChannel(s.ChannelID) })
 		event.Data = data
 	case ReadSnapshotData:
+		event.encoding = nil
 		data.Reads = slices.DeleteFunc(slices.Clone(data.Reads), func(r ChannelReadData) bool { return !c.canAccessChannel(r.ChannelID) })
 		event.Data = data
 	}

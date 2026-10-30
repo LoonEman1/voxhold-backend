@@ -148,17 +148,63 @@ func (s *Service) Deliver(value message.Message) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT a.user_id,u.username,m.role,COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END),c.server_id,c.name,s.name,
- EXISTS(SELECT 1 FROM thread_subscriptions t WHERE t.message_id=? AND t.user_id=a.user_id AND t.following=1)
- FROM channel_accessible_members a
- JOIN channels c ON c.id=a.channel_id AND c.kind='text'
- JOIN servers s ON s.id=c.server_id
- JOIN server_members m ON m.server_id=c.server_id AND m.user_id=a.user_id
- JOIN users u ON u.id=a.user_id
- LEFT JOIN channel_notification_settings n ON n.channel_id=c.id AND n.user_id=a.user_id
- WHERE a.channel_id=? AND a.user_id<>? AND u.deleted_at IS NULL
-   AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=u.id)
-   AND COALESCE(n.mode,CASE WHEN c.is_news=1 THEN 'all' ELSE 'mentions' END)<>'none'`, value.ThreadRootID,value.ChannelID, value.Author.UserID)
+	var base Event
+	var news bool
+	var kind string
+	err = tx.QueryRowContext(ctx, `SELECT c.kind,c.is_news,c.server_id,c.name,s.name
+ FROM channels c JOIN servers s ON s.id=c.server_id WHERE c.id=?`, value.ChannelID).Scan(&kind, &news, &base.ServerID, &base.ChannelName, &base.ServerName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("notification channel: %w", err)
+	}
+	if kind != "text" {
+		return nil
+	}
+	users := make([]int64, 0, len(targets.Users)+1)
+	names := make([]string, 0, len(targets.Names))
+	roles := make([]string, 0, len(targets.Roles))
+	if value.Forward == nil {
+		for id := range targets.Users {
+			users = append(users, id)
+		}
+		for name := range targets.Names {
+			names = append(names, name)
+		}
+		for role := range targets.Roles {
+			roles = append(roles, role)
+		}
+		if value.Reply != nil && !value.Reply.Deleted {
+			users = append(users, value.Reply.Author.UserID)
+		}
+	}
+	userJSON, _ := json.Marshal(users)
+	nameJSON, _ := json.Marshal(names)
+	roleJSON, _ := json.Marshal(roles)
+	// Start from indexed candidate sets instead of scanning every channel member
+	// for an ordinary message with no mentions. The final ACL/settings predicates
+	// still apply inside the same transaction, including explicit opt-outs.
+	rows, err := tx.QueryContext(ctx, `WITH candidates(user_id) AS (
+ SELECT user_id FROM server_members WHERE server_id=? AND ?
+ UNION SELECT user_id FROM channel_notification_settings WHERE channel_id=? AND mode='all' AND ?
+ UNION SELECT CAST(value AS INTEGER) FROM json_each(?)
+ UNION SELECT id FROM users WHERE username IN (SELECT value FROM json_each(?))
+ UNION SELECT user_id FROM server_members WHERE server_id=? AND role IN (SELECT value FROM json_each(?))
+ UNION SELECT user_id FROM thread_subscriptions WHERE message_id=? AND following=1
+ )
+ SELECT u.id,u.username,m.role,COALESCE(n.mode,?),
+ EXISTS(SELECT 1 FROM thread_subscriptions t WHERE t.message_id=? AND t.user_id=u.id AND t.following=1)
+ FROM candidates candidate CROSS JOIN users u ON u.id=candidate.user_id
+ CROSS JOIN server_members m ON m.server_id=? AND m.user_id=u.id
+ LEFT JOIN channel_notification_settings n ON n.channel_id=? AND n.user_id=u.id
+ WHERE u.id<>? AND u.deleted_at IS NULL
+ AND COALESCE(n.mode,?)<>'none'
+ AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=? AND a.user_id=u.id)
+ AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=u.id)`,
+		base.ServerID, news && value.ThreadRootID == nil, value.ChannelID, value.ThreadRootID == nil,
+		string(userJSON), string(nameJSON), base.ServerID, string(roleJSON), value.ThreadRootID,
+		defaultMode(news), value.ThreadRootID, base.ServerID, value.ChannelID, value.Author.UserID, defaultMode(news), value.ChannelID)
 	if err != nil {
 		return fmt.Errorf("notification recipients: %w", err)
 	}
@@ -172,9 +218,9 @@ func (s *Service) Deliver(value message.Message) error {
 		var id int64
 		var username, role string
 		var mode Mode
-		var event Event
+		event := base
 		var following bool
-		if err = rows.Scan(&id, &username, &role, &mode, &event.ServerID, &event.ChannelName, &event.ServerName,&following); err != nil {
+		if err = rows.Scan(&id, &username, &role, &mode, &following); err != nil {
 			break
 		}
 		event.Mentioned = value.Forward == nil && (targets.Matches(id, username, role) || value.Reply != nil && !value.Reply.Deleted && value.Reply.Author.UserID == id)
@@ -193,6 +239,9 @@ func (s *Service) Deliver(value message.Message) error {
 	rows.Close()
 	if err != nil {
 		return err
+	}
+	if len(deliveries) == 0 {
+		return tx.Commit()
 	}
 	encoded, err := json.Marshal(ids)
 	if err != nil {
@@ -223,4 +272,11 @@ func (s *Service) Deliver(value message.Message) error {
 		}
 	}
 	return nil
+}
+
+func defaultMode(news bool) Mode {
+	if news {
+		return All
+	}
+	return Mentions
 }

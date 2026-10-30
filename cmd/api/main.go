@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
@@ -70,6 +72,20 @@ const (
 )
 
 func main() {
+	// The Go runtime validates GOAMD64 before main. This preflight therefore
+	// verifies the actual image on its target CPU without opening the database.
+	if len(os.Args) == 2 && os.Args[1] == "--check-cpu" {
+		level := "native"
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range info.Settings {
+				if setting.Key == "GOAMD64" {
+					level = setting.Value
+				}
+			}
+		}
+		fmt.Printf("arch=%s level=%s\n", runtime.GOARCH, level)
+		return
+	}
 	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
 	if err != nil {
 		log.Fatal(err)
