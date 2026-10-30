@@ -23,6 +23,7 @@ import (
 	"voxhold-backend/internal/cors"
 	"voxhold-backend/internal/diagnostics"
 	"voxhold-backend/internal/instancebootstrap"
+	"voxhold-backend/internal/linkpreview"
 	"voxhold-backend/internal/notifications"
 	"voxhold-backend/internal/recordings"
 	"voxhold-backend/internal/safego"
@@ -451,6 +452,9 @@ func main() {
 	)
 
 	mux := http.NewServeMux()
+	previews := linkpreview.New()
+	defer previews.Close()
+	previews.RegisterRoutes(mux, accountHandler.RequireAuth)
 	communityService.RegisterRoutes(mux, accountHandler.RequireAuth)
 	attachmentService.RegisterRoutes(mux, accountHandler.RequireAuth)
 	accountHandler.RegisterRoutes(mux)

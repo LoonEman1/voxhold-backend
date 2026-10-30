@@ -48,7 +48,7 @@ func TestConversationPagesCoverOlderGroupsAndAllowDirectLookup(t *testing.T) {
 		t.Fatalf("covered %d conversations", len(seen))
 	}
 	f.call(t, 1, "GET", fmt.Sprintf("/api/v1/conversations/%d", oldest), nil, 200)
-	f.call(t, 99, "GET", fmt.Sprintf("/api/v1/conversations/%d", oldest), nil, 404)
+	f.call(t, 99, "GET", fmt.Sprintf("/api/v1/conversations/%d", oldest), nil, 403)
 	f.call(t, 1, "GET", "/api/v1/me/conversations?before=invalid", nil, 400)
 	f.call(t, 1, "GET", "/api/v1/me/conversations?limit=0", nil, 400)
 }

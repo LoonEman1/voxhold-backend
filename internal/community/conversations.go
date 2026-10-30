@@ -89,13 +89,14 @@ func (s *Service) block(r *http.Request, userID int64) (any, error) {
 }
 
 type Conversation struct {
-	ID      int64    `json:"id"`
-	Name    string   `json:"name"`
-	Direct  bool     `json:"direct"`
-	Members []Person `json:"members"`
-	Unread  int64    `json:"unread_count"`
-	Muted   bool     `json:"muted"`
-	Saved   bool     `json:"saved"`
+	LastMessageID int64    `json:"last_message_id"`
+	ID            int64    `json:"id"`
+	Name          string   `json:"name"`
+	Direct        bool     `json:"direct"`
+	Members       []Person `json:"members"`
+	Unread        int64    `json:"unread_count"`
+	Muted         bool     `json:"muted"`
+	Saved         bool     `json:"saved"`
 }
 type Person struct {
 	ID       int64  `json:"user_id"`

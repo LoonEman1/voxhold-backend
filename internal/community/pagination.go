@@ -27,6 +27,17 @@ func parsePage(r *http.Request) (pageRequest, error) {
 		}
 		p.limit = n
 	}
+	if q.Has("before_id") {
+		var err error
+		p.id, err = strconv.ParseInt(q.Get("before_id"), 10, 64)
+		if err != nil || p.id < 1 {
+			return p, ErrInvalid
+		}
+		p.before, err = strconv.ParseInt(q.Get("before_activity"), 10, 64)
+		if err != nil || p.before < 0 {
+			return p, ErrInvalid
+		}
+	}
 	if q.Has("before") {
 		raw, err := base64.RawURLEncoding.DecodeString(q.Get("before"))
 		if err != nil || len(raw) > 64 {
@@ -83,7 +94,7 @@ func (s *Service) conversation(r *http.Request, uid int64) (any, error) {
 		return nil, err
 	}
 	if len(values) == 0 {
-		return nil, sql.ErrNoRows
+		return nil, ErrForbidden
 	}
 	return values[0], nil
 }
@@ -112,6 +123,7 @@ func (s *Service) listConversations(ctx context.Context, uid, id int64, p pageRe
 		if err = rows.Scan(&v.ID, &v.Name, &v.Direct, &v.Muted, &v.Saved, &v.Unread, &at); err != nil {
 			break
 		}
+		v.LastMessageID = at
 		values = append(values, v)
 		activity = append(activity, at)
 		ids = append(ids, v.ID)
