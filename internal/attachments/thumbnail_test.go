@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/message"
@@ -61,6 +62,15 @@ func TestThumbnailSharesContentACLAndHEADIsLightweight(t *testing.T) {
 	head := call(1, "HEAD", "/api/v1/attachments/"+id+"/content", nil, 200)
 	if head.Body.Len() != 0 || head.Header().Get("Content-Length") == "" {
 		t.Fatalf("HEAD body=%d headers=%v", head.Body.Len(), head.Header())
+	}
+	for _, typ := range []string{"text/html", "image/svg+xml", "application/xhtml+xml", "image/custom"} {
+		if _, err := db.Exec(`UPDATE attachments SET mime_type=? WHERE id=?`, typ, id); err != nil {
+			t.Fatal(err)
+		}
+		content := call(1, "GET", "/api/v1/attachments/"+id+"/content", nil, 200)
+		if !strings.HasPrefix(content.Header().Get("Content-Disposition"), "attachment;") || content.Header().Get("Content-Security-Policy") != "default-src 'none'; sandbox" || content.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("active MIME %s headers=%v", typ, content.Header())
+		}
 	}
 	if _, err := db.Exec(`UPDATE attachments SET deleted_at=unixepoch() WHERE id=?`, id); err != nil {
 		t.Fatal(err)

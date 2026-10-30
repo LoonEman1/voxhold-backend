@@ -370,7 +370,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	disposition := "attachment"
-	if strings.HasPrefix(typ, "image/") || typ == "video/mp4" || typ == "video/webm" {
+	if inlineContentType(typ) {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Type", typ)
@@ -379,6 +379,20 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, name, stat.ModTime(), f)
+}
+
+// Only passive media may open in the application's origin. Keep legacy SVG
+// and other document types as downloads even when their stored MIME is image/*.
+func inlineContentType(value string) bool {
+	typ := strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
+	switch typ {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+		"video/mp4", "video/webm", "video/ogg",
+		"audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4":
+		return true
+	default:
+		return false
+	}
 }
 func (s *Service) storage(w http.ResponseWriter, r *http.Request) {
 	uid, ok := httpapi.AuthenticatedUserID(w, r)
