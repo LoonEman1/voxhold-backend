@@ -20,3 +20,5 @@ data/
 
 # Local diagnostics, benchmark binaries and generated task artifacts.
 output/
+bin/
+dist/

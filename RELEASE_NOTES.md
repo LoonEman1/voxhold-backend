@@ -1,3 +1,25 @@
+# Voxhold Backend 2.5.0
+
+Минорный релиз от 30 октября 2026 года. Новых миграций нет; схема остаётся 000031.
+
+- Адресаты уведомлений отбираются в SQL до загрузки пользователей; сохранены
+  упоминания, ответы, подписки обсуждений, настройки уведомлений и проверки доступа.
+- Одинаковые WebSocket-события кодируются один раз на рассылку. Персональные
+  реакции и отфильтрованные snapshots получают собственное представление.
+- Отдельные AMD64-образы `2.5.0-amd64-v1` и `2.5.0-amd64-v3` содержат по одному
+  варианту API. Обычный `2.5.0` остаётся переносимым: amd64-v1 и arm64.
+- Release-сборки используют trimpath и удаляют отладочные секции. API остаётся
+  на encoding/json; перехода публичного кода на encoding/json/v2 нет.
+- Установщик и обновлятор в voxhold-deploy автоматически выбирают v1/v3,
+  проверяют запуск CPU до остановки сервиса и поддерживают принудительный v1.
+
+Notification candidates are filtered in SQL before materialization; identical
+WebSocket broadcasts share one JSON encoding while preserving per-user data and
+access filtering. AMD64 v1/v3 images each contain one API variant, with portable
+amd64-v1/arm64 tags retained. No new database migration or JSON API change.
+See [AMD64 builds](docs/amd64-levels.md) and the
+[performance report](docs/performance-2.5.0.md).
+
 # Voxhold Backend 2.4.0
 
 Минорный релиз от 29 октября 2026 года. Backend и frontend выпускаются вместе.

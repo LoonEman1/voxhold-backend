@@ -16,4 +16,6 @@ data/*
 
 # Local build and test caches.
 .tmp/
+bin/
+dist/
 

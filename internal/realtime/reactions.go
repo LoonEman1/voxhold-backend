@@ -16,6 +16,7 @@ func (p *MessageEventPublisher) PublishReactionsChanged(state message.ReactionSt
 		event, ok := events[client.UserID()]
 		if !ok {
 			event = OutgoingEvent{Type: EventMessageReactionsChanged, Data: state.ForUser(client.UserID())}
+			event = event.shareEncoding()
 			events[client.UserID()] = event
 		}
 		if !client.enqueue(event) {

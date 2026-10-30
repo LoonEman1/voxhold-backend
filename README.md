@@ -248,3 +248,7 @@ If you modify this program and make the modified version available to users
 over a network, AGPL section 13 requires offering those users the corresponding
 source code. Consult the license text for the exact terms; this summary is not
 legal advice. Third-party dependencies remain under their respective licenses.
+
+AMD64 releases also include separate `-amd64-v1` and `-amd64-v3` image tags.
+Each contains one CPU variant; the deploy installer/updater selects it
+automatically. See [CPU variants and PGO](docs/amd64-levels.md).
