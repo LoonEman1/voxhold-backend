@@ -62,6 +62,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Check reachable vulnerabilities (Linux production packages)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./cmd/... ./internal/...
+
   test-race:
     name: Test with race detector
     runs-on: ubuntu-latest
