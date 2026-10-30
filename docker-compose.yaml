@@ -58,7 +58,7 @@ services:
       - .env
 
     ports:
-      - "${HTTP_BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
+      - "${HTTP_BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
       - "${WEBRTC_UDP_PORT:-50000}:${WEBRTC_UDP_PORT:-50000}/udp"
       - "${WEBRTC_STREAM_UDP_PORT:-50001}:${WEBRTC_STREAM_UDP_PORT:-50001}/udp"
 

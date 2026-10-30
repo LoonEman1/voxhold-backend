@@ -13,7 +13,8 @@ SQLite and is distributed as a multi-platform container image.
 
 Saved messages and notes, cross-scope forwarding, scheduled messages, polls,
 server events, administrative audit and personal calls are described in
-[the community features guide](docs/community-features.md). Requires migration **000031**.
+[the community features guide](docs/community-features.md). The current source also requires migration **000032**. See
+[audit fixes and upgrade order](docs/audit-2.5-fixes.md).
 
 
 - invite-only registration and token-based sessions;
@@ -79,21 +80,21 @@ replaceable website, use
 ## Images, versions and upgrades
 
 Backend and [frontend](https://github.com/LoonEman1/voxhold-frontend) share release
-**2.5.1**. Apply migrations **000027–000031** for roles, thread subscriptions,
-conversations and attachments. Upgrade the backend and migrations before the matching
+**2.5.0**. Apply migrations **000027–000032** for roles, thread subscriptions,
+conversations, attachments, community features and scheduled retries. Upgrade the backend and migrations before the matching
 frontend, retaining a verified database backup. See
 [community migration notes](docs/community-2.3.md).
 
 ```bash
-docker pull ghcr.io/looneman1/voxhold-backend:2.5.1
+docker pull ghcr.io/looneman1/voxhold-backend:2.5.0
 ```
 
-The exact `2.5.1` tag identifies a release; `2.5` and `latest` move with later
+The exact `2.5.0` tag identifies a release; `2.5` and `latest` move with later
 publications. An OCI digest is immutable. CI publishes `linux/amd64` and
 `linux/arm64` images with SBOM and provenance attestations.
 
 Changes pass through a feature PR into `dev`, then a `dev` → `main` release PR.
-A new `VERSION` passing main CI publishes the images, annotated `v2.5.1` tag and
+A new `VERSION` passing main CI publishes the images, annotated `v2.5.0` tag and
 GitHub Release automatically. A separate manual tag is unnecessary; existing
 releases are not overwritten. See the [shared workflow](docs/release-workflow.md)
 and [release notes](RELEASE_NOTES.md).
@@ -102,7 +103,7 @@ For an installed production stack, follow
 [Voxhold deploy](https://github.com/LoonEman1/voxhold-deploy):
 
 ```bash
-./update.sh --backend-version 2.5.1 --frontend-version 2.5.1
+./update.sh --backend-version 2.5.0 --frontend-version 2.5.0
 ```
 
 Run this from the deploy directory. Its Compose stack applies migrations before

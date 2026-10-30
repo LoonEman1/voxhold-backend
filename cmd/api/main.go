@@ -356,7 +356,7 @@ func main() {
 	messageHandler := messagehttp.NewHandler(
 		messageService,
 	)
-	attachmentService, err := attachments.New(db, recordingService, func(cid, conversationID int64) {
+	attachmentService, err := attachments.New(db, recordingService, func(cid, conversationID int64, attachmentIDs []string) {
 		if conversationID > 0 {
 			rows, err := db.Query(`SELECT user_id FROM conversation_members WHERE conversation_id=?`, conversationID)
 			if err != nil {
@@ -371,11 +371,11 @@ func main() {
 			}
 			rows.Close()
 			for _, id := range ids {
-				realtimeHub.PublishToUser(id, realtimeDomain.OutgoingEvent{Type: "attachments.changed", Data: map[string]int64{"conversation_id": conversationID}})
+				realtimeHub.PublishToUser(id, realtimeDomain.OutgoingEvent{Type: "attachments.changed", Data: attachments.Changed{ConversationID: conversationID, AttachmentIDs: attachmentIDs}})
 			}
 			return
 		}
-		realtimeHub.Publish(cid, realtimeDomain.OutgoingEvent{Type: "attachments.changed", Data: map[string]int64{"channel_id": cid}})
+		realtimeHub.Publish(cid, realtimeDomain.OutgoingEvent{Type: "attachments.changed", Data: attachments.Changed{ChannelID: cid, AttachmentIDs: attachmentIDs}})
 	})
 	if err != nil {
 		log.Fatal(err)

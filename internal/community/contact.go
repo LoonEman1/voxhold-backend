@@ -18,7 +18,7 @@ func CanSend(ctx context.Context, db *sql.DB, id, userID int64) error {
 	return tx.Commit()
 }
 func canSendTransaction(ctx context.Context, tx *sql.Tx, id, userID int64) error {
-	if err := activeSender(ctx, tx, userID); err != nil {
+	if err := activeActor(ctx, tx, userID); err != nil {
 		return err
 	}
 	if err := conversationAccess(ctx, tx, id, userID); err != nil {
@@ -58,11 +58,10 @@ func canSendTransaction(ctx context.Context, tx *sql.Tx, id, userID int64) error
 	return nil
 }
 
-// Workers do not pass through HTTP authentication. Check the author in the
-// same transaction as delivery so a concurrent ban cannot leave a valid send.
-func activeSender(ctx context.Context, q queryer, userID int64) error {
+// Background operations must enforce account revocation inside their transaction.
+func activeActor(ctx context.Context, q queryer, userID int64) error {
 	var active bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=users.id))`, userID).Scan(&active)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_bans b WHERE b.user_id=u.id))`, userID).Scan(&active)
 	if err != nil {
 		return err
 	}

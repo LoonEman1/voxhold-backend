@@ -11,7 +11,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.25
 	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.47.0
-	golang.org/x/net v0.60.0
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/time v0.14.0
 	modernc.org/sqlite v1.56.0
