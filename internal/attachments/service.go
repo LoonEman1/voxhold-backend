@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 	"voxhold-backend/internal/community"
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/imagelimit"
 	"voxhold-backend/internal/message"
 	"voxhold-backend/internal/permissions"
 	"voxhold-backend/internal/recordings"
@@ -248,13 +249,12 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "upload unavailable")
 			return
 		}
-		data, readErr := io.ReadAll(file)
-		file.Close()
-		if readErr != nil {
+		compressed, typ, err := compressImage(file)
+		closeErr := file.Close()
+		if closeErr != nil {
 			fail(w, 500, "upload unavailable")
 			return
 		}
-		compressed, typ, err := compressImage(data)
 		if err != nil {
 			fail(w, 400, "invalid image or image exceeds 30 megapixels")
 			return
@@ -311,12 +311,15 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.WriteJSON(w, 200, message.Attachment{ID: id, Filename: name, MIMEType: mimeType, SizeBytes: size})
 }
-func compressImage(data []byte) ([]byte, string, error) {
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 {
+func compressImage(file io.ReadSeeker) ([]byte, string, error) {
+	config, _, err := image.DecodeConfig(file)
+	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
 		return nil, "", errors.New("invalid image")
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, "", err
+	}
+	img, _, err := image.Decode(file)
 	if err != nil {
 		return nil, "", err
 	}

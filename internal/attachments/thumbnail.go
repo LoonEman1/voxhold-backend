@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/imagelimit"
 )
 
 type Changed struct {
@@ -69,7 +70,7 @@ func (s *Service) thumbnail(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 		config, _, err := image.DecodeConfig(f)
-		if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 {
+		if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
 			fail(w, 400, "invalid image")
 			return
 		}

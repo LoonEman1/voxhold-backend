@@ -87,6 +87,7 @@ func main() {
 		fmt.Printf("arch=%s level=%s\n", runtime.GOARCH, level)
 		return
 	}
+	configureMemoryLimit()
 	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
 	if err != nil {
 		log.Fatal(err)

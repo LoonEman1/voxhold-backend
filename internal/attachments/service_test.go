@@ -120,7 +120,7 @@ func TestUploadCompressionAuthorizationRetryQuotaAndCleanup(t *testing.T) {
 	}
 }
 func TestInvalidImageDimensionsAndCorruption(t *testing.T) {
-	if _, _, err := compressImage([]byte("broken image")); err == nil {
+	if _, _, err := compressImage(bytes.NewReader([]byte("broken image"))); err == nil {
 		t.Fatal("accepted corrupt image")
 	}
 	// DecodeConfig rejects a decompression bomb before allocating its pixels.
@@ -129,7 +129,7 @@ func TestInvalidImageDimensionsAndCorruption(t *testing.T) {
 	if err := png.Encode(&b, img); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := compressImage(b.Bytes()); err == nil {
+	if _, _, err := compressImage(bytes.NewReader(b.Bytes())); err == nil {
 		t.Fatal("accepted oversized image")
 	}
 }
