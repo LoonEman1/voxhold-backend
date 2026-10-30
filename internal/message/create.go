@@ -9,6 +9,7 @@ import (
 const MaxContentLength = 5120
 
 var (
+	ErrContentInvalid  = errors.New("message content must not contain NUL characters")
 	ErrContentRequired = errors.New(
 		"message content is required",
 	)
@@ -68,6 +69,9 @@ func (i CreateInput) Normalize() CreateInput {
 }
 
 func (i CreateInput) Validate() error {
+	if strings.ContainsRune(i.Content, '\x00') {
+		return ErrContentInvalid
+	}
 	if err := i.Poll.Validate(); err != nil {
 		return err
 	}

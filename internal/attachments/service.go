@@ -43,17 +43,21 @@ type Plan struct {
 	Expires  time.Time `json:"-"`
 }
 type Service struct {
-	db         *sql.DB
-	root       *os.Root
-	directory  string
-	mu         sync.Mutex
-	uploads    chan struct{}
-	plans      map[string]Plan
-	recordings *recordings.Service
-	changed    func(int64, int64)
+	db             *sql.DB
+	root           *os.Root
+	directory      string
+	mu             sync.Mutex
+	uploads        chan struct{}
+	plans          map[string]Plan
+	recordings     *recordings.Service
+	changed        func(int64, int64, []string)
+	thumbMu        sync.Mutex
+	thumbnails     map[string][]byte
+	thumbnailOrder []string
+	thumbnailSlots chan struct{}
 }
 
-func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, int64)) (*Service, error) {
+func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, int64, []string)) (*Service, error) {
 	dir := storagebudget.Directory()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
@@ -62,7 +66,7 @@ func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, i
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
+	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 2), thumbnails: map[string][]byte{}, thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
 	state, err := storagebudget.Get(context.Background(), db, dir)
 	if err != nil {
 		root.Close()
@@ -126,6 +130,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) htt
 	mux.Handle("PUT /api/v1/channels/{channelID}/attachments/{attachmentID}", auth(http.HandlerFunc(s.upload)))
 	mux.Handle("PUT /api/v1/conversations/{conversationID}/attachments/{attachmentID}", auth(http.HandlerFunc(s.upload)))
 	mux.Handle("GET /api/v1/attachments/{attachmentID}/content", auth(http.HandlerFunc(s.content)))
+	mux.Handle("GET /api/v1/attachments/{attachmentID}/thumbnail", auth(http.HandlerFunc(s.thumbnail)))
 	mux.Handle("GET /api/v1/instance/storage", auth(http.HandlerFunc(s.storage)))
 	mux.Handle("PUT /api/v1/instance/storage", auth(http.HandlerFunc(s.storage)))
 	mux.Handle("POST /api/v1/instance/storage/preview", auth(http.HandlerFunc(s.preview)))
@@ -344,9 +349,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "attachment not found")
 		return
 	}
-	var name, typ string
-	var deleted bool
-	err := s.db.QueryRowContext(r.Context(), `SELECT a.filename,a.mime_type,a.deleted_at IS NOT NULL FROM attachments a WHERE a.id=? AND ((a.channel_id IS NOT NULL AND EXISTS(SELECT 1 FROM channel_accessible_members c WHERE c.channel_id=a.channel_id AND c.user_id=?)) OR (a.conversation_id IS NOT NULL AND EXISTS(SELECT 1 FROM conversation_members m WHERE m.conversation_id=a.conversation_id AND m.user_id=?))) AND (a.message_id IS NOT NULL OR a.direct_message_id IS NOT NULL OR a.owner_user_id=?)`, id, uid, uid, uid).Scan(&name, &typ, &deleted)
+	name, typ, deleted, err := s.contentMetadata(r.Context(), uid, id)
 	if err != nil {
 		fail(w, 404, "attachment not found")
 		return
@@ -367,7 +370,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	disposition := "attachment"
-	if strings.HasPrefix(typ, "image/") || typ == "video/mp4" || typ == "video/webm" {
+	if inlineContentType(typ) {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Type", typ)
@@ -376,6 +379,20 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, name, stat.ModTime(), f)
+}
+
+// Only passive media may open in the application's origin. Keep legacy SVG
+// and other document types as downloads even when their stored MIME is image/*.
+func inlineContentType(value string) bool {
+	typ := strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
+	switch typ {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+		"video/mp4", "video/webm", "video/ogg",
+		"audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4":
+		return true
+	default:
+		return false
+	}
 }
 func (s *Service) storage(w http.ResponseWriter, r *http.Request) {
 	uid, ok := httpapi.AuthenticatedUserID(w, r)
@@ -555,18 +572,19 @@ func (s *Service) cleanup(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "cleanup unavailable")
 			return
 		}
-		if err = s.root.Remove(id); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fail(w, 500, "file cleanup failed")
-			return
-		}
 		if _, err = s.db.ExecContext(r.Context(), `UPDATE attachments SET deleted_at=unixepoch() WHERE id=? AND deleted_at IS NULL`, id); err != nil {
 			fail(w, 500, "cleanup metadata failed")
 			return
 		}
+		if err = s.root.Remove(id); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fail(w, 500, "file cleanup failed")
+			return
+		}
+
 		reclaimed += size
 		count++
 		if s.changed != nil {
-			s.changed(cid, conversationID)
+			s.changed(cid, conversationID, []string{id})
 		}
 	}
 	httpapi.WriteJSON(w, 200, map[string]any{"bytes": reclaimed, "count": count})

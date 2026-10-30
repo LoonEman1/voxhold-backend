@@ -221,6 +221,8 @@ func (r *Repository) BanMember(
 	}
 
 	const revokeQuery = `
+	UPDATE scheduled_messages SET status='cancelled', error='Автор заблокирован' WHERE user_id=? AND status='pending';
+
 	DELETE FROM sessions
 	WHERE user_id = ?;
 
@@ -238,6 +240,7 @@ func (r *Repository) BanMember(
 	if _, err := tx.ExecContext(
 		ctx,
 		revokeQuery,
+		targetUserID,
 		targetUserID,
 		targetUserID,
 		targetUserID,

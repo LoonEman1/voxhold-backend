@@ -11,19 +11,31 @@ import (
 	"strings"
 	"time"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 type Scheduled struct {
-	ID          int64       `json:"id"`
-	Destination Destination `json:"destination"`
-	Payload     DirectInput `json:"payload"`
-	SendAt      int64       `json:"send_at"`
-	Status      string      `json:"status"`
-	Error       string      `json:"error"`
+	Attempts      int         `json:"attempts"`
+	NextAttemptAt int64       `json:"next_attempt_at"`
+	ID            int64       `json:"id"`
+	Destination   Destination `json:"destination"`
+	Payload       DirectInput `json:"payload"`
+	SendAt        int64       `json:"send_at"`
+	Status        string      `json:"status"`
+	Error         string      `json:"error"`
 }
 
 func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id,destination_kind,destination_id,payload,send_at,status,error FROM scheduled_messages WHERE user_id=? ORDER BY send_at DESC,id DESC LIMIT 200`, uid)
+	p, err := parsePage(r)
+	if err != nil {
+		return nil, err
+	}
+	status := r.URL.Query().Get("status")
+	if status != "" && status != "pending" && status != "sent" && status != "failed" && status != "cancelled" {
+		return nil, ErrInvalid
+	}
+	rows, err := s.db.QueryContext(r.Context(), `SELECT id,destination_kind,destination_id,payload,send_at,status,error,attempts,next_attempt_at FROM scheduled_messages
+ WHERE user_id=? AND (?='' OR status=?) AND (?=0 OR send_at<? OR (send_at=? AND id<?)) ORDER BY send_at DESC,id DESC LIMIT ?`, uid, status, status, p.id, p.before, p.before, p.id, p.limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +44,7 @@ func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
 	for rows.Next() {
 		var v Scheduled
 		var data string
-		if err = rows.Scan(&v.ID, &v.Destination.Kind, &v.Destination.ID, &data, &v.SendAt, &v.Status, &v.Error); err != nil {
+		if err = rows.Scan(&v.ID, &v.Destination.Kind, &v.Destination.ID, &data, &v.SendAt, &v.Status, &v.Error, &v.Attempts, &v.NextAttemptAt); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(data), &v.Payload); err != nil {
@@ -40,7 +52,22 @@ func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
 		}
 		values = append(values, v)
 	}
-	return values, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	more := len(values) > p.limit
+	if more {
+		values = values[:p.limit]
+	}
+	if !p.paged {
+		return values, nil
+	}
+	var next any
+	if more {
+		last := values[len(values)-1]
+		next = pageCursor(last.SendAt, last.ID)
+	}
+	return map[string]any{"scheduled_messages": values, "has_more": more, "next_cursor": next}, nil
 }
 func (s *Service) validateSchedule(ctx context.Context, uid int64, v *Scheduled) error {
 	if v.SendAt <= time.Now().Unix() || v.SendAt > time.Now().AddDate(1, 0, 0).Unix() {
@@ -57,13 +84,17 @@ func (s *Service) validateSchedule(ctx context.Context, uid int64, v *Scheduled)
 	if v.Payload.Poll != nil && v.Payload.Poll.ClosesAt <= v.SendAt {
 		return ErrInvalid
 	}
+	return validateScheduleAttachments(ctx, s.db, uid, v)
+}
+
+func validateScheduleAttachments(ctx context.Context, q queryer, uid int64, v *Scheduled) error {
 	for _, id := range v.Payload.AttachmentIDs {
 		var valid bool
 		column := "channel_id"
 		if v.Destination.Kind == "conversation" {
 			column = "conversation_id"
 		}
-		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE id=? AND owner_user_id=? AND `+column+`=? AND message_id IS NULL AND direct_message_id IS NULL AND deleted_at IS NULL)`, id, uid, v.Destination.ID).Scan(&valid)
+		err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE id=? AND owner_user_id=? AND `+column+`=? AND message_id IS NULL AND direct_message_id IS NULL AND deleted_at IS NULL)`, id, uid, v.Destination.ID).Scan(&valid)
 		if err != nil {
 			return err
 		}
@@ -114,7 +145,21 @@ func (s *Service) schedule(r *http.Request, uid int64) (any, error) {
 	}
 	data, _ := json.Marshal(v.Payload)
 	v.Status = "pending"
-	err := s.db.QueryRowContext(r.Context(), `INSERT INTO scheduled_messages(user_id,destination_kind,destination_id,payload,send_at) VALUES(?,?,?,?,?) RETURNING id`, uid, v.Destination.Kind, v.Destination.ID, string(data), v.SendAt).Scan(&v.ID)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = activeActor(r.Context(), tx, uid); err != nil {
+		return nil, err
+	}
+	if err = validateScheduleAttachments(r.Context(), tx, uid, &v); err != nil {
+		return nil, err
+	}
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO scheduled_messages(user_id,destination_kind,destination_id,payload,send_at) VALUES(?,?,?,?,?) RETURNING id`, uid, v.Destination.Kind, v.Destination.ID, string(data), v.SendAt).Scan(&v.ID)
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err == nil {
 		s.emit(uid, "conversation.scheduled", v)
 	}
@@ -146,13 +191,27 @@ func (s *Service) reschedule(r *http.Request, uid int64) (any, error) {
 		return nil, err
 	}
 	data, _ := json.Marshal(v.Payload)
-	res, err := s.db.ExecContext(r.Context(), `UPDATE scheduled_messages SET payload=?,destination_kind=?,destination_id=?,send_at=?,status='pending',error='' WHERE id=? AND user_id=? AND status IN('pending','failed')`, string(data), v.Destination.Kind, v.Destination.ID, v.SendAt, path(r, "scheduleID"), uid)
+	tx, err := storage.BeginWrite(r.Context(), s.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = activeActor(r.Context(), tx, uid); err != nil {
+		return nil, err
+	}
+	if err = validateScheduleAttachments(r.Context(), tx, uid, &v); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(r.Context(), `UPDATE scheduled_messages SET payload=?,destination_kind=?,destination_id=?,send_at=?,status='pending',error='',attempts=0,next_attempt_at=0 WHERE id=? AND user_id=? AND status IN('pending','failed')`, string(data), v.Destination.Kind, v.Destination.ID, v.SendAt, path(r, "scheduleID"), uid)
 	if err != nil {
 		return nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
 		return nil, sql.ErrNoRows
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
 	}
 	v.ID = path(r, "scheduleID")
 	v.Status = "pending"
@@ -191,21 +250,24 @@ func (s *Service) Run(ctx context.Context) {
 		}
 	}
 }
-func (s *Service) ProcessDue(ctx context.Context, now int64) error {
+func (s *Service) ProcessDue(ctx context.Context, now int64) (resultErr error) {
+	// Reminders are independent of message dispatch failures.
+	defer func() { resultErr = errors.Join(resultErr, s.processEventReminders(ctx, now)) }()
 	s.workMu.Lock()
 	defer s.workMu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,destination_kind,destination_id,payload FROM scheduled_messages WHERE status='pending' AND send_at<=? ORDER BY send_at,id LIMIT 20`, now)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,destination_kind,destination_id,payload,attempts FROM scheduled_messages WHERE status='pending' AND send_at<=? AND next_attempt_at<=? ORDER BY send_at,id LIMIT 20`, now, now)
 	if err != nil {
 		return err
 	}
 	type work struct {
 		id, uid, destination int64
+		attempts             int
 		kind, data           string
 	}
 	pending := []work{}
 	for rows.Next() {
 		var v work
-		if err = rows.Scan(&v.id, &v.uid, &v.kind, &v.destination, &v.data); err != nil {
+		if err = rows.Scan(&v.id, &v.uid, &v.kind, &v.destination, &v.data, &v.attempts); err != nil {
 			break
 		}
 		pending = append(pending, v)
@@ -220,7 +282,10 @@ func (s *Service) ProcessDue(ctx context.Context, now int64) error {
 	for _, v := range pending {
 		var input DirectInput
 		if err = json.Unmarshal([]byte(v.data), &input); err != nil {
-			return err
+			if _, err = s.db.ExecContext(ctx, `UPDATE scheduled_messages SET status='failed',error='Некорректное задание',attempts=attempts+1 WHERE id=?`, v.id); err != nil {
+				return err
+			}
+			continue
 		}
 		input.ClientMessageID = fmt.Sprintf("schedule-%d", v.id)
 		var delivered bool
@@ -249,20 +314,37 @@ func (s *Service) ProcessDue(ctx context.Context, now int64) error {
 			}
 		}
 		status, problem := "sent", ""
+		nextAttempt := int64(0)
 		if sendErr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if !errors.Is(sendErr, ErrForbidden) && !errors.Is(sendErr, message.ErrForbidden) && !errors.Is(sendErr, ErrInvalid) && !errors.Is(sendErr, message.ErrPollInvalid) && !errors.Is(sendErr, message.ErrContentRequired) && !errors.Is(sendErr, message.ErrContentTooLong) && !errors.Is(sendErr, message.ErrChannelNotFound) && !errors.Is(sendErr, message.ErrReplyInvalid) {
-				return sendErr
-			}
 			status = "failed"
 			problem = "Отправка недоступна: проверьте права, получателей и вложения"
+			if !permanentScheduleError(sendErr) && v.attempts+1 < 5 {
+				status = "pending"
+				nextAttempt = now + int64(5<<min(v.attempts, 4))
+				problem = "Временная ошибка отправки; ожидается повторная попытка"
+			}
+			log.Printf("scheduled message id=%d attempt=%d status=%s: %v", v.id, v.attempts+1, status, sendErr)
 		}
-		if _, err = s.db.ExecContext(ctx, `UPDATE scheduled_messages SET status=?,error=? WHERE id=? AND status='pending'`, status, problem, v.id); err != nil {
+		if _, err = s.db.ExecContext(ctx, `UPDATE scheduled_messages SET status=?,error=?,attempts=attempts+1,next_attempt_at=? WHERE id=? AND status='pending'`, status, problem, nextAttempt, v.id); err != nil {
 			return err
 		}
 		s.emit(v.uid, "conversation.scheduled", map[string]any{"id": v.id, "status": status, "error": problem})
 	}
-	return s.processEventReminders(ctx, now)
+	return nil
+}
+
+func permanentScheduleError(err error) bool {
+	for _, permanent := range []error{ErrForbidden, ErrInvalid, ErrConflict, sql.ErrNoRows,
+		message.ErrForbidden, message.ErrPollInvalid, message.ErrContentRequired, message.ErrContentTooLong,
+		message.ErrContentInvalid, message.ErrChannelNotFound, message.ErrReplyInvalid, message.ErrClientMessageIDInvalid,
+		message.ErrIdempotencyConflict, message.ErrMessageNotFound, message.ErrTextChannelRequired} {
+		if errors.Is(err, permanent) {
+			return true
+		}
+	}
+	var code interface{ Code() int }
+	return errors.As(err, &code) && code.Code()&0xff == 19 // SQLITE_CONSTRAINT cannot succeed by retrying.
 }

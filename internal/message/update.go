@@ -16,6 +16,9 @@ func (i UpdateInput) Normalize() UpdateInput {
 }
 
 func (i UpdateInput) Validate() error {
+	if strings.ContainsRune(i.Content, '\x00') {
+		return ErrContentInvalid
+	}
 	if i.Content == "" {
 		return ErrContentRequired
 	}

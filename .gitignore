@@ -19,3 +19,6 @@ data/*
 bin/
 dist/
 
+
+# Generated audits, benchmarks and local release tooling.
+/output/

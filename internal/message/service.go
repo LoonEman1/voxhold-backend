@@ -44,7 +44,7 @@ func (s *Service) Create(
 
 	var createdMessage Message
 	var err error
-	if input.ReplyToMessageID != nil || input.ThreadRootID != nil || len(input.AttachmentIDs) > 0 {
+	if input.Poll != nil || input.ReplyToMessageID != nil || input.ThreadRootID != nil || len(input.AttachmentIDs) > 0 {
 		if repo, ok := s.repository.(InteractionRepository); ok {
 			createdMessage, err = repo.CreateReferenced(ctx, serverID, channelID, authorUserID, input, nil)
 		} else {

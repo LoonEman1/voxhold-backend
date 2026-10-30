@@ -221,7 +221,7 @@ func (h *Handler) create(
 		case errors.Is(err, message.ErrMessageNotFound):
 			httpapi.WriteError(w, http.StatusGone, "the original message was deleted")
 		case errors.Is(err, message.ErrPollInvalid), errors.Is(err, message.ErrReplyInvalid), errors.Is(err, message.ErrClientMessageIDInvalid), errors.Is(err, message.ErrContentRequired),
-			errors.Is(err, message.ErrContentTooLong):
+			errors.Is(err, message.ErrContentTooLong), errors.Is(err, message.ErrContentInvalid):
 
 			httpapi.WriteError(
 				w,
@@ -596,7 +596,7 @@ func writeMessageOperationError(
 ) {
 	switch {
 	case errors.Is(err, message.ErrContentRequired),
-		errors.Is(err, message.ErrContentTooLong):
+		errors.Is(err, message.ErrContentTooLong), errors.Is(err, message.ErrContentInvalid):
 
 		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
 

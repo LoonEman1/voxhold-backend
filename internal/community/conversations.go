@@ -17,6 +17,9 @@ import (
 // Contacts are checked both on creation and on every send. A shared room is
 // required by default, and either side's block always overrides privacy mode.
 func canContact(ctx context.Context, q queryer, from, to int64) error {
+	if err := activeActor(ctx, q, from); err != nil {
+		return err
+	}
 	var yes bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=u.id)
  AND NOT EXISTS(SELECT 1 FROM user_blocks WHERE (user_id=? AND blocked_user_id=?) OR (user_id=? AND blocked_user_id=?))
@@ -291,7 +294,7 @@ func (s *Service) createDirect(ctx context.Context, id, userID int64, input Dire
 	if input.Content == "" && len(input.AttachmentIDs) > 0 {
 		input.Content = "\U0001f4ce"
 	}
-	if input.Content == "" || utf8.RuneCountInString(input.Content) > 5120 || len(input.ClientMessageID) < 1 || len(input.ClientMessageID) > 64 {
+	if strings.ContainsRune(input.Content, '\x00') || input.Content == "" || utf8.RuneCountInString(input.Content) > 5120 || len(input.ClientMessageID) < 1 || len(input.ClientMessageID) > 64 {
 		return nil, ErrInvalid
 	}
 	tx, err := storage.BeginWrite(ctx, s.db)
@@ -299,7 +302,7 @@ func (s *Service) createDirect(ctx context.Context, id, userID int64, input Dire
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err = activeSender(ctx, tx, userID); err != nil {
+	if err = activeActor(ctx, tx, userID); err != nil {
 		return nil, err
 	}
 	if err = conversationAccess(ctx, tx, id, userID); err != nil {

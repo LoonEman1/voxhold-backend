@@ -96,6 +96,9 @@ func TestBanMemberRevokesInstanceAccess(t *testing.T) {
 		t.Fatalf("create instance server: %v", err)
 	}
 	memberID := createTestMember(t, db, created.ID, "member")
+	if _, err := db.Exec("INSERT INTO scheduled_messages(user_id) VALUES(?)", memberID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(
 		"INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?, randomblob(32), unixepoch() + 3600)",
 		memberID,
@@ -110,6 +113,7 @@ func TestBanMemberRevokesInstanceAccess(t *testing.T) {
 	assertServerTestCount(t, db, "SELECT COUNT(*) FROM user_bans WHERE user_id = ?", memberID, 1)
 	assertServerTestCount(t, db, "SELECT COUNT(*) FROM sessions WHERE user_id = ?", memberID, 0)
 	assertServerTestCount(t, db, "SELECT COUNT(*) FROM server_members WHERE user_id = ?", memberID, 0)
+	assertServerTestCount(t, db, "SELECT COUNT(*) FROM scheduled_messages WHERE user_id = ? AND status = 'cancelled'", memberID, 1)
 }
 
 func TestDeleteAccountAnonymizesMember(t *testing.T) {
@@ -244,8 +248,10 @@ func openServerTestDB(t *testing.T) *sql.DB {
 		created_at INTEGER NOT NULL DEFAULT (unixepoch())
 	);
 	CREATE TABLE scheduled_messages (
-		id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
-		status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT ''
+		id INTEGER PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id),
+		status TEXT NOT NULL DEFAULT 'pending',
+		error TEXT NOT NULL DEFAULT ''
 	);
 
 	INSERT INTO users (username) VALUES ('owner');
