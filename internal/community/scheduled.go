@@ -15,16 +15,27 @@ import (
 )
 
 type Scheduled struct {
-	ID          int64       `json:"id"`
-	Destination Destination `json:"destination"`
-	Payload     DirectInput `json:"payload"`
-	SendAt      int64       `json:"send_at"`
-	Status      string      `json:"status"`
-	Error       string      `json:"error"`
+	Attempts      int         `json:"attempts"`
+	NextAttemptAt int64       `json:"next_attempt_at"`
+	ID            int64       `json:"id"`
+	Destination   Destination `json:"destination"`
+	Payload       DirectInput `json:"payload"`
+	SendAt        int64       `json:"send_at"`
+	Status        string      `json:"status"`
+	Error         string      `json:"error"`
 }
 
 func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id,destination_kind,destination_id,payload,send_at,status,error FROM scheduled_messages WHERE user_id=? ORDER BY send_at DESC,id DESC LIMIT 200`, uid)
+	p, err := parsePage(r)
+	if err != nil {
+		return nil, err
+	}
+	status := r.URL.Query().Get("status")
+	if status != "" && status != "pending" && status != "sent" && status != "failed" && status != "cancelled" {
+		return nil, ErrInvalid
+	}
+	rows, err := s.db.QueryContext(r.Context(), `SELECT id,destination_kind,destination_id,payload,send_at,status,error,attempts,next_attempt_at FROM scheduled_messages
+ WHERE user_id=? AND (?='' OR status=?) AND (?=0 OR send_at<? OR (send_at=? AND id<?)) ORDER BY send_at DESC,id DESC LIMIT ?`, uid, status, status, p.id, p.before, p.before, p.id, p.limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +44,7 @@ func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
 	for rows.Next() {
 		var v Scheduled
 		var data string
-		if err = rows.Scan(&v.ID, &v.Destination.Kind, &v.Destination.ID, &data, &v.SendAt, &v.Status, &v.Error); err != nil {
+		if err = rows.Scan(&v.ID, &v.Destination.Kind, &v.Destination.ID, &data, &v.SendAt, &v.Status, &v.Error, &v.Attempts, &v.NextAttemptAt); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal([]byte(data), &v.Payload); err != nil {
@@ -41,7 +52,22 @@ func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
 		}
 		values = append(values, v)
 	}
-	return values, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	more := len(values) > p.limit
+	if more {
+		values = values[:p.limit]
+	}
+	if !p.paged {
+		return values, nil
+	}
+	var next any
+	if more {
+		last := values[len(values)-1]
+		next = pageCursor(last.SendAt, last.ID)
+	}
+	return map[string]any{"scheduled_messages": values, "has_more": more, "next_cursor": next}, nil
 }
 func (s *Service) validateSchedule(ctx context.Context, uid int64, v *Scheduled) error {
 	if v.SendAt <= time.Now().Unix() || v.SendAt > time.Now().AddDate(1, 0, 0).Unix() {
