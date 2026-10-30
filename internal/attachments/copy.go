@@ -81,6 +81,7 @@ func (s *Service) Copy(ctx context.Context, uid int64, sourceID, kind string, de
 	}
 	if _, err = s.db.ExecContext(ctx, `INSERT INTO attachments(id,channel_id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes) VALUES(?,?,?,?,?,?,?,?)`, id, cid, conv, uid, name, mime, category, size); err != nil {
 		_ = s.root.Remove(id)
+		_ = removeMissingOK(s.root, "thumbs/"+id+".jpg")
 		return "", err
 	}
 	return id, nil

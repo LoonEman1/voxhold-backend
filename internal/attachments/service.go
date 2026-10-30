@@ -54,9 +54,6 @@ type Service struct {
 	plans          map[string]Plan
 	recordings     *recordings.Service
 	changed        func(int64, int64, []string)
-	thumbMu        sync.Mutex
-	thumbnails     map[string][]byte
-	thumbnailOrder []string
 	thumbnailSlots chan struct{}
 }
 
@@ -69,7 +66,11 @@ func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, i
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 2), thumbnails: map[string][]byte{}, thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
+	if err := root.Mkdir("thumbs", 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		root.Close()
+		return nil, err
+	}
+	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 2), thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
 	state, err := storagebudget.Get(context.Background(), db, dir)
 	if err != nil {
 		root.Close()
@@ -306,6 +307,7 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 	_, err = s.db.ExecContext(r.Context(), `INSERT INTO attachments(id,channel_id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes) VALUES(?,NULLIF(?,0),NULLIF(?,0),?,?,?,?,?)`, id, cid, conversationID, uid, name, mimeType, category, size)
 	if err != nil {
 		s.root.Remove(id)
+		_ = removeMissingOK(s.root, "thumbs/"+id+".jpg")
 		fail(w, 500, "upload unavailable")
 		return
 	}
@@ -581,7 +583,13 @@ func (s *Service) cleanup(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "cleanup metadata failed")
 			return
 		}
-		if err = s.root.Remove(id); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.mu.Lock()
+		err = removeMissingOK(s.root, id)
+		if err == nil {
+			err = removeMissingOK(s.root, "thumbs/"+id+".jpg")
+		}
+		s.mu.Unlock()
+		if err != nil {
 			fail(w, 500, "file cleanup failed")
 			return
 		}

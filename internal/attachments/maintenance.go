@@ -109,7 +109,10 @@ func (s *Service) cleanupEntry(ctx context.Context, name, id string, cutoff time
 	if err != nil || !claimed {
 		return err
 	}
-	return removeMissingOK(s.root, name)
+	if err := removeMissingOK(s.root, name); err != nil {
+		return err
+	}
+	return removeMissingOK(s.root, "thumbs/"+id+".jpg")
 }
 
 func removeMissingOK(root *os.Root, name string) error {
