@@ -13,7 +13,7 @@ SQLite and is distributed as a multi-platform container image.
 
 Saved messages and notes, cross-scope forwarding, scheduled messages, polls,
 server events, administrative audit and personal calls are described in
-[the community features guide](docs/community-features.md). The current source also requires migration **000032**. See
+[the community features guide](docs/community-features.md). The current source also requires migration **000033**. See
 [audit fixes and upgrade order](docs/audit-2.5-fixes.md).
 
 
@@ -253,3 +253,5 @@ legal advice. Third-party dependencies remain under their respective licenses.
 AMD64 releases also include separate `-amd64-v1` and `-amd64-v3` image tags.
 Each contains one CPU variant; the deploy installer/updater selects it
 automatically. See [CPU variants and PGO](docs/amd64-levels.md).
+
+[Patch 2.5.3: changes, checks and measurements](https://github.com/LoonEman1/voxhold-frontend/blob/main/docs/audit-2.5.3-status.md).
