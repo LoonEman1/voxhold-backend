@@ -5,5 +5,7 @@ type Attachment struct {
 	Filename  string `json:"filename"`
 	MIMEType  string `json:"mime_type"`
 	SizeBytes int64  `json:"size_bytes"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
 	Deleted   bool   `json:"deleted"`
 }

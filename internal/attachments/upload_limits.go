@@ -28,19 +28,19 @@ func (s *Service) releaseUserUpload(userID int64) {
 	}
 }
 
-func (s *Service) compressUpload(ctx context.Context, file io.ReadSeeker) ([]byte, string, error) {
+func (s *Service) compressUpload(ctx context.Context, file io.ReadSeeker) ([]byte, string, int, int, error) {
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 	select {
 	case s.imageSlots <- struct{}{}:
 		defer func() { <-s.imageSlots }()
 	case <-ctx.Done():
-		return nil, "", ctx.Err()
+		return nil, "", 0, 0, ctx.Err()
 	case <-timer.C:
-		return nil, "", errImageBusy
+		return nil, "", 0, 0, errImageBusy
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", err
+		return nil, "", 0, 0, err
 	}
 	return compressImage(file)
 }

@@ -112,7 +112,7 @@ func TestImageProcessingWaitsAndHonoursCancellation(t *testing.T) {
 	}
 	ready := make(chan error, 1)
 	go func() {
-		_, _, err := s.compressUpload(context.Background(), bytes.NewReader(data.Bytes()))
+		_, _, _, _, err := s.compressUpload(context.Background(), bytes.NewReader(data.Bytes()))
 		ready <- err
 	}()
 	select {
@@ -132,7 +132,7 @@ func TestImageProcessingWaitsAndHonoursCancellation(t *testing.T) {
 	s.imageSlots <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := s.compressUpload(ctx, bytes.NewReader(data.Bytes())); err != context.Canceled {
+	if _, _, _, _, err := s.compressUpload(ctx, bytes.NewReader(data.Bytes())); err != context.Canceled {
 		t.Fatal(err)
 	}
 	<-s.imageSlots

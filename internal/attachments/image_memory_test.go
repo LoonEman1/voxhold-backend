@@ -34,7 +34,7 @@ func TestCompressImageRejects16BitMemoryBeforeDecode(t *testing.T) {
 	binary.BigEndian.PutUint32(header[20:24], 4000)
 	header[24], header[25] = 16, 6
 	binary.BigEndian.PutUint32(header[29:33], crc32.ChecksumIEEE(header[12:29]))
-	if _, _, err := compressImage(noDecodeReader{bytes.NewReader(header), t}); err == nil {
+	if _, _, _, _, err := compressImage(noDecodeReader{bytes.NewReader(header), t}); err == nil {
 		t.Fatal("accepted 192 MB decoded pixels")
 	}
 }
@@ -83,7 +83,7 @@ func BenchmarkCompressImage(b *testing.B) {
 					}
 					source = bytes.NewReader(copied)
 				}
-				out, _, err := compressImage(source)
+				out, _, _, _, err := compressImage(source)
 				f.Close()
 				if err != nil {
 					b.Fatal(err)

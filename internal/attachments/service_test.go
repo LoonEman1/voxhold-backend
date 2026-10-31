@@ -63,10 +63,13 @@ func TestUploadCompressionAuthorizationRetryQuotaAndCleanup(t *testing.T) {
 	if err = json.Unmarshal(w.Body.Bytes(), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.MIMEType != "image/jpeg" {
+	if a.MIMEType != "image/jpeg" || a.Width != 2560 || a.Height != 1 {
 		t.Fatal(a)
 	}
-	call(2, "PUT", url, body.Bytes(), 200)
+	retry := call(2, "PUT", url, body.Bytes(), 200)
+	if retry.Body.String() != w.Body.String() {
+		t.Fatal("retry lost image dimensions", retry.Body.String())
+	}
 	// A second uploader must not bypass the metadata key using a case variant
 	// of the same filesystem name (Windows and common macOS volumes).
 	call(1, "PUT", "/api/v1/channels/2/attachments/"+strings.ToUpper(id)+"?filename=overwrite.png", body.Bytes(), 400)
@@ -81,7 +84,7 @@ func TestUploadCompressionAuthorizationRetryQuotaAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(post.Attachments) != 1 {
+	if len(post.Attachments) != 1 || post.Attachments[0].Width != a.Width || post.Attachments[0].Height != a.Height {
 		t.Fatal(post)
 	}
 	content := call(1, "GET", "/api/v1/attachments/"+id+"/content", nil, 200)
@@ -120,7 +123,7 @@ func TestUploadCompressionAuthorizationRetryQuotaAndCleanup(t *testing.T) {
 	}
 }
 func TestInvalidImageDimensionsAndCorruption(t *testing.T) {
-	if _, _, err := compressImage(bytes.NewReader([]byte("broken image"))); err == nil {
+	if _, _, _, _, err := compressImage(bytes.NewReader([]byte("broken image"))); err == nil {
 		t.Fatal("accepted corrupt image")
 	}
 	// DecodeConfig rejects a decompression bomb before allocating its pixels.
@@ -129,7 +132,7 @@ func TestInvalidImageDimensionsAndCorruption(t *testing.T) {
 	if err := png.Encode(&b, img); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := compressImage(bytes.NewReader(b.Bytes())); err == nil {
+	if _, _, _, _, err := compressImage(bytes.NewReader(b.Bytes())); err == nil {
 		t.Fatal("accepted oversized image")
 	}
 }
