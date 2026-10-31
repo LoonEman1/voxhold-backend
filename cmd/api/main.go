@@ -87,6 +87,7 @@ func main() {
 		fmt.Printf("arch=%s level=%s\n", runtime.GOARCH, level)
 		return
 	}
+	configureMemoryLimit()
 	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
 	if err != nil {
 		log.Fatal(err)
@@ -330,7 +331,7 @@ func main() {
 		realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventType(event), Data: value})
 	})
 
-	notificationService := notifications.NewService(db, realtimeHub.ConnectedUserIDs,
+	notificationService := notifications.NewService(db, realtimeHub.IsUserOnline,
 		func(userID int64, event notifications.Event) {
 			realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventNotificationMessage, Data: event})
 		},
@@ -338,13 +339,18 @@ func main() {
 			realtimeHub.PublishToUser(userID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventNotificationSettingsUpdated, Data: value})
 		},
 	)
+	notificationContext, stopNotifications := context.WithCancel(context.Background())
+	var notificationWorker sync.WaitGroup
+	notificationWorker.Add(1)
+	safego.Go("notifications/worker", func() { defer notificationWorker.Done(); notificationService.Run(notificationContext) })
+	// Registered before other producers: their deferred shutdown runs first.
+	// HTTP shutdown completes before main returns and starts unwinding defers.
+	defer func() { stopNotifications(); notificationWorker.Wait() }()
 	messageEventPublisher.SetCreatedListener(func(value messageDomain.Message) {
 		if err := communityService.RecordThread(value); err != nil {
 			log.Printf("follow thread: %v", err)
 		}
-		if err := notificationService.Deliver(value); err != nil {
-			log.Printf("deliver message notification: %v", err)
-		}
+		notificationService.Enqueue(value)
 	})
 	messageRepository := messageSqlite.NewRepository(db)
 
@@ -406,17 +412,11 @@ func main() {
 		timer := time.NewTicker(time.Minute)
 		defer timer.Stop()
 		for {
-			ctx, cancel := context.WithTimeout(maintenanceContext, 2*time.Second)
-			if err := diagnosticsRepository.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
-				log.Printf("diagnostic cleanup: %v", err)
-			}
-			if err := attachmentService.Cleanup(ctx); err != nil && maintenanceContext.Err() == nil {
-				log.Printf("attachment cleanup: %v", err)
-			}
-			if err := messageRepository.PruneChanges(ctx); err != nil && maintenanceContext.Err() == nil {
-				log.Printf("message journal cleanup: %v", err)
-			}
-			cancel()
+			runStorageMaintenance(maintenanceContext,
+				maintenanceTask{"diagnostic", 2 * time.Second, diagnosticsRepository.Cleanup},
+				maintenanceTask{"attachment", 5 * time.Second, attachmentService.Cleanup},
+				maintenanceTask{"message journal", 2 * time.Second, messageRepository.PruneChanges},
+			)
 			sessionCtx, cancelSessions := context.WithTimeout(maintenanceContext, 2*time.Second)
 			if _, err := sessionRepository.DeleteExpired(sessionCtx, time.Now().Unix(), 256); err != nil && maintenanceContext.Err() == nil {
 				log.Printf("expired session cleanup: %v", err)

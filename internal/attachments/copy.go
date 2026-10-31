@@ -36,7 +36,8 @@ func (s *Service) Copy(ctx context.Context, uid int64, sourceID, kind string, de
 	}
 	var name, mime, category string
 	var size int64
-	err = s.db.QueryRowContext(ctx, `SELECT a.filename,a.mime_type,a.category,a.size_bytes FROM attachments a WHERE a.id=? AND a.deleted_at IS NULL AND (a.message_id IS NOT NULL OR a.direct_message_id IS NOT NULL) AND ((a.channel_id IS NOT NULL AND EXISTS(SELECT 1 FROM channel_accessible_members WHERE channel_id=a.channel_id AND user_id=?)) OR(a.conversation_id IS NOT NULL AND EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=a.conversation_id AND user_id=?)))`, sourceID, uid, uid).Scan(&name, &mime, &category, &size)
+	var width, height int
+	err = s.db.QueryRowContext(ctx, `SELECT a.filename,a.mime_type,a.category,a.size_bytes,COALESCE(a.width,0),COALESCE(a.height,0) FROM attachments a WHERE a.id=? AND a.deleted_at IS NULL AND (a.message_id IS NOT NULL OR a.direct_message_id IS NOT NULL) AND ((a.channel_id IS NOT NULL AND EXISTS(SELECT 1 FROM channel_accessible_members WHERE channel_id=a.channel_id AND user_id=?)) OR(a.conversation_id IS NOT NULL AND EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=a.conversation_id AND user_id=?)))`, sourceID, uid, uid).Scan(&name, &mime, &category, &size, &width, &height)
 	if err == sql.ErrNoRows {
 		return "", community.ErrForbidden
 	}
@@ -79,8 +80,9 @@ func (s *Service) Copy(ctx context.Context, uid int64, sourceID, kind string, de
 	} else {
 		conv = destination
 	}
-	if _, err = s.db.ExecContext(ctx, `INSERT INTO attachments(id,channel_id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes) VALUES(?,?,?,?,?,?,?,?)`, id, cid, conv, uid, name, mime, category, size); err != nil {
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO attachments(id,channel_id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes,width,height) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,0),NULLIF(?,0))`, id, cid, conv, uid, name, mime, category, size, width, height); err != nil {
 		_ = s.root.Remove(id)
+		_ = removeMissingOK(s.root, "thumbs/"+id+".jpg")
 		return "", err
 	}
 	return id, nil

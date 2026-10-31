@@ -7,9 +7,11 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"log"
 	"net/http"
 	"time"
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/imagelimit"
 )
 
 type Changed struct {
@@ -25,8 +27,8 @@ func (s *Service) contentMetadata(ctx context.Context, uid int64, id string) (na
 	return
 }
 
-// Thumbnails are bounded in-memory derivatives; original files remain the only
-// persistent storage reservation. Every cache hit still rechecks current ACL.
+// Derivatives are cached on disk. Every hit still checks current access and deletion.
+// Cache publication and deletion share the attachment mutation lock.
 func (s *Service) thumbnail(w http.ResponseWriter, r *http.Request) {
 	uid, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
@@ -50,59 +52,80 @@ func (s *Service) thumbnail(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "thumbnail unavailable")
 		return
 	}
-	s.thumbMu.Lock()
-	data := s.thumbnails[id]
-	s.thumbMu.Unlock()
+	cacheName := "thumbs/" + id + ".jpg"
+	data, _ := s.root.ReadFile(cacheName)
 	if data == nil {
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
 		select {
 		case s.thumbnailSlots <- struct{}{}:
 			defer func() { <-s.thumbnailSlots }()
-		default:
+		case <-r.Context().Done():
+			return
+		case <-timer.C:
 			w.Header().Set("Retry-After", "1")
 			fail(w, 429, "thumbnails busy; retry shortly")
 			return
 		}
-		f, err := s.root.Open(id)
-		if err != nil {
-			fail(w, 410, "attachment removed by server")
-			return
-		}
-		defer f.Close()
-		config, _, err := image.DecodeConfig(f)
-		if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 {
-			fail(w, 400, "invalid image")
-			return
-		}
-		if _, err = f.Seek(0, 0); err != nil {
-			fail(w, 500, "thumbnail unavailable")
-			return
-		}
-		img, _, err := image.Decode(f)
-		if err != nil {
-			fail(w, 400, "invalid image")
-			return
-		}
-		ratio := min(1.0, 480/float64(config.Width), 480/float64(config.Height))
-		dst := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(config.Width)*ratio)), max(1, int(float64(config.Height)*ratio))))
-		draw.Draw(dst, dst.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
-		draw.CatmullRom.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
-		var encoded bytes.Buffer
-		if err = jpeg.Encode(&encoded, dst, &jpeg.Options{Quality: 70}); err != nil {
-			fail(w, 500, "thumbnail unavailable")
-			return
-		}
-		data = encoded.Bytes()
-		s.thumbMu.Lock()
-		if s.thumbnails[id] == nil {
-			if len(s.thumbnailOrder) >= 64 {
-				delete(s.thumbnails, s.thumbnailOrder[0])
-				s.thumbnailOrder = s.thumbnailOrder[1:]
+		data, _ = s.root.ReadFile(cacheName)
+		if data == nil {
+			f, err := s.root.Open(id)
+			if err != nil {
+				fail(w, 410, "attachment removed by server")
+				return
 			}
-			s.thumbnailOrder = append(s.thumbnailOrder, id)
-			s.thumbnails[id] = data
+			defer f.Close()
+			config, _, err := image.DecodeConfig(f)
+			if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
+				fail(w, 400, "invalid image")
+				return
+			}
+			if _, err = f.Seek(0, 0); err != nil {
+				fail(w, 500, "thumbnail unavailable")
+				return
+			}
+			img, _, err := image.Decode(f)
+			if err != nil {
+				fail(w, 400, "invalid image")
+				return
+			}
+			ratio := min(1.0, 480/float64(config.Width), 480/float64(config.Height))
+			dst := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(config.Width)*ratio)), max(1, int(float64(config.Height)*ratio))))
+			draw.Draw(dst, dst.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+			draw.CatmullRom.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
+			var encoded bytes.Buffer
+			if err = jpeg.Encode(&encoded, dst, &jpeg.Options{Quality: 70}); err != nil {
+				fail(w, 500, "thumbnail unavailable")
+				return
+			}
+			data = encoded.Bytes()
+			// Use a unique staging name: two requests may generate the same ID.
+			// Recheck metadata while holding the deletion lock before publishing a cache entry.
+			s.mu.Lock()
+			_, _, gone, accessErr := s.contentMetadata(r.Context(), uid, id)
+			if accessErr == nil && !gone {
+				temporary := "thumbs/" + id + "." + randomID() + ".tmp"
+				cacheErr := s.root.WriteFile(temporary, data, 0600)
+				if cacheErr == nil {
+					cacheErr = s.root.Rename(temporary, cacheName)
+				}
+				_ = removeMissingOK(s.root, temporary)
+				if cacheErr != nil {
+					log.Printf("cache attachment thumbnail %s: %v", id, cacheErr)
+				}
+			}
+			s.mu.Unlock()
+			if accessErr != nil {
+				fail(w, 404, "attachment not found")
+				return
+			}
+			if gone {
+				fail(w, 410, "attachment removed by server")
+				return
+			}
 		}
-		s.thumbMu.Unlock()
 	}
+
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Content-Disposition", "inline")
 	w.Header().Set("Cache-Control", "private, no-store")

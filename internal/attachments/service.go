@@ -19,12 +19,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 	"voxhold-backend/internal/community"
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/imagelimit"
 	"voxhold-backend/internal/message"
 	"voxhold-backend/internal/permissions"
 	"voxhold-backend/internal/recordings"
@@ -47,13 +49,15 @@ type Service struct {
 	root           *os.Root
 	directory      string
 	mu             sync.Mutex
+	cleanupMu      sync.Mutex
+	cleanupCursor  string
 	uploads        chan struct{}
+	imageSlots     chan struct{}
+	uploadUsersMu  sync.Mutex
+	userUploads    map[int64]int
 	plans          map[string]Plan
 	recordings     *recordings.Service
 	changed        func(int64, int64, []string)
-	thumbMu        sync.Mutex
-	thumbnails     map[string][]byte
-	thumbnailOrder []string
 	thumbnailSlots chan struct{}
 }
 
@@ -66,7 +70,11 @@ func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, i
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 2), thumbnails: map[string][]byte{}, thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
+	if err := root.Mkdir("thumbs", 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		root.Close()
+		return nil, err
+	}
+	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 8), imageSlots: make(chan struct{}, imageConcurrency(debug.SetMemoryLimit(-1))), userUploads: make(map[int64]int), thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
 	state, err := storagebudget.Get(context.Background(), db, dir)
 	if err != nil {
 		root.Close()
@@ -180,17 +188,24 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "upload unavailable")
 		return
 	}
+	if !s.acquireUserUpload(uid) {
+		w.Header().Set("Retry-After", "2")
+		fail(w, 429, "uploads busy; retry shortly")
+		return
+	}
+	defer s.releaseUserUpload(uid)
 	select {
 	case s.uploads <- struct{}{}:
 		defer func() { <-s.uploads }()
 	default:
+		w.Header().Set("Retry-After", "2")
 		fail(w, 429, "uploads busy; retry shortly")
 		return
 	}
 	var existing message.Attachment
 	var owner, c, conv int64
 	var deleted bool
-	err := s.db.QueryRowContext(r.Context(), `SELECT id,filename,mime_type,size_bytes,owner_user_id,COALESCE(channel_id,0),COALESCE(conversation_id,0),deleted_at IS NOT NULL FROM attachments WHERE id=?`, id).Scan(&existing.ID, &existing.Filename, &existing.MIMEType, &existing.SizeBytes, &owner, &c, &conv, &deleted)
+	err := s.db.QueryRowContext(r.Context(), `SELECT id,filename,mime_type,size_bytes,COALESCE(width,0),COALESCE(height,0),owner_user_id,COALESCE(channel_id,0),COALESCE(conversation_id,0),deleted_at IS NOT NULL FROM attachments WHERE id=?`, id).Scan(&existing.ID, &existing.Filename, &existing.MIMEType, &existing.SizeBytes, &existing.Width, &existing.Height, &owner, &c, &conv, &deleted)
 	if err == nil {
 		if owner != uid || c != cid || conv != conversationID || deleted {
 			fail(w, 409, "attachment ID already used")
@@ -240,23 +255,32 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 	file.Close()
 	mimeType := http.DetectContentType(head[:n])
 	category := "files"
+	var width, height int
 	if strings.HasPrefix(mimeType, "image/") && mimeType != "image/svg+xml" {
 		file, err = s.root.Open(temp)
 		if err != nil {
 			fail(w, 500, "upload unavailable")
 			return
 		}
-		data, readErr := io.ReadAll(file)
-		file.Close()
-		if readErr != nil {
+		compressed, typ, imageWidth, imageHeight, err := s.compressUpload(r.Context(), file)
+		closeErr := file.Close()
+		if closeErr != nil {
 			fail(w, 500, "upload unavailable")
 			return
 		}
-		compressed, typ, err := compressImage(data)
 		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			if errors.Is(err, errImageBusy) {
+				w.Header().Set("Retry-After", "2")
+				fail(w, 429, err.Error())
+				return
+			}
 			fail(w, 400, "invalid image or image exceeds 30 megapixels")
 			return
 		}
+		width, height = imageWidth, imageHeight
 		mimeType = typ
 		size = int64(len(compressed))
 		if err = s.root.WriteFile(temp, compressed, 0600); err != nil {
@@ -301,22 +325,26 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "upload unavailable")
 		return
 	}
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO attachments(id,channel_id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes) VALUES(?,NULLIF(?,0),NULLIF(?,0),?,?,?,?,?)`, id, cid, conversationID, uid, name, mimeType, category, size)
+	_, err = s.db.ExecContext(r.Context(), `INSERT INTO attachments(id,channel_id,conversation_id,owner_user_id,filename,mime_type,category,size_bytes,width,height) VALUES(?,NULLIF(?,0),NULLIF(?,0),?,?,?,?,?,NULLIF(?,0),NULLIF(?,0))`, id, cid, conversationID, uid, name, mimeType, category, size, width, height)
 	if err != nil {
 		s.root.Remove(id)
+		_ = removeMissingOK(s.root, "thumbs/"+id+".jpg")
 		fail(w, 500, "upload unavailable")
 		return
 	}
-	httpapi.WriteJSON(w, 200, message.Attachment{ID: id, Filename: name, MIMEType: mimeType, SizeBytes: size})
+	httpapi.WriteJSON(w, 200, message.Attachment{ID: id, Filename: name, MIMEType: mimeType, SizeBytes: size, Width: width, Height: height})
 }
-func compressImage(data []byte) ([]byte, string, error) {
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 {
-		return nil, "", errors.New("invalid image")
+func compressImage(file io.ReadSeeker) ([]byte, string, int, int, error) {
+	config, _, err := image.DecodeConfig(file)
+	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 30_000_000 || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
+		return nil, "", 0, 0, errors.New("invalid image")
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, "", 0, 0, err
+	}
+	img, _, err := image.Decode(file)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, 0, err
 	}
 	w, h := config.Width, config.Height
 	if w > 2560 || h > 2560 {
@@ -334,10 +362,10 @@ func compressImage(data []byte) ([]byte, string, error) {
 	}
 	if !opaque {
 		err = png.Encode(&out, img)
-		return out.Bytes(), "image/png", err
+		return out.Bytes(), "image/png", w, h, err
 	}
 	err = jpeg.Encode(&out, img, &jpeg.Options{Quality: 82})
-	return out.Bytes(), "image/jpeg", err
+	return out.Bytes(), "image/jpeg", w, h, err
 }
 func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 	uid, ok := httpapi.AuthenticatedUserID(w, r)
@@ -576,7 +604,13 @@ func (s *Service) cleanup(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "cleanup metadata failed")
 			return
 		}
-		if err = s.root.Remove(id); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.mu.Lock()
+		err = removeMissingOK(s.root, id)
+		if err == nil {
+			err = removeMissingOK(s.root, "thumbs/"+id+".jpg")
+		}
+		s.mu.Unlock()
+		if err != nil {
 			fail(w, 500, "file cleanup failed")
 			return
 		}

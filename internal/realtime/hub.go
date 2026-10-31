@@ -105,12 +105,15 @@ type Hub struct {
 	closed              bool
 	clients             map[*Client]struct{}
 	clientsByUser       map[int64]map[*Client]struct{}
+	clientsByServer     map[int64]map[*Client]struct{}
 	clientsBySession    map[[32]byte]map[*Client]struct{}
 	clientsByConnection map[string]*Client
 
 	presenceMu         sync.RWMutex
 	presence           map[int64]map[int64]int
 	lastSeenSaver      func(userID, at int64)
+	lastSeenMu         sync.Mutex
+	lastSeen           map[int64]presenceStamp
 	presenceBroadcasts keylock.Set
 
 	mediaTransitions keylock.Set
@@ -125,9 +128,10 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		rooms:               make(map[int64]*room),
-		clients:             make(map[*Client]struct{}),
-		clientsByUser:       make(map[int64]map[*Client]struct{}),
+		rooms:           make(map[int64]*room),
+		clients:         make(map[*Client]struct{}),
+		clientsByUser:   make(map[int64]map[*Client]struct{}),
+		clientsByServer: make(map[int64]map[*Client]struct{}), lastSeen: make(map[int64]presenceStamp),
 		clientsBySession:    make(map[[32]byte]map[*Client]struct{}),
 		clientsByConnection: make(map[string]*Client),
 		presence:            make(map[int64]map[int64]int),
@@ -147,6 +151,13 @@ func (h *Hub) ConnectedUserIDs() []int64 {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// IsUserOnline checks one account without allocating an instance-wide snapshot.
+func (h *Hub) IsUserOnline(userID int64) bool {
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	return len(h.clientsByUser[userID]) > 0
 }
 
 // CloseReasonServerShutdown marks connections closed by a server restart.
@@ -199,6 +210,9 @@ func (h *Hub) Register(client *Client) bool {
 	}
 
 	h.clients[client] = struct{}{}
+	for _, serverID := range client.serverIDs() {
+		h.indexServerLocked(serverID, client)
+	}
 	h.clientsByConnection[client.ConnectionID()] = client
 
 	userClients := h.clientsByUser[client.userID]
@@ -283,6 +297,9 @@ func (h *Hub) Unregister(client *Client) {
 	client.Close()
 	h.clientsMu.Lock()
 	delete(h.clients, client)
+	for _, serverID := range client.serverIDs() {
+		h.unindexServerLocked(serverID, client)
+	}
 	delete(h.clientsByConnection, client.ConnectionID())
 
 	userClients := h.clientsByUser[client.userID]
@@ -418,30 +435,27 @@ func (h *Hub) RevokeServer(serverID int64) {
 	}
 }
 
-func (h *Hub) clientsForServer(
-	serverID int64,
-) []*Client {
+func (h *Hub) clientsForServer(serverID int64) []*Client {
 	h.clientsMu.RLock()
-	clients := clientSetSnapshot(h.clients)
-	h.clientsMu.RUnlock()
+	defer h.clientsMu.RUnlock()
+	return clientSetSnapshot(h.clientsByServer[serverID])
+}
 
-	serverClients := make(
-		[]*Client,
-		0,
-		len(clients),
-	)
-
-	for _, client := range clients {
-		if client.hasServer(serverID) {
-			serverClients = append(
-				serverClients,
-				client,
-			)
-		}
-
+// Caller holds clientsMu before touching the client's server membership.
+func (h *Hub) indexServerLocked(serverID int64, client *Client) {
+	clients := h.clientsByServer[serverID]
+	if clients == nil {
+		clients = make(map[*Client]struct{})
+		h.clientsByServer[serverID] = clients
 	}
-
-	return serverClients
+	clients[client] = struct{}{}
+}
+func (h *Hub) unindexServerLocked(serverID int64, client *Client) {
+	clients := h.clientsByServer[serverID]
+	delete(clients, client)
+	if len(clients) == 0 {
+		delete(h.clientsByServer, serverID)
+	}
 }
 
 func (h *Hub) AddUserToServer(
@@ -458,10 +472,15 @@ func (h *Hub) AddUserToServer(
 	h.clientsMu.RUnlock()
 
 	for _, client := range clients {
-		if !client.addServer(serverID) {
+		h.clientsMu.Lock()
+		_, registered := h.clients[client]
+		if !registered || !client.addServer(serverID) {
+			h.clientsMu.Unlock()
 			continue
 		}
-
+		h.indexServerLocked(serverID, client)
+		becameOnline := h.incrementPresence(serverID, userID)
+		h.clientsMu.Unlock()
 		ids, err := h.loadChannelAccess(userID)
 		if err != nil {
 			client.CloseWithReason(CloseReasonServerShutdown)
@@ -469,10 +488,6 @@ func (h *Hub) AddUserToServer(
 			continue
 		}
 		client.replaceChannelAccess(ids)
-		becameOnline := h.incrementPresence(
-			serverID,
-			userID,
-		)
 		if becameOnline {
 			h.broadcastPresence(
 				serverID,
@@ -486,18 +501,23 @@ func (h *Hub) AddUserToServer(
 }
 
 func (h *Hub) registerPresence(client *Client) {
+	// Registration may race with disconnect before this post-registration step.
+	h.clientsMu.RLock()
+	if _, registered := h.clients[client]; !registered {
+		h.clientsMu.RUnlock()
+		return
+	}
 	serverIDs := client.serverIDs()
-
+	var online []int64
 	for _, serverID := range serverIDs {
 		if h.incrementPresence(serverID, client.UserID()) {
-			h.broadcastPresence(
-				serverID,
-				client.UserID(),
-				PresenceOnline,
-			)
+			online = append(online, serverID)
 		}
 	}
-
+	h.clientsMu.RUnlock()
+	for _, serverID := range online {
+		h.broadcastPresence(serverID, client.UserID(), PresenceOnline)
+	}
 	h.sendPresenceSnapshot(client, serverIDs)
 }
 
@@ -505,6 +525,14 @@ func (h *Hub) unregisterPresence(client *Client) {
 	for _, serverID := range client.serverIDs() {
 		h.removeClientServer(client, serverID, true)
 	}
+	// Keep the offline stamp through the complete server batch, then reclaim it.
+	h.clientsMu.RLock()
+	if len(h.clientsByUser[client.UserID()]) == 0 {
+		h.lastSeenMu.Lock()
+		delete(h.lastSeen, client.UserID())
+		h.lastSeenMu.Unlock()
+	}
+	h.clientsMu.RUnlock()
 }
 
 func (h *Hub) removeClientServer(
@@ -512,14 +540,14 @@ func (h *Hub) removeClientServer(
 	serverID int64,
 	announce bool,
 ) {
+	h.clientsMu.Lock()
 	if !client.removeServer(serverID) {
+		h.clientsMu.Unlock()
 		return
 	}
-
-	becameOffline := h.decrementPresence(
-		serverID,
-		client.UserID(),
-	)
+	h.unindexServerLocked(serverID, client)
+	becameOffline := h.decrementPresence(serverID, client.UserID())
+	h.clientsMu.Unlock()
 	if announce && becameOffline {
 		h.broadcastPresence(
 			serverID,
@@ -650,7 +678,17 @@ func (h *Hub) broadcastPresence(
 	save := h.lastSeenSaver
 	h.clientsMu.RUnlock()
 	if save != nil {
-		save(userID, lastSeenAt)
+		stamp := presenceStamp{lastSeenAt, status}
+		h.lastSeenMu.Lock()
+		previous, exists := h.lastSeen[userID]
+		changed := !exists || previous != stamp
+		if changed {
+			h.lastSeen[userID] = stamp
+		}
+		h.lastSeenMu.Unlock()
+		if changed {
+			save(userID, lastSeenAt)
+		}
 	}
 	event := OutgoingEvent{
 		Type: EventPresenceUpdated,
@@ -911,4 +949,11 @@ func (h *Hub) Stats() map[string]int {
 		result["queue_high_watermark"] = max(result["queue_high_watermark"], stats.HighWatermark)
 	}
 	return result
+}
+
+// Preserve online/offline transitions in the same second while deduplicating
+// identical transitions emitted for several server memberships.
+type presenceStamp struct {
+	at     int64
+	status PresenceStatus
 }

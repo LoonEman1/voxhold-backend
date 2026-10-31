@@ -11,6 +11,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"math"
+	"voxhold-backend/internal/imagelimit"
 
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
@@ -37,7 +38,7 @@ func OptimizeWithCrop(data []byte, selected *Crop) ([]byte, error) {
 		return nil, ErrImage
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > MaxPixels/config.Height {
+	if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > MaxPixels/config.Height || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
 		return nil, ErrImage
 	}
 	source, _, err := image.Decode(bytes.NewReader(data))

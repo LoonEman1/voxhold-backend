@@ -14,6 +14,8 @@ const (
 	EventAuthenticate EventType = "auth"
 	EventReady        EventType = "ready"
 	EventError        EventType = "error"
+	EventPing         EventType = "ping"
+	EventPong         EventType = "pong"
 
 	EventChannelSubscribe    EventType = "channel.subscribe"
 	EventChannelSubscribed   EventType = "channel.subscribed"

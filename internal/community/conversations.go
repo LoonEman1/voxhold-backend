@@ -232,14 +232,14 @@ func (s *Service) conversationMessages(r *http.Request, userID int64) (any, erro
 		byID[values[i].ID] = &values[i]
 	}
 	encoded, _ := json.Marshal(ids)
-	attachments, err := tx.QueryContext(r.Context(), `SELECT direct_message_id,id,filename,mime_type,size_bytes,deleted_at IS NOT NULL FROM attachments WHERE direct_message_id IN (SELECT value FROM json_each(?)) ORDER BY id`, string(encoded))
+	attachments, err := tx.QueryContext(r.Context(), `SELECT direct_message_id,id,filename,mime_type,size_bytes,COALESCE(width,0),COALESCE(height,0),deleted_at IS NOT NULL FROM attachments WHERE direct_message_id IN (SELECT value FROM json_each(?)) ORDER BY id`, string(encoded))
 	if err != nil {
 		return nil, err
 	}
 	for attachments.Next() {
 		var id int64
 		var a message.Attachment
-		if err = attachments.Scan(&id, &a.ID, &a.Filename, &a.MIMEType, &a.SizeBytes, &a.Deleted); err != nil {
+		if err = attachments.Scan(&id, &a.ID, &a.Filename, &a.MIMEType, &a.SizeBytes, &a.Width, &a.Height, &a.Deleted); err != nil {
 			break
 		}
 		if v := byID[id]; v != nil {
@@ -381,13 +381,13 @@ func (s *Service) createDirect(ctx context.Context, id, userID int64, input Dire
 	}
 	// Return and broadcast the same complete message as history, including on
 	// retries after the original HTTP response was lost.
-	attached, err := tx.QueryContext(ctx, `SELECT id,filename,mime_type,size_bytes,deleted_at IS NOT NULL FROM attachments WHERE direct_message_id=? ORDER BY id`, v.ID)
+	attached, err := tx.QueryContext(ctx, `SELECT id,filename,mime_type,size_bytes,COALESCE(width,0),COALESCE(height,0),deleted_at IS NOT NULL FROM attachments WHERE direct_message_id=? ORDER BY id`, v.ID)
 	if err != nil {
 		return nil, err
 	}
 	for attached.Next() {
 		var a message.Attachment
-		if err = attached.Scan(&a.ID, &a.Filename, &a.MIMEType, &a.SizeBytes, &a.Deleted); err != nil {
+		if err = attached.Scan(&a.ID, &a.Filename, &a.MIMEType, &a.SizeBytes, &a.Width, &a.Height, &a.Deleted); err != nil {
 			break
 		}
 		v.Attachments = append(v.Attachments, a)

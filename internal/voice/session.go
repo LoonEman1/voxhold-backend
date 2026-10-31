@@ -14,6 +14,7 @@ import (
 	"voxhold-backend/internal/telemetry"
 	"voxhold-backend/internal/webrtcrecovery"
 
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -199,10 +200,19 @@ func (s *session) forwardAudio(
 		}
 	}()
 
+	// Pion interceptor v0.1.49 NACK uses PacketFactoryCopy: NewPacket clones
+	// the header and copies payload before WriteRTP returns. Static RTP writes
+	// are synchronous, so the receive buffer can be reused after each write.
+	buffer := make([]byte, 1500)
+	var packet rtp.Packet
 	for {
-		packet, _, err := remote.ReadRTP()
+		n, _, err := remote.Read(buffer)
 		if err != nil {
 			return
+		}
+		packet = rtp.Packet{}
+		if err := packet.Unmarshal(buffer[:n]); err != nil {
+			continue
 		}
 
 		if !s.audioBitrate.allow(len(packet.Payload)) {
@@ -221,7 +231,7 @@ func (s *session) forwardAudio(
 		// listener when one binding fails (closed DTLS, transient ENOBUFS).
 		// Leaving the loop would silence this speaker for the whole channel,
 		// so only a failed read from the speaker stops forwarding.
-		_ = telemetry.Forward(telemetry.VoiceRTP, func() error { return local.WriteRTP(packet) })
+		_ = telemetry.Forward(telemetry.VoiceRTP, func() error { return local.WriteRTP(&packet) })
 	}
 }
 

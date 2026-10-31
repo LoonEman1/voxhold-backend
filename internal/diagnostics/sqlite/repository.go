@@ -108,7 +108,7 @@ func (r *Repository) InsertBatch(
 // Cleanup keeps each write transaction small and runs outside request handling.
 func (r *Repository) Cleanup(ctx context.Context) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM client_diagnostic_events WHERE id IN (
-		SELECT id FROM client_diagnostic_events WHERE created_at < ? ORDER BY created_at, id LIMIT 500
+		SELECT id FROM client_diagnostic_events WHERE created_at < ? ORDER BY created_at, id LIMIT 2000
 	)`, time.Now().Add(-diagnostics.Retention).Unix())
 	return err
 }

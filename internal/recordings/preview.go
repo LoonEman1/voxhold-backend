@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"voxhold-backend/internal/imagelimit"
 
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
@@ -30,7 +31,7 @@ func optimizePreview(data []byte) ([]byte, error) {
 		return nil, ErrPreview
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || (format != "jpeg" && format != "png" && format != "webp") || config.Width <= 0 || config.Height <= 0 || config.Width > 1280 || config.Height > 720 {
+	if err != nil || (format != "jpeg" && format != "png" && format != "webp") || config.Width <= 0 || config.Height <= 0 || config.Width > 1280 || config.Height > 720 || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
 		return nil, ErrPreview
 	}
 	source, _, err := image.Decode(bytes.NewReader(data))
