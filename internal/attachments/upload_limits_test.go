@@ -16,6 +16,17 @@ import (
 	"voxhold-backend/internal/testdb"
 )
 
+func TestImageConcurrencyReservesHeadroomInSmallContainers(t *testing.T) {
+	for _, value := range []struct {
+		limit int64
+		want  int
+	}{{614 << 20, 1}, {1<<30 - 1, 1}, {1 << 30, 2}, {1<<63 - 1, 2}, {0, 2}} {
+		if got := imageConcurrency(value.limit); got != value.want {
+			t.Fatalf("memory limit %d: got %d, want %d", value.limit, got, value.want)
+		}
+	}
+}
+
 type uploadGate struct {
 	*bytes.Reader
 	started chan struct{}

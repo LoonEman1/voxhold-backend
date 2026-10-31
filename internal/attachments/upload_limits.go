@@ -9,6 +9,15 @@ import (
 
 var errImageBusy = errors.New("image processing busy; retry shortly")
 
+func imageConcurrency(memoryLimit int64) int {
+	// Two 24 MP CatmullRom jobs peak near 780 MiB; GC alone cannot bound
+	// their live scaler scratch space on the default 768 MiB container.
+	if memoryLimit > 0 && memoryLimit < 1<<30 {
+		return 1
+	}
+	return 2
+}
+
 func (s *Service) acquireUserUpload(userID int64) bool {
 	s.uploadUsersMu.Lock()
 	defer s.uploadUsersMu.Unlock()

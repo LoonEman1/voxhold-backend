@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func New(db *sql.DB, recordingService *recordings.Service, changed func(int64, i
 		root.Close()
 		return nil, err
 	}
-	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 8), imageSlots: make(chan struct{}, 2), userUploads: make(map[int64]int), thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
+	s := &Service{db: db, root: root, directory: dir, uploads: make(chan struct{}, 8), imageSlots: make(chan struct{}, imageConcurrency(debug.SetMemoryLimit(-1))), userUploads: make(map[int64]int), thumbnailSlots: make(chan struct{}, 2), plans: map[string]Plan{}, recordings: recordingService, changed: changed}
 	state, err := storagebudget.Get(context.Background(), db, dir)
 	if err != nil {
 		root.Close()
