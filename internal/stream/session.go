@@ -437,10 +437,19 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPR
 		limitReason = "stream audio bitrate limit exceeded"
 	}
 
+	// Pion interceptor v0.1.49 NACK uses PacketFactoryCopy: NewPacket clones
+	// the header and copies payload before WriteRTP returns. Static RTP writes
+	// are synchronous, so the receive buffer can be reused after each write.
+	buffer := make([]byte, 1500)
+	var packet rtp.Packet
 	for {
-		packet, _, err := remote.ReadRTP()
+		n, _, err := remote.Read(buffer)
 		if err != nil {
 			return
+		}
+		packet = rtp.Packet{}
+		if err := packet.Unmarshal(buffer[:n]); err != nil {
+			continue
 		}
 		if !limiter.allow(len(packet.Payload)) {
 			s.scheduleFail(limitReason)
@@ -451,7 +460,7 @@ func (s *session) forwardTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPR
 		// ENOBUFS); the packet still reached every other viewer. Leaving the
 		// loop would end this rendition for the whole room, so only a failed
 		// read from the publisher stops forwarding.
-		_ = telemetry.Forward(telemetry.StreamRTP, func() error { return local.WriteRTP(packet) })
+		_ = telemetry.Forward(telemetry.StreamRTP, func() error { return local.WriteRTP(&packet) })
 	}
 }
 
