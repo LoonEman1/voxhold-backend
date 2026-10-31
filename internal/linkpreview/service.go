@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"voxhold-backend/internal/imagelimit"
 
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
@@ -156,7 +157,7 @@ func (s *Service) image(w http.ResponseWriter, r *http.Request) {
 }
 func thumbnail(data []byte) ([]byte, error) {
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 8_000_000 {
+	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 8_000_000 || imagelimit.DecodedBytes(config) > imagelimit.MaxDecodedBytes {
 		return nil, errUnavailable
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))

@@ -120,7 +120,7 @@ func openMessageTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("create schema: %v", err)
 	}
 
-	for _, name := range []string{"000020_message_sync.up.sql", "000022_channel_access.up.sql", "000024_message_interactions.up.sql", "000025_news_channels.up.sql", "000027_custom_roles.up.sql", "000029_conversations.up.sql", "000030_attachments.up.sql", "000031_community_features.up.sql"} {
+	for _, name := range []string{"000020_message_sync.up.sql", "000022_channel_access.up.sql", "000024_message_interactions.up.sql", "000025_news_channels.up.sql", "000027_custom_roles.up.sql", "000029_conversations.up.sql", "000030_attachments.up.sql", "000031_community_features.up.sql", "000033_attachment_dimensions.up.sql"} {
 		migration, err := os.ReadFile("../../../migrations/" + name)
 		if err != nil {
 			t.Fatal(err)

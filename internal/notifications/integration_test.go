@@ -24,7 +24,7 @@ func TestUnsubscribedChannelNotificationReachesBothTabsAndHonorsRevocation(t *te
 	hub.SetChannelAccessLoader(repo.AccessibleChannelIDs)
 	defer hub.Close()
 	var deliveryError error
-	service := notifications.NewService(db, hub.ConnectedUserIDs, func(id int64, event notifications.Event) {
+	service := notifications.NewService(db, hub.IsUserOnline, func(id int64, event notifications.Event) {
 		hub.PublishToUser(id, realtime.OutgoingEvent{Type: realtime.EventNotificationMessage, Data: event})
 	}, nil)
 	publisher := realtime.NewMessageEventPublisher(hub)

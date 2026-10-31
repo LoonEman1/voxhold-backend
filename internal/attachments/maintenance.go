@@ -3,9 +3,11 @@ package attachments
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"voxhold-backend/internal/storage"
@@ -15,30 +17,77 @@ import (
 // Cleanup reclaims abandoned uploads. A database tombstone arbitrates with
 // sending and scheduling before any physical content is removed.
 func (s *Service) Cleanup(ctx context.Context) error {
+	s.cleanupMu.Lock()
+	defer s.cleanupMu.Unlock()
 	entries, err := fs.ReadDir(s.root.FS(), ".")
 	if err != nil {
 		return err
 	}
 	cutoff := time.Now().Add(-24 * time.Hour)
-	for _, entry := range entries {
+	start := sort.Search(len(entries), func(i int) bool { return entries[i].Name() > s.cleanupCursor })
+	for start < len(entries) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		name := entry.Name()
-		id := strings.TrimSuffix(name, ".part")
-		if !validID(id) || entry.IsDir() {
-			continue
+		end := min(start+500, len(entries))
+		ids := make([]string, 0, end-start)
+		for _, entry := range entries[start:end] {
+			if !entry.IsDir() && validID(entry.Name()) {
+				ids = append(ids, entry.Name())
+			}
 		}
-		s.mu.Lock()
-		storagebudget.Mu.Lock()
-		err = s.cleanupEntry(ctx, name, id, cutoff)
-		storagebudget.Mu.Unlock()
-		s.mu.Unlock()
+		candidates, err := s.cleanupCandidates(ctx, ids)
 		if err != nil {
 			return err
 		}
+		for _, entry := range entries[start:end] {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			name := entry.Name()
+			id := strings.TrimSuffix(name, ".part")
+			if !entry.IsDir() && validID(id) && (strings.HasSuffix(name, ".part") || candidates[id]) {
+				s.mu.Lock()
+				storagebudget.Mu.Lock()
+				err = s.cleanupEntry(ctx, name, id, cutoff)
+				storagebudget.Mu.Unlock()
+				s.mu.Unlock()
+				if err != nil {
+					return err
+				}
+			}
+			s.cleanupCursor = name
+		}
+		start = end
 	}
+	s.cleanupCursor = ""
 	return nil
+}
+
+func (s *Service) cleanupCandidates(ctx context.Context, ids []string) (map[string]bool, error) {
+	candidates := make(map[string]bool)
+	if len(ids) == 0 {
+		return candidates, nil
+	}
+	data, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT j.value FROM json_each(?) j
+ LEFT JOIN attachments a ON a.id=j.value WHERE a.id IS NULL OR a.deleted_at IS NOT NULL
+ OR (a.message_id IS NULL AND a.direct_message_id IS NULL)`, string(data))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		candidates[id] = true
+	}
+	return candidates, rows.Err()
 }
 
 func (s *Service) cleanupEntry(ctx context.Context, name, id string, cutoff time.Time) error {
@@ -60,7 +109,10 @@ func (s *Service) cleanupEntry(ctx context.Context, name, id string, cutoff time
 	if err != nil || !claimed {
 		return err
 	}
-	return removeMissingOK(s.root, name)
+	if err := removeMissingOK(s.root, name); err != nil {
+		return err
+	}
+	return removeMissingOK(s.root, "thumbs/"+id+".jpg")
 }
 
 func removeMissingOK(root *os.Root, name string) error {

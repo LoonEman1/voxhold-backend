@@ -10,6 +10,7 @@ import (
 
 	"voxhold-backend/internal/mentions"
 	"voxhold-backend/internal/message"
+	"voxhold-backend/internal/storage"
 )
 
 type Mode string
@@ -57,13 +58,14 @@ func (e Event) EventChannelID() int64 { return e.ChannelID }
 
 type Service struct {
 	db              *sql.DB
-	online          func() []int64
+	isOnline        func(int64) bool
+	queue           chan message.Message
 	publish         func(int64, Event)
 	settingsChanged func(int64, Settings)
 }
 
-func NewService(db *sql.DB, online func() []int64, publish func(int64, Event), changed func(int64, Settings)) *Service {
-	return &Service{db: db, online: online, publish: publish, settingsChanged: changed}
+func NewService(db *sql.DB, isOnline func(int64) bool, publish func(int64, Event), changed func(int64, Settings)) *Service {
+	return &Service{db: db, isOnline: isOnline, queue: make(chan message.Message, 1024), publish: publish, settingsChanged: changed}
 }
 
 func check(ctx context.Context, tx *sql.Tx, serverID, channelID, userID int64) error {
@@ -137,13 +139,17 @@ func (s *Service) Set(ctx context.Context, serverID, channelID, userID int64, mo
 // transient previews to connected accounts. Counts survive reconnects and use
 // exactly the same mentions/reply/forward rules as live notifications.
 func (s *Service) Deliver(value message.Message) error {
+	return s.deliver(context.Background(), value)
+}
+
+func (s *Service) deliver(parent context.Context, value message.Message) error {
 	if value.Replayed {
 		return nil
 	}
 	targets := mentions.Parse(value.Content)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return err
 	}
@@ -240,33 +246,19 @@ func (s *Service) Deliver(value message.Message) error {
 	if err != nil {
 		return err
 	}
-	if len(deliveries) == 0 {
-		return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
 	}
-	encoded, err := json.Marshal(ids)
+	if len(deliveries) == 0 {
+		return nil
+	}
+	inserted, err := s.persistDeliveries(ctx, value.ChannelID, value.ID, ids)
 	if err != nil {
 		return err
 	}
-	// SELECT also avoids resurrecting alerts for a concurrently removed message.
-	if _, err = tx.ExecContext(ctx, `INSERT INTO channel_notifications(channel_id,server_id,user_id,message_id)
-       SELECT c.id,c.server_id,CAST(j.value AS INTEGER),m.id FROM json_each(?) j
-       JOIN messages m ON m.id=? JOIN channels c ON c.id=m.channel_id AND c.id=?
-       WHERE m.id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=c.id AND r.user_id=CAST(j.value AS INTEGER)),0)
-       ON CONFLICT DO NOTHING`, string(encoded), value.ID, value.ChannelID); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	online := map[int64]bool{}
-	if s.online != nil {
-		for _, id := range s.online() {
-			online[id] = true
-		}
-	}
 	if s.publish != nil {
 		for _, item := range deliveries {
-			if online[item.userID] {
+			if inserted[item.userID] && s.isOnline != nil && s.isOnline(item.userID) {
 				s.publish(item.userID, item.event)
 			}
 		}
@@ -279,4 +271,48 @@ func defaultMode(news bool) Mode {
 		return All
 	}
 	return Mentions
+}
+
+// persistDeliveries revalidates access after the read snapshot is released.
+// Returning only inserted IDs prevents phantom events and duplicate alerts.
+func (s *Service) persistDeliveries(ctx context.Context, channelID, messageID int64, ids []int64) (map[int64]bool, error) {
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := storage.BeginWrite(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `INSERT INTO channel_notifications(channel_id,server_id,user_id,message_id)
+ SELECT c.id,c.server_id,CAST(j.value AS INTEGER),m.id FROM json_each(?) j
+ JOIN messages m ON m.id=? JOIN channels c ON c.id=m.channel_id AND c.id=?
+ WHERE m.id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=c.id AND r.user_id=CAST(j.value AS INTEGER)),0)
+ AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=c.id AND a.user_id=CAST(j.value AS INTEGER))
+ AND EXISTS(SELECT 1 FROM users u WHERE u.id=CAST(j.value AS INTEGER) AND u.deleted_at IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM user_bans WHERE user_id=CAST(j.value AS INTEGER))
+ ON CONFLICT DO NOTHING RETURNING user_id`, string(encoded), messageID, channelID)
+	if err != nil {
+		return nil, err
+	}
+	inserted := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			break
+		}
+		inserted[id] = true
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return inserted, nil
 }
