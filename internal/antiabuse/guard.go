@@ -1,6 +1,7 @@
 package antiabuse
 
 import (
+	"voxhold-backend/internal/telemetry"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -213,7 +214,7 @@ func (g *Guard) RecordLoginFailure(
 			entry = failureEntry{}
 		}
 		if !exists && len(g.failures) >= g.config.MaxRateEntries {
-			continue
+			g.evictFailureLocked(now)
 		}
 		entry.failures++
 		entry.lastSeen = now
@@ -385,7 +386,7 @@ func (s *limiterStore) allow(
 	entry, ok := s.entries[key]
 	if !ok {
 		if len(s.entries) >= s.maxEntries {
-			return false
+			s.evictOldestLocked()
 		}
 
 		entry = &limiterEntry{
@@ -435,4 +436,50 @@ func (g *Guard) rateKey(ip string) string {
 		return ip
 	}
 	return prefix.String()
+}
+
+const evictionSample = 16
+
+// evictOldestLocked drops the least recently seen of a few random entries so a
+// full table keeps admitting new clients in O(1).
+func (s *limiterStore) evictOldestLocked() {
+	var oldestKey string
+	var oldest time.Time
+	seen := 0
+	for key, entry := range s.entries {
+		if seen == 0 || entry.lastSeen.Before(oldest) {
+			oldestKey, oldest = key, entry.lastSeen
+		}
+		if seen++; seen >= evictionSample {
+			break
+		}
+	}
+	if seen > 0 {
+		delete(s.entries, oldestKey)
+		telemetry.Observe(telemetry.RateEvict, 0, false)
+	}
+}
+
+// evictFailureLocked prefers entries whose block already expired; entries that
+// are still blocking are evicted last.
+func (g *Guard) evictFailureLocked(now time.Time) {
+	var victim string
+	var victimSeen time.Time
+	victimBlocked, seen := true, 0
+	for key, entry := range g.failures {
+		blocked := now.Before(entry.blockedUntil)
+		better := seen == 0 ||
+			(victimBlocked && !blocked) ||
+			(blocked == victimBlocked && entry.lastSeen.Before(victimSeen))
+		if better {
+			victim, victimSeen, victimBlocked = key, entry.lastSeen, blocked
+		}
+		if seen++; seen >= evictionSample {
+			break
+		}
+	}
+	if seen > 0 {
+		delete(g.failures, victim)
+		telemetry.Observe(telemetry.RateEvict, 0, false)
+	}
 }

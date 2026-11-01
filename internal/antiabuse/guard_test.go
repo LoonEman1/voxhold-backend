@@ -1,6 +1,7 @@
 package antiabuse
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -197,5 +198,36 @@ func TestInvalidIPv6PrefixIsConfigError(t *testing.T) {
 	t.Setenv("RATE_LIMIT_IPV6_PREFIX", "56")
 	if c, err := ConfigFromEnv(); err != nil || c.IPv6PrefixBits != 56 {
 		t.Fatalf("got %v %v", c.IPv6PrefixBits, err)
+	}
+}
+
+func TestFullLimiterTableEvictsInsteadOfRejecting(t *testing.T) {
+	store := limiterStore{entries: map[string]*limiterEntry{}, ttl: time.Hour, maxEntries: 3}
+	for _, key := range []string{"a", "b", "c", "d"} {
+		if !store.allow(key, 10, 10) {
+			t.Fatalf("key %q rejected", key)
+		}
+	}
+	if len(store.entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(store.entries))
+	}
+}
+
+func TestLoginBlockWorksWhenFailureTableIsFull(t *testing.T) {
+	config := DefaultConfig()
+	config.MaxRateEntries = 40
+	config.LoginMaxFailures = 2
+	guard := New(config)
+	for i := 0; i < 100; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r.RemoteAddr = fmt.Sprintf("198.51.100.%d:1", i)
+		guard.RecordLoginFailure(r, fmt.Sprintf("user%d", i))
+	}
+	victim := httptest.NewRequest(http.MethodPost, "/", nil)
+	victim.RemoteAddr = "203.0.113.5:1"
+	guard.RecordLoginFailure(victim, "target")
+	guard.RecordLoginFailure(victim, "target")
+	if ok, _ := guard.AllowLogin(victim, "target"); ok {
+		t.Fatal("login should be blocked after repeated failures")
 	}
 }

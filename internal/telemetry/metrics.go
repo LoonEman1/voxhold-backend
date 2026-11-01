@@ -16,10 +16,11 @@ const (
 	ACLRefresh
 	VoiceRTP
 	StreamRTP
+	RateEvict
 	metricCount
 )
 
-var names = [...]string{"voice_answer", "stream_answer", "ws_queue", "ws_write", "acl_refresh", "voice_rtp", "stream_rtp"}
+var names = [...]string{"voice_answer", "stream_answer", "ws_queue", "ws_write", "acl_refresh", "voice_rtp", "stream_rtp", "rate_evict"}
 var enabled atomic.Bool
 var values [metricCount]recorder
 var bounds = [...]time.Duration{time.Microsecond, 10 * time.Microsecond, 100 * time.Microsecond, time.Millisecond, 10 * time.Millisecond, 100 * time.Millisecond, time.Second, 10 * time.Second}
