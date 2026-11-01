@@ -68,13 +68,15 @@ jobs:
   staticcheck:
     name: Staticcheck (advisory)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # Advisory until the existing findings are fixed: they are printed as
+      # annotations, but the step does not turn the PR check red.
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+        continue-on-error: true
 
   test-race:
     name: Test with race detector
