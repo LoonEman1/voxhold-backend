@@ -17,6 +17,19 @@ func (h *Hub) JoinVoice(
 	selfMute bool,
 	selfDeaf bool,
 ) (VoiceJoinedData, bool) {
+	return h.JoinVoiceWithDevice(client, serverID, channelID, selfMute, selfDeaf, "")
+}
+
+// JoinVoiceWithDevice joins like JoinVoice and records the E2EE device the
+// client encrypts with; the caller has checked the channel policy.
+func (h *Hub) JoinVoiceWithDevice(
+	client *Client,
+	serverID int64,
+	channelID int64,
+	selfMute bool,
+	selfDeaf bool,
+	e2eeDeviceID string,
+) (VoiceJoinedData, bool) {
 	if client == nil {
 		return VoiceJoinedData{}, false
 	}
@@ -49,6 +62,7 @@ func (h *Hub) JoinVoice(
 		channelID,
 		selfMute,
 		selfDeaf,
+		e2eeDeviceID,
 	)
 
 	if result.previous != nil {
@@ -245,5 +259,39 @@ func newVoiceLeftData(
 		UserID:       participant.UserID,
 		ServerID:     participant.ServerID,
 		ChannelID:    participant.ChannelID,
+	}
+}
+
+// RelayVoiceE2EE forwards a wrapped sender key (or a request for one) from
+// sender to the recipient's connection when both are in the same encrypted
+// voice channel. The payload is opaque to the server.
+func (h *Hub) RelayVoiceE2EE(sender *Client, eventType EventType, data E2EERelayData) bool {
+	from, recipient, ok := h.voice.e2eeRecipient(sender, data.ChannelID, data.RecipientUserID, data.RecipientDeviceID)
+	if !ok {
+		return false
+	}
+	data.SenderUserID = from.UserID
+	data.SenderDeviceID = from.E2EEDeviceID
+	data.SenderConnectionID = from.ConnectionID
+	data.RecipientUserID = 0
+	data.RecipientDeviceID = ""
+	if recipient.enqueue(OutgoingEvent{Type: eventType, Data: data}) {
+		return true
+	}
+	h.Unregister(recipient)
+	return false
+}
+
+// ResetVoiceChannel disconnects everyone in a voice channel, e.g. after its
+// encryption policy changed, so clients rejoin in the new mode.
+func (h *Hub) ResetVoiceChannel(channelID int64, reason string) {
+	for _, client := range h.voice.channelClients(channelID) {
+		if _, left := h.leaveVoice(client); !left {
+			continue
+		}
+		h.SendToConnection(client.ConnectionID(), OutgoingEvent{
+			Type: EventVoiceWebRTCClosed,
+			Data: VoiceWebRTCClosedData{Reason: reason},
+		})
 	}
 }

@@ -114,6 +114,7 @@ func (s *Service) Forward(ctx context.Context, serverID, channelID, userID int64
 		return Message{}, err
 	}
 	s.events.PublishMessageCreated(value)
+	s.publishActivity(serverID, value)
 	return value, nil
 }
 
