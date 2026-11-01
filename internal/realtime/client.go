@@ -223,21 +223,6 @@ func (c *Client) subscriptionIDsForServer(
 	return channelIDs
 }
 
-func (c *Client) hasSubscriptionForServer(
-	serverID int64,
-) bool {
-	c.subscriptionsMu.RLock()
-	defer c.subscriptionsMu.RUnlock()
-
-	for _, subscribedServerID := range c.subscriptions {
-		if subscribedServerID == serverID {
-			return true
-		}
-	}
-
-	return false
-}
-
 func (c *Client) serverIDs() []int64 {
 	c.serversMu.RLock()
 	defer c.serversMu.RUnlock()

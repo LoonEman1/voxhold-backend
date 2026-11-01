@@ -149,8 +149,10 @@ func TestWebSocketEventLimiterRejectsBurstOverflow(t *testing.T) {
 	guard := New(config)
 	allow := guard.NewWebSocketEventLimiter()
 
-	if !allow() || !allow() {
-		t.Fatal("allowed event burst was rejected")
+	for range 2 {
+		if !allow() {
+			t.Fatal("allowed event burst was rejected")
+		}
 	}
 	if allow() {
 		t.Fatal("event above burst was accepted")

@@ -144,75 +144,12 @@ func (h *Handler) getInstance(
 	})
 }
 
-type createRequest struct {
-	Name string `json:"name"`
-}
-
 type updateRequest struct {
 	Name string `json:"name"`
 }
 
 type updateMemberRoleRequest struct {
 	Role server.Role `json:"role"`
-}
-
-func (h *Handler) create(
-	w http.ResponseWriter, r *http.Request,
-) {
-	userID, ok := httpapi.AuthenticatedUserID(w, r)
-	if !ok {
-		return
-	}
-
-	var request createRequest
-	if !httpapi.DecodeJSON(w, r, &request) {
-		return
-	}
-
-	createdServer, err := h.service.Create(
-		r.Context(),
-		userID,
-		server.CreateInput{
-			Name: request.Name,
-		},
-	)
-
-	if err != nil {
-		switch {
-		case errors.Is(err, server.ErrNameRequired),
-			errors.Is(err, server.ErrNameTooLong):
-
-			httpapi.WriteError(
-				w,
-				http.StatusBadRequest,
-				err.Error(),
-			)
-
-		case errors.Is(err, server.ErrAlreadyExists):
-			httpapi.WriteError(
-				w,
-				http.StatusConflict,
-				"this Voxhold instance already has a server",
-			)
-
-		default:
-			log.Printf("create server: %v", err)
-
-			httpapi.WriteError(
-				w,
-				http.StatusInternalServerError,
-				"internal server error",
-			)
-		}
-
-		return
-	}
-
-	httpapi.WriteJSON(
-		w,
-		http.StatusCreated,
-		newServerResponse(createdServer),
-	)
 }
 
 func (h *Handler) update(
@@ -282,57 +219,6 @@ func (h *Handler) update(
 		http.StatusOK,
 		newServerResponse(updatedServer),
 	)
-}
-
-func (h *Handler) deleteServer(
-	w http.ResponseWriter, r *http.Request,
-) {
-	userID, ok := httpapi.AuthenticatedUserID(w, r)
-	if !ok {
-		return
-	}
-
-	serverID, ok := httpapi.PositiveInt64PathValue(
-		w,
-		r,
-		"serverID",
-		"server",
-	)
-	if !ok {
-		return
-	}
-
-	err := h.service.Delete(r.Context(), serverID, userID)
-
-	if err != nil {
-		switch {
-		case errors.Is(err, server.ErrNotFound):
-			httpapi.WriteError(
-				w,
-				http.StatusNotFound,
-				"server not found",
-			)
-
-		case errors.Is(err, server.ErrLastServerDelete):
-			httpapi.WriteError(
-				w,
-				http.StatusConflict,
-				"the instance server cannot be deleted through the API",
-			)
-
-		default:
-			log.Printf("delete server: %v", err)
-
-			httpapi.WriteError(
-				w,
-				http.StatusInternalServerError,
-				"internal server error",
-			)
-		}
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) deleteAccount(
