@@ -203,3 +203,6 @@ type TypingData struct {
 	UserID    int64 `json:"user_id,omitempty"`
 	ExpiresAt int64 `json:"expires_at,omitempty"`
 }
+
+// EventChannelID lets the outgoing filter apply channel access to typing.
+func (d TypingData) EventChannelID() int64 { return d.ChannelID }
