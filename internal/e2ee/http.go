@@ -46,7 +46,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrInvalidDevice), errors.Is(err, ErrInvalidPublicKey):
 		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, ErrKeyConflict), errors.Is(err, ErrTooManyDevices):
+	case errors.Is(err, ErrKeyConflict):
 		httpapi.WriteError(w, http.StatusConflict, err.Error())
 	default:
 		log.Printf("register e2ee device: %v", err)
