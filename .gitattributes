@@ -1,0 +1,4 @@
+# Files executed inside Linux containers keep LF even on Windows checkouts
+# with core.autocrlf=true; otherwise /bin/sh fails on "set -eu\r".
+*.sh text eol=lf
+Dockerfile text eol=lf

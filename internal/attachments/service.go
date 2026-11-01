@@ -406,7 +406,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, name, stat.ModTime(), f)
+	http.ServeContent(idleDeadlineWriter{ResponseWriter: w, idle: 20 * time.Second}, r, name, stat.ModTime(), f)
 }
 
 // Only passive media may open in the application's origin. Keep legacy SVG
