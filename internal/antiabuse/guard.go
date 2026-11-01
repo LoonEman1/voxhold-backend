@@ -1,7 +1,6 @@
 package antiabuse
 
 import (
-	"voxhold-backend/internal/telemetry"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/telemetry"
 )
 
 type clientIPContextKey struct{}
