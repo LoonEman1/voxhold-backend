@@ -99,6 +99,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	if err := accountSqlite.BackfillUsernameKeys(context.Background(), db); err != nil {
+		log.Fatal(err)
+	}
 	if err := instancebootstrap.Validate(context.Background(), db); err != nil {
 		log.Fatal(err)
 	}
