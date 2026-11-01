@@ -218,7 +218,7 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "upload metadata unavailable")
 		return
 	}
-	name := strings.TrimSpace(filepath.Base(strings.ReplaceAll(r.URL.Query().Get("filename"), "\\", "/")))
+	name := sanitizeFilename(filepath.Base(strings.ReplaceAll(r.URL.Query().Get("filename"), "\\", "/")))
 	if name == "" || name == "." || utf8.RuneCountInString(name) > 200 || strings.ContainsAny(name, "\r\n\x00") {
 		fail(w, 400, "invalid filename")
 		return
