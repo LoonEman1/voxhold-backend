@@ -44,6 +44,7 @@ The container includes three commands:
 
 - `voxhold` — API, WebSocket and WebRTC server;
 - `voxhold-bootstrap` — creates the initial instance and owner;
+- `voxhold-admin reset-password --username <name>` — operator recovery: sets a random password (printed once) and revokes all sessions of that account. Run it in the backend container, e.g. `docker compose run --rm --entrypoint voxhold-admin backend reset-password --username owner`.
 - `migrate` — applies SQLite schema migrations.
 
 ## Quick local start

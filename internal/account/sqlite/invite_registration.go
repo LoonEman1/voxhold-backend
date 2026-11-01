@@ -95,17 +95,23 @@ func (r *InviteRegistrationRepository) RegisterWithInvite(
 	}
 
 	const createUserQuery = `
-	INSERT INTO users (username, password_hash)
-	VALUES (?, ?)
+	INSERT INTO users (username, password_hash, username_key)
+	VALUES (?, ?, ?)
 	RETURNING id, username, created_at
 	`
+
+	displayName, usernameKey, err := account.NormalizeUsername(username)
+	if err != nil {
+		return account.UserInfo{}, 0, server.ServerMember{}, err
+	}
 
 	var user account.UserInfo
 	if err := tx.QueryRowContext(
 		ctx,
 		createUserQuery,
-		username,
+		displayName,
 		passwordHash,
+		usernameKey,
 	).Scan(&user.ID, &user.Username, &user.CreatedAt); err != nil {
 		var sqliteError *sqliteDriver.Error
 		if errors.As(err, &sqliteError) &&

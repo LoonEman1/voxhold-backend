@@ -43,7 +43,13 @@ func (r *Repository) Search(
 		cursor = *beforeID
 	}
 
-	const searchQuery = `
+	// Operators (from:, in:, has:, before:, after:) become SQL conditions with
+	// bound parameters; only the remaining words reach the full-text index.
+	filters := message.ParseSearchFilters(query)
+	match := ftsPrefixQuery(filters.Rest)
+	var sqlText strings.Builder
+	var args []any
+	sqlText.WriteString(`
 	SELECT
 		messages.id,
 		messages.channel_id,
@@ -54,31 +60,54 @@ func (r *Repository) Search(
 		messages.created_at,
 		messages.edited_at,
 		messages.revision
-	FROM message_search
-	JOIN messages
-		ON messages.id = message_search.rowid
-	JOIN channels
-		ON channels.id = messages.channel_id
-	JOIN users
-		ON users.id = messages.author_user_id
-	WHERE message_search MATCH ?
-	  AND channels.server_id = ?
+	`)
+	if match != "" {
+		sqlText.WriteString(`FROM message_search
+	JOIN messages ON messages.id = message_search.rowid`)
+	} else {
+		sqlText.WriteString(`FROM messages`)
+	}
+	sqlText.WriteString(`
+	JOIN channels ON channels.id = messages.channel_id
+	JOIN users ON users.id = messages.author_user_id
+	WHERE channels.server_id = ?
 	  AND channels.kind IN ('text', 'voice')
 	  AND EXISTS(SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channels.id AND a.user_id=?)
-	  AND messages.id < ?
-	ORDER BY messages.id DESC
-	LIMIT ?
-	`
+	  AND messages.id < ?`)
+	args = append(args, serverID, userID, cursor)
+	if match != "" {
+		sqlText.WriteString(" AND message_search MATCH ?")
+		args = append(args, match)
+	}
+	if filters.From != "" {
+		sqlText.WriteString(" AND lower(users.username) = lower(?)")
+		args = append(args, filters.From)
+	}
+	if filters.In != "" {
+		sqlText.WriteString(" AND lower(channels.name) = lower(?)")
+		args = append(args, filters.In)
+	}
+	if filters.HasFile {
+		sqlText.WriteString(" AND EXISTS(SELECT 1 FROM attachments WHERE attachments.message_id = messages.id)")
+	}
+	if filters.HasImage {
+		sqlText.WriteString(" AND EXISTS(SELECT 1 FROM attachments WHERE attachments.message_id = messages.id AND attachments.category = 'images')")
+	}
+	if filters.HasLink {
+		sqlText.WriteString(" AND (instr(messages.content, 'http://') > 0 OR instr(messages.content, 'https://') > 0)")
+	}
+	if filters.Before != nil {
+		sqlText.WriteString(" AND messages.created_at < ?")
+		args = append(args, filters.Before.Unix())
+	}
+	if filters.After != nil {
+		sqlText.WriteString(" AND messages.created_at >= ?")
+		args = append(args, filters.After.Unix())
+	}
+	sqlText.WriteString(" ORDER BY messages.id DESC LIMIT ?")
+	args = append(args, limit)
 
-	rows, err := tx.QueryContext(
-		ctx,
-		searchQuery,
-		ftsPrefixQuery(query),
-		serverID,
-		userID,
-		cursor,
-		limit,
-	)
+	rows, err := tx.QueryContext(ctx, sqlText.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"query message search index: %w",

@@ -134,6 +134,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) htt
 		"DELETE /api/v1/me/blocks/{userID}":                               s.block,
 		"GET /api/v1/conversations/{conversationID}":                      s.conversation,
 		"GET /api/v1/me/conversations":                                    s.conversations,
+		"GET /api/v1/me/conversations/search":                             s.searchConversations,
 		"POST /api/v1/me/conversations":                                   s.createConversation,
 		"GET /api/v1/conversations/{conversationID}/messages":             s.conversationMessages,
 		"POST /api/v1/conversations/{conversationID}/messages":            s.sendConversation,
