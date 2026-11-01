@@ -74,6 +74,14 @@ const (
 )
 
 func main() {
+	// os.Exit skips deferred cleanup, so a failing server only records the code
+	// here; this defer is registered first and therefore runs last.
+	exitCode := 0
+	defer func() {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+	}()
 	// The Go runtime validates GOAMD64 before main. This preflight therefore
 	// verifies the actual image on its target CPU without opening the database.
 	if len(os.Args) == 2 && os.Args[1] == "--check-cpu" {
@@ -595,7 +603,9 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			log.Printf("http server: %v", err)
+			exitCode = 1
+			return
 		}
 		return
 
