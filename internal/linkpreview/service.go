@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/imagelimit"
 
 	"golang.org/x/image/draw"
@@ -31,11 +32,12 @@ type Service struct {
 	mu     sync.Mutex
 	cache  map[string]entry
 	slots  chan struct{}
+	active map[int64]int
 	client *http.Client
 }
 
 func New() *Service {
-	return &Service{cache: map[string]entry{}, slots: make(chan struct{}, 4), client: newClient()}
+	return &Service{cache: map[string]entry{}, slots: make(chan struct{}, 4), active: map[int64]int{}, client: newClient()}
 }
 func (s *Service) Close() { s.client.CloseIdleConnections() }
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
@@ -73,14 +75,40 @@ func (s *Service) put(key string, value entry) {
 	}
 	s.cache[key] = value
 }
-func (s *Service) acquire(w http.ResponseWriter) bool {
-	select {
-	case s.slots <- struct{}{}:
-		return true
-	default:
+// maxSlotsPerUser keeps one user from occupying every global fetch slot.
+const maxSlotsPerUser = 1
+
+// acquire reserves a global slot and a per-user slot; release frees both.
+func (s *Service) acquire(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	userID, _ := account.UserIDFromContext(r.Context())
+	s.mu.Lock()
+	if s.active[userID] >= maxSlotsPerUser {
+		s.mu.Unlock()
 		w.Header().Set("Retry-After", "2")
 		httpapi.WriteError(w, 429, "preview busy")
-		return false
+		return nil, false
+	}
+	s.active[userID]++
+	s.mu.Unlock()
+	select {
+	case s.slots <- struct{}{}:
+		return func() {
+			<-s.slots
+			s.mu.Lock()
+			if s.active[userID]--; s.active[userID] <= 0 {
+				delete(s.active, userID)
+			}
+			s.mu.Unlock()
+		}, true
+	default:
+		s.mu.Lock()
+		if s.active[userID]--; s.active[userID] <= 0 {
+			delete(s.active, userID)
+		}
+		s.mu.Unlock()
+		w.Header().Set("Retry-After", "2")
+		httpapi.WriteError(w, 429, "preview busy")
+		return nil, false
 	}
 }
 func (s *Service) preview(w http.ResponseWriter, r *http.Request) {
@@ -94,10 +122,11 @@ func (s *Service) preview(w http.ResponseWriter, r *http.Request) {
 	key := hex.EncodeToString(hash[:])
 	value, ok := s.get(key)
 	if !ok {
-		if !s.acquire(w) {
+		release, ok := s.acquire(w, r)
+		if !ok {
 			return
 		}
-		defer func() { <-s.slots }()
+		defer release()
 		p, image, err := metadata(r.Context(), s.client, u)
 		value = entry{preview: p, imageURL: image, expires: time.Now().Add(10 * time.Minute), failed: err != nil}
 		if image != "" {
@@ -128,10 +157,11 @@ func (s *Service) image(w http.ResponseWriter, r *http.Request) {
 	}
 	data := value.image
 	if data == nil {
-		if !s.acquire(w) {
+		release, ok := s.acquire(w, r)
+		if !ok {
 			return
 		}
-		defer func() { <-s.slots }()
+		defer release()
 		raw, typ, _, err := fetch(r.Context(), s.client, value.imageURL, 2<<20)
 		if err != nil || !strings.HasPrefix(typ, "image/") {
 			httpapi.WriteError(w, 404, "preview image unavailable")
