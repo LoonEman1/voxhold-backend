@@ -236,7 +236,9 @@ func TestAuthenticatedUsersBehindOneIPHaveSeparateBudgets(t *testing.T) {
 	config := DefaultConfig()
 	config.HTTPRequestsPerSecond = 1
 	config.HTTPBurst = 1
-	config.IPMultiplier = 4
+	if config.IPMultiplier != 4 {
+		t.Fatalf("default HTTP_IP_MULTIPLIER = %d, want 4", config.IPMultiplier)
+	}
 	handler := New(config).ProtectHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

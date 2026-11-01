@@ -64,6 +64,7 @@ func DefaultConfig() Config {
 		WebSocketMaxPerUser:        5,
 		EntryTTL:                   30 * time.Minute,
 		MaxRateEntries:             20_000,
+		IPMultiplier:               4,
 	}
 }
 
