@@ -88,10 +88,21 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 			return
 		}
 
+		// Authenticated clients are limited per session token so users behind one
+		// NAT do not share a budget; the token is only a key here (not validated),
+		// so the outer per-IP bucket stays, scaled by IPMultiplier.
+		ipMultiplier := 1
+		if tokenKey := bearerKey(r); tokenKey != "" {
+			ipMultiplier = max(1, g.config.IPMultiplier)
+			if !g.limiters.allow("http:token:"+tokenKey, rate.Limit(g.config.HTTPRequestsPerSecond), g.config.HTTPBurst) {
+				writeRateLimitError(w, time.Second)
+				return
+			}
+		}
 		if !g.limiters.allow(
 			"http:all:"+rateIP,
-			rate.Limit(g.config.HTTPRequestsPerSecond),
-			g.config.HTTPBurst,
+			rate.Limit(g.config.HTTPRequestsPerSecond*ipMultiplier),
+			g.config.HTTPBurst*ipMultiplier,
 		) {
 			writeRateLimitError(w, time.Second)
 			return
@@ -486,4 +497,15 @@ func (g *Guard) evictFailureLocked(now time.Time) {
 		delete(g.failures, victim)
 		telemetry.Observe(telemetry.RateEvict, 0, false)
 	}
+}
+
+// bearerKey derives a bucket key from the Authorization token without
+// validating it; random fake tokens only create buckets bounded by the table.
+func bearerKey(r *http.Request) string {
+	parts := strings.Fields(r.Header.Get("Authorization"))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(parts[1]))
+	return hex.EncodeToString(digest[:])[:32]
 }
