@@ -109,10 +109,11 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 		}
 
 		switch {
-		case r.Method == http.MethodPost &&
-			(r.URL.Path == "/api/v1/auth/login" ||
+		case (r.Method == http.MethodPut && r.URL.Path == "/api/v1/me/password") ||
+			(r.Method == http.MethodPost &&
+				(r.URL.Path == "/api/v1/auth/login" ||
 				r.URL.Path == "/api/v1/auth/register" ||
-				r.URL.Path == "/api/v1/auth/refresh"):
+				r.URL.Path == "/api/v1/auth/refresh")):
 
 			if !g.limiters.allow(
 				"http:auth:"+clientIP,

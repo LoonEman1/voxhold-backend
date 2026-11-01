@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"crypto/sha256"
 	"slices"
 	"sync"
 	"time"
@@ -326,7 +327,20 @@ func (h *Hub) Unregister(client *Client) {
 }
 
 func (h *Hub) RevokeSession(token string) {
-	key := newSessionKey(token)
+	h.revokeSessionKey(newSessionKey(token))
+}
+
+// RevokeSessionHash revokes by the stored SHA-256 token hash.
+func (h *Hub) RevokeSessionHash(hash []byte) {
+	if len(hash) != sha256.Size {
+		return
+	}
+	var key [sha256.Size]byte
+	copy(key[:], hash)
+	h.revokeSessionKey(key)
+}
+
+func (h *Hub) revokeSessionKey(key [sha256.Size]byte) {
 
 	h.clientsMu.RLock()
 	clients := clientSetSnapshot(

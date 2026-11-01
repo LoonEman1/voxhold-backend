@@ -75,3 +75,21 @@ func (r *UserRepository) FindByUsername(
 
 	return user, nil
 }
+
+func (r *UserRepository) FindByID(ctx context.Context, userID int64) (account.User, error) {
+	var user account.User
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, username, created_at, password_hash FROM users WHERE id=? AND deleted_at IS NULL`, userID,
+	).Scan(&user.ID, &user.Username, &user.CreatedAt, &user.PasswordHash)
+	if err != nil {
+		return account.User{}, fmt.Errorf("find user by id: %w", err)
+	}
+	return user, nil
+}
+
+func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID int64, passwordHash string) error {
+	if _, err := r.db.ExecContext(ctx, `UPDATE users SET password_hash=? WHERE id=? AND deleted_at IS NULL`, passwordHash, userID); err != nil {
+		return fmt.Errorf("update password hash: %w", err)
+	}
+	return nil
+}

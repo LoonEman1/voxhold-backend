@@ -261,7 +261,7 @@ func main() {
 	accountHandler := accounthttp.NewHandler(
 		accountService,
 		antiAbuseGuard,
-	)
+	).WithSessions(accountService)
 
 	serverRepository := serverSqlite.NewRepository(db)
 	serverService := serverDomain.NewService(
@@ -269,7 +269,7 @@ func main() {
 		realtimeHub,
 		serverEventPublisher,
 	)
-	serverHandler := serverhttp.NewHandler(serverService)
+	serverHandler := serverhttp.NewHandler(serverService).WithPasswordVerifier(accountService.VerifyPassword)
 
 	channelRepository := channelSqlite.NewRepository(db)
 	channelService := channelDomain.NewService(
