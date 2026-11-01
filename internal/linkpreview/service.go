@@ -17,6 +17,7 @@ import (
 	"voxhold-backend/internal/imagelimit"
 
 	"golang.org/x/image/draw"
+	"golang.org/x/time/rate"
 	_ "golang.org/x/image/webp"
 	"voxhold-backend/internal/httpapi"
 )
@@ -33,11 +34,12 @@ type Service struct {
 	cache  map[string]entry
 	slots  chan struct{}
 	active map[int64]int
+	rates  map[int64]*userRate
 	client *http.Client
 }
 
 func New() *Service {
-	return &Service{cache: map[string]entry{}, slots: make(chan struct{}, 4), active: map[int64]int{}, client: newClient()}
+	return &Service{cache: map[string]entry{}, slots: make(chan struct{}, 4), active: map[int64]int{}, rates: map[int64]*userRate{}, client: newClient()}
 }
 func (s *Service) Close() { s.client.CloseIdleConnections() }
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
@@ -79,6 +81,32 @@ func (s *Service) put(key string, value entry) {
 const maxSlotsPerUser = 1
 
 // acquire reserves a global slot and a per-user slot; release frees both.
+// userRate limits uncached preview fetches to 30 per minute per user.
+type userRate struct {
+	limiter *rate.Limiter
+	seen    time.Time
+}
+
+func (s *Service) allowUser(userID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if len(s.rates) > 1000 {
+		for id, entry := range s.rates {
+			if now.Sub(entry.seen) > 10*time.Minute {
+				delete(s.rates, id)
+			}
+		}
+	}
+	entry, ok := s.rates[userID]
+	if !ok {
+		entry = &userRate{limiter: rate.NewLimiter(rate.Every(2*time.Second), 5)}
+		s.rates[userID] = entry
+	}
+	entry.seen = now
+	return entry.limiter.AllowN(now, 1)
+}
+
 func (s *Service) acquire(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
 	userID, _ := account.UserIDFromContext(r.Context())
 	s.mu.Lock()
@@ -122,6 +150,12 @@ func (s *Service) preview(w http.ResponseWriter, r *http.Request) {
 	key := hex.EncodeToString(hash[:])
 	value, ok := s.get(key)
 	if !ok {
+		userID, _ := account.UserIDFromContext(r.Context())
+		if !s.allowUser(userID) {
+			w.Header().Set("Retry-After", "2")
+			httpapi.WriteError(w, 429, "too many previews")
+			return
+		}
 		release, ok := s.acquire(w, r)
 		if !ok {
 			return

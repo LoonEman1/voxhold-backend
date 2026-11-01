@@ -36,3 +36,20 @@ func TestOneUserCannotTakeEverySlot(t *testing.T) {
 	again()
 	other()
 }
+
+func TestUncachedPreviewsAreRateLimitedPerUser(t *testing.T) {
+	s := New()
+	defer s.Close()
+	allowed := 0
+	for i := 0; i < 20; i++ {
+		if s.allowUser(1) {
+			allowed++
+		}
+	}
+	if allowed != 5 {
+		t.Fatalf("burst allowed %d requests, want 5", allowed)
+	}
+	if !s.allowUser(2) {
+		t.Fatal("another user must not be throttled")
+	}
+}
