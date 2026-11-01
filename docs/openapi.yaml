@@ -230,6 +230,43 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/sessions:
+    delete:
+      operationId: delete_api_v1_me_sessions
+      summary: DELETE /api/v1/me/sessions
+      x-source: internal/account/http/sessions.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      operationId: get_api_v1_me_sessions
+      summary: GET /api/v1/me/sessions
+      x-source: internal/account/http/sessions.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/sessions/{sessionID}:
+    delete:
+      operationId: delete_api_v1_me_sessions_sessionID
+      summary: DELETE /api/v1/me/sessions/{sessionID}
+      x-source: internal/account/http/sessions.go
+      parameters:
+        - {name: sessionID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/recordings/{recordingID}:
     delete:
       operationId: delete_api_v1_recordings_recordingID
@@ -252,6 +289,39 @@ paths:
       x-source: internal/recordings/http.go
       parameters:
         - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/bans/{userID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_bans_userID
+      summary: DELETE /api/v1/servers/{serverID}/bans/{userID}
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_bans_userID
+      summary: POST /api/v1/servers/{serverID}/bans/{userID}
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
       security:
         - bearer: []
       responses:
@@ -770,6 +840,18 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/conversations/search:
+    get:
+      operationId: get_api_v1_me_conversations_search
+      summary: GET /api/v1/me/conversations/search
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/me/favorites:
     get:
       operationId: get_api_v1_me_favorites
@@ -991,6 +1073,22 @@ paths:
       x-source: internal/community/message_features.go
       parameters:
         - {name: serverID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/bans:
+    get:
+      operationId: get_api_v1_servers_serverID_bans
+      summary: GET /api/v1/servers/{serverID}/bans
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
       responses:
         '200': {description: OK}
         default:
@@ -1237,6 +1335,39 @@ paths:
       parameters:
         - {name: serverID, in: path, required: true, schema: {type: string}}
         - {name: channelID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/slowmode:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_slowmode
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/slowmode
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_slowmode
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/slowmode
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
       responses:
         '200': {description: OK}
         default:
@@ -1756,23 +1887,6 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
-  /api/v1/servers/{serverID}/bans/{userID}:
-    post:
-      operationId: post_api_v1_servers_serverID_bans_userID
-      summary: POST /api/v1/servers/{serverID}/bans/{userID}
-      x-source: internal/server/http/handler.go
-      parameters:
-        - {name: serverID, in: path, required: true, schema: {type: string}}
-        - {name: userID, in: path, required: true, schema: {type: string}}
-      security:
-        - bearer: []
-      responses:
-        '200': {description: OK}
-        default:
-          description: Error
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/servers/{serverID}/channels/{channelID}/messages/forward:
     post:
       operationId: post_api_v1_servers_serverID_channels_channelID_messages_forward
@@ -1885,6 +1999,18 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/password:
+    put:
+      operationId: put_api_v1_me_password
+      summary: PUT /api/v1/me/password
+      x-source: internal/account/http/sessions.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/polls/{pollID}/votes:
     put:
       operationId: put_api_v1_polls_pollID_votes
@@ -1924,6 +2050,23 @@ paths:
       parameters:
         - {name: serverID, in: path, required: true, schema: {type: string}}
         - {name: userID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/members/{userID}/timeout:
+    put:
+      operationId: put_api_v1_servers_serverID_members_userID_timeout
+      summary: PUT /api/v1/servers/{serverID}/members/{userID}/timeout
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
       responses:
         '200': {description: OK}
         default:
