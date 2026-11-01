@@ -30,6 +30,7 @@ func Open() (*sql.DB, error) {
 	params.Add("_pragma", "journal_mode(WAL)")
 	params.Add("_pragma", "busy_timeout(5000)")
 	params.Add("_pragma", "synchronous(NORMAL)")
+	params.Add("_pragma", "temp_store(MEMORY)")
 
 	databaseURL := "file:" +
 		filepath.ToSlash(databasePath) +
