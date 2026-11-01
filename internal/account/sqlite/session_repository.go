@@ -1,11 +1,12 @@
 package sqlite
 
 import (
-	"errors"
-	"voxhold-backend/internal/account"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+
+	"voxhold-backend/internal/account"
 )
 
 type SessionRepository struct {
@@ -161,9 +162,19 @@ func (r *SessionRepository) Rotate(
 	return nil
 }
 
-// Touch records activity at most every five minutes to avoid a write per request.
+// Touch records activity at most every five minutes. The read comes first:
+// even an UPDATE that matches no row takes SQLite's single write lock, which
+// would serialize every authenticated request behind the writer.
 func (r *SessionRepository) Touch(ctx context.Context, tokenHash []byte, now int64) error {
-	_, err := r.db.ExecContext(ctx,
+	var last sql.NullInt64
+	err := r.db.QueryRowContext(ctx, `SELECT last_used_at FROM sessions WHERE token_hash=?`, tokenHash).Scan(&last)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && last.Valid && last.Int64 >= now-300 {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read session activity: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
 		`UPDATE sessions SET last_used_at=? WHERE token_hash=? AND (last_used_at IS NULL OR last_used_at < ?)`,
 		now, tokenHash, now-300)
 	if err != nil {

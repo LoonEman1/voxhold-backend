@@ -13,7 +13,7 @@ import (
 
 type recordingRevoker struct{ hashes [][]byte }
 
-func (r *recordingRevoker) RevokeSession(string)        {}
+func (r *recordingRevoker) RevokeSession(string)       {}
 func (r *recordingRevoker) RevokeSessionHash(h []byte) { r.hashes = append(r.hashes, h) }
 
 func TestPasswordChangeAndSessionManagement(t *testing.T) {

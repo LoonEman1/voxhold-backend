@@ -1,12 +1,12 @@
 package serverhttp
 
 import (
-	"voxhold-backend/internal/account"
 	"context"
 	"errors"
 	"log"
 	"net/http"
 
+	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/server"
 )
@@ -66,7 +66,7 @@ type Service interface {
 }
 
 type Handler struct {
-	service Service
+	service        Service
 	verifyPassword func(ctx context.Context, userID int64, password string) error
 }
 
