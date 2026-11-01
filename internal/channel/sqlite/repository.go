@@ -197,11 +197,14 @@ func (r *Repository) ListByServerID(
           OR EXISTS(SELECT 1 FROM channel_publishers p WHERE p.channel_id=channels.id AND p.user_id=?))),
         (SELECT count(*) FROM channel_notifications n WHERE n.channel_id=channels.id AND n.user_id=? AND n.read_at IS NULL
           AND n.message_id>COALESCE((SELECT last_read_message_id FROM channel_reads r WHERE r.channel_id=channels.id AND r.user_id=n.user_id),0)),
+		-- Thread replies do not make the channel itself unread.
 		COALESCE((
 			SELECT MAX(messages.id)
 			FROM messages
 			WHERE messages.channel_id = channels.id
-		), 0) AS last_message_id
+			  AND messages.thread_root_id IS NULL
+		), 0) AS last_message_id,
+		channels.e2ee_required
 	FROM channels
 	WHERE channels.server_id = ?
 	  AND EXISTS (SELECT 1 FROM channel_accessible_members a WHERE a.channel_id=channels.id AND a.user_id=?)
@@ -244,6 +247,7 @@ func (r *Repository) ListByServerID(
 			&value.CanPublish,
 			&value.UnreadCount,
 			&value.LastMessageID,
+			&value.E2EERequired,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"scan server channel: %w",

@@ -238,6 +238,23 @@ only TCP 80/443 plus the configured WebRTC UDP ports.
 Please do not report vulnerabilities in a public issue. Follow
 [SECURITY.md](SECURITY.md) instead.
 
+### End-to-end encrypted voice
+
+Owners and administrators can require end-to-end encryption for a voice
+channel; calls in direct conversations encrypt voice automatically when every
+member's client supports it. Each client encrypts its Opus frames with its own
+AES-256-GCM sender key and shares that key with the other devices, wrapped with
+ECDH P-256 device keys. The server stores only public device keys and relays
+the wrapped keys without reading them; the SFU forwards ciphertext.
+
+This protects voice against eavesdropping by the server, leaked SFU memory or
+traffic dumps, and a host administrator who only watches traffic. It does
+**not** protect against a server that actively replaces public keys unless the
+users compare their security codes, against metadata (who talked to whom, when,
+for how long and how much), against recordings (a participant's recording is
+stored on the server without end-to-end encryption, and the interface says so),
+against video or audio of screen streams, or against text messages.
+
 ## License
 
 Copyright © 2026 LoonEman1.

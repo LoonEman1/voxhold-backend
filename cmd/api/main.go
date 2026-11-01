@@ -23,6 +23,7 @@ import (
 	"voxhold-backend/internal/community"
 	"voxhold-backend/internal/cors"
 	"voxhold-backend/internal/diagnostics"
+	"voxhold-backend/internal/e2ee"
 	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/linkpreview"
 	"voxhold-backend/internal/notifications"
@@ -469,6 +470,14 @@ func main() {
 		antiAbuseGuard,
 	)
 	webSocketHandler.SetOriginPatterns(corsManager.OriginPatterns)
+	// FEAT-13: end-to-end encrypted voice. A policy change reconnects the
+	// channel so nobody mixes encrypted and plain audio.
+	e2eeRepository := e2ee.NewRepository(db)
+	webSocketHandler.SetVoiceEncryption(e2eeRepository)
+	e2eeHandler := e2ee.NewHandler(e2eeRepository, func(serverID, channelID int64, _ bool) {
+		realtimeHub.ResetVoiceChannel(channelID, realtimeDomain.VoiceWebRTCClosedReasonE2EEPolicy)
+		realtimeHub.PublishToServer(serverID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventChannelsChanged, Data: realtimeDomain.ServerDeletedData{ServerID: serverID}})
+	})
 
 	webrtcConfigHandler := webrtcconfighttp.NewHandler(
 		clientICEURLs,
@@ -545,6 +554,7 @@ func main() {
 		accountHandler.RequireAuth,
 	)
 
+	e2eeHandler.RegisterRoutes(mux, accountHandler.RequireAuth)
 	webSocketHandler.RegisterRoutes(mux)
 
 	// Liveness: the process is up. Deliberately dependency-free.

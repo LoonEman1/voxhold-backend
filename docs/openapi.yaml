@@ -203,6 +203,37 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/e2ee/devices/{deviceID}:
+    delete:
+      operationId: delete_api_v1_me_e2ee_devices_deviceID
+      summary: DELETE /api/v1/me/e2ee/devices/{deviceID}
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: deviceID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_me_e2ee_devices_deviceID
+      summary: PUT /api/v1/me/e2ee/devices/{deviceID}
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: deviceID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/me/scheduled-messages/{scheduleID}:
     delete:
       operationId: delete_api_v1_me_scheduled_messages_scheduleID
@@ -1160,6 +1191,39 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/e2ee:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_e2ee
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/e2ee
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_e2ee
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/e2ee
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/servers/{serverID}/channels/{channelID}/members:
     get:
       operationId: get_api_v1_servers_serverID_channels_channelID_members
@@ -1544,6 +1608,22 @@ paths:
       operationId: get_api_v1_users_userID_avatar
       summary: GET /api/v1/users/{userID}/avatar
       x-source: internal/avatar/http.go
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/users/{userID}/e2ee/devices:
+    get:
+      operationId: get_api_v1_users_userID_e2ee_devices
+      summary: GET /api/v1/users/{userID}/e2ee/devices
+      x-source: internal/e2ee/http.go
       parameters:
         - {name: userID, in: path, required: true, schema: {type: string}}
       security:

@@ -67,6 +67,7 @@ func (s *Service) Create(
 	s.events.PublishMessageCreated(
 		createdMessage,
 	)
+	s.publishActivity(serverID, createdMessage)
 
 	s.publishCommentRoot(ctx, serverID, channelID, authorUserID, createdMessage)
 	return createdMessage, nil
