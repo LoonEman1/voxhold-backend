@@ -48,4 +48,5 @@ type Ban struct {
 	Reason    string `json:"reason"`
 	CreatedAt int64  `json:"created_at"`
 }
+
 var ErrBanReasonTooLong = errors.New("ban reason must not exceed 500 characters")
