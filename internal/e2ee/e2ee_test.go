@@ -42,7 +42,7 @@ func TestValidatePublicKey(t *testing.T) {
 	}
 }
 
-func TestRegisterIsIdempotentButRejectsKeyChangesAndAnEleventhDevice(t *testing.T) {
+func TestRegisterIsIdempotentButRejectsKeyChanges(t *testing.T) {
 	repo := NewRepository(testdb.Open(t))
 	ctx := context.Background()
 	key := publicKey(t)
@@ -55,25 +55,59 @@ func TestRegisterIsIdempotentButRejectsKeyChangesAndAnEleventhDevice(t *testing.
 	if err := repo.Register(ctx, 1, device(1), publicKey(t)); !errors.Is(err, ErrKeyConflict) {
 		t.Fatalf("key change err=%v", err)
 	}
-	for n := 2; n <= MaxActiveDevices; n++ {
-		if err := repo.Register(ctx, 1, device(n), publicKey(t)); err != nil {
-			t.Fatal(err)
-		}
+	if err := repo.Revoke(ctx, 1, device(2)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoke unknown device err=%v", err)
 	}
-	if err := repo.Register(ctx, 1, device(99), publicKey(t)); !errors.Is(err, ErrTooManyDevices) {
-		t.Fatalf("11th device err=%v", err)
+	if err := repo.Register(ctx, 1, device(2), publicKey(t)); err != nil {
+		t.Fatal(err)
 	}
 	if err := repo.Revoke(ctx, 1, device(2)); err != nil {
 		t.Fatal(err)
-	}
-	if err := repo.Register(ctx, 1, device(99), publicKey(t)); err != nil {
-		t.Fatalf("slot freed by revocation: %v", err)
 	}
 	if err := repo.Register(ctx, 1, device(2), publicKey(t)); !errors.Is(err, ErrKeyConflict) {
 		t.Fatalf("revoked device id reused: %v", err)
 	}
 	if active, _ := repo.DeviceActive(ctx, 1, device(2)); active {
 		t.Fatal("revoked device still active")
+	}
+}
+
+func TestRegisterBeyondTheLimitRevokesTheLeastRecentlyUsedDevice(t *testing.T) {
+	db := testdb.Open(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	keys := map[int][]byte{}
+	for n := 1; n <= MaxActiveDevices; n++ {
+		keys[n] = publicKey(t)
+		if err := repo.Register(ctx, 1, device(n), keys[n]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Device 1 is the oldest but still used; device 2 was never used again.
+	if _, err := db.Exec(`UPDATE e2ee_device_keys SET created_at=10,last_used_at=CASE device_id WHEN ? THEN 50 ELSE 200 END WHERE user_id=1`, device(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Register(ctx, 1, device(1), keys[1]); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+	if err := repo.Register(ctx, 1, device(99), publicKey(t)); err != nil {
+		t.Fatalf("device over the limit: %v", err)
+	}
+	devices, err := repo.Devices(ctx, 1, 1)
+	if err != nil || len(devices) != MaxActiveDevices {
+		t.Fatalf("active devices %d err=%v", len(devices), err)
+	}
+	for _, d := range devices {
+		if d.DeviceID == device(2) {
+			t.Fatal("least recently used device is still active")
+		}
+	}
+	if active, _ := repo.DeviceActive(ctx, 1, device(1)); !active {
+		t.Fatal("recently used device was revoked")
+	}
+	// The evicted browser gets a conflict and replaces its device.
+	if err := repo.Register(ctx, 1, device(2), keys[2]); !errors.Is(err, ErrKeyConflict) {
+		t.Fatalf("evicted device err=%v", err)
 	}
 }
 

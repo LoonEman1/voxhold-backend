@@ -245,7 +245,10 @@ channel; calls in direct conversations encrypt voice automatically when every
 member's client supports it. Each client encrypts its Opus frames with its own
 AES-256-GCM sender key and shares that key with the other devices, wrapped with
 ECDH P-256 device keys. The server stores only public device keys and relays
-the wrapped keys without reading them; the SFU forwards ciphertext.
+the wrapped keys without reading them; the SFU forwards ciphertext. Wrapped
+keys carry an authenticated generation, so the relay cannot roll a sender back
+to an older key. A user keeps up to 10 device keys; registering another one
+revokes the device used least recently.
 
 This protects voice against eavesdropping by the server, leaked SFU memory or
 traffic dumps, and a host administrator who only watches traffic. It does

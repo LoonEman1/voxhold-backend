@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	// MaxActiveDevices bounds the keys a client has to wrap a sender key for.
+	// MaxActiveDevices bounds the keys a client has to wrap a sender key for;
+	// registering one more revokes the device used least recently.
 	MaxActiveDevices = 10
 	// MaxRelayPayload is the largest base64 wrapped-key payload the server relays.
 	MaxRelayPayload = 1024
@@ -26,7 +27,6 @@ var (
 	ErrInvalidDevice    = errors.New("device id must be 32 lowercase hex characters")
 	ErrInvalidPublicKey = errors.New("public key must be an uncompressed P-256 point")
 	ErrKeyConflict      = errors.New("device is already registered with another key")
-	ErrTooManyDevices   = errors.New("too many active devices")
 	ErrNotFound         = errors.New("not found")
 	ErrForbidden        = errors.New("only owners and administrators can change encryption")
 )
@@ -58,8 +58,11 @@ type Repository struct{ db *sql.DB }
 func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
 
 // Register stores the public key of a device. Registering the same key again
-// is a no-op; a different key for a known device is a conflict, because a key
-// change must be visible to peers (revoke, then register a new device).
+// only marks the device as used (clients do it before every encrypted call); a
+// different key for a known device is a conflict, because a key change must be
+// visible to peers (revoke, then register a new device). A user at the device
+// limit loses the device used least recently: browsers that were closed in
+// private mode or cleared never revoke theirs.
 func (r *Repository) Register(ctx context.Context, userID int64, deviceID string, publicKey []byte) error {
 	if !ValidDeviceID(deviceID) {
 		return ErrInvalidDevice
@@ -80,6 +83,9 @@ func (r *Repository) Register(ctx context.Context, userID int64, deviceID string
 		// A revoked device id is never reused: peers may still trust its key.
 		return ErrKeyConflict
 	case err == nil && string(existing) == string(publicKey):
+		if _, err = tx.ExecContext(ctx, `UPDATE e2ee_device_keys SET last_used_at=unixepoch() WHERE user_id=? AND device_id=?`, userID, deviceID); err != nil {
+			return fmt.Errorf("touch device key: %w", err)
+		}
 		return tx.Commit()
 	case err == nil:
 		return ErrKeyConflict
@@ -91,9 +97,13 @@ func (r *Repository) Register(ctx context.Context, userID int64, deviceID string
 		return fmt.Errorf("count devices: %w", err)
 	}
 	if active >= MaxActiveDevices {
-		return ErrTooManyDevices
+		if _, err = tx.ExecContext(ctx, `UPDATE e2ee_device_keys SET revoked_at=unixepoch() WHERE user_id=? AND device_id IN (
+ SELECT device_id FROM e2ee_device_keys WHERE user_id=? AND revoked_at IS NULL ORDER BY max(last_used_at,created_at),device_id LIMIT ?)`,
+			userID, userID, active-MaxActiveDevices+1); err != nil {
+			return fmt.Errorf("revoke least recently used device: %w", err)
+		}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO e2ee_device_keys(user_id,device_id,public_key) VALUES(?,?,?)`, userID, deviceID, publicKey); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO e2ee_device_keys(user_id,device_id,public_key,last_used_at) VALUES(?,?,?,unixepoch())`, userID, deviceID, publicKey); err != nil {
 		return fmt.Errorf("register device key: %w", err)
 	}
 	return tx.Commit()
