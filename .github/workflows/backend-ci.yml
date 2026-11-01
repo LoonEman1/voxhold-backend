@@ -65,6 +65,17 @@ jobs:
       - name: Check reachable vulnerabilities (Linux production packages)
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./cmd/... ./internal/...
 
+  staticcheck:
+    name: Staticcheck (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+
   test-race:
     name: Test with race detector
     runs-on: ubuntu-latest
