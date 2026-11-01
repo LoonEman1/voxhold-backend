@@ -76,3 +76,22 @@ func TestQueuedNotificationsRespectRevocation(t *testing.T) {
 		t.Fatal("private notification delivered")
 	}
 }
+
+func TestTypingIndicatorsNeverDisconnectASlowClient(t *testing.T) {
+	client := NewClient(2, "session", []int64{1})
+	for i := 0; i < 10; i++ {
+		client.enqueue(OutgoingEvent{Type: EventTyping, Data: TypingData{ServerID: 1, ChannelID: 7, UserID: 3}})
+	}
+	if client.QueueStats().NormalPending != 1 {
+		t.Fatal("repeated typing of one user was not coalesced")
+	}
+	for user := int64(10); user < 10+outgoingBufferSize; user++ {
+		client.enqueue(OutgoingEvent{Type: EventTyping, Data: TypingData{ServerID: 1, ChannelID: 7, UserID: user}})
+	}
+	if !client.enqueue(OutgoingEvent{Type: EventTyping, Data: TypingData{ServerID: 1, ChannelID: 7, UserID: 999}}) {
+		t.Fatal("typing overflow closed the queue")
+	}
+	if !client.enqueue(OutgoingEvent{Type: EventChannelsChanged, Data: ServerDeletedData{ServerID: 1}}) {
+		t.Fatal("typing indicators blocked a permission event")
+	}
+}

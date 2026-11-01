@@ -957,3 +957,28 @@ type presenceStamp struct {
 	at     int64
 	status PresenceStatus
 }
+
+// PublishExcept publishes to a channel room without echoing to one client.
+func (h *Hub) PublishExcept(channelID int64, event OutgoingEvent, except *Client) int {
+	room := h.getRoom(channelID)
+	if channelID <= 0 || room == nil {
+		return 0
+	}
+	event = event.shareEncoding()
+	delivered := 0
+	var failed []*Client
+	for _, client := range room.snapshot() {
+		if client == except {
+			continue
+		}
+		if client.enqueue(event) {
+			delivered++
+		} else {
+			failed = append(failed, client)
+		}
+	}
+	for _, client := range failed {
+		h.Unregister(client)
+	}
+	return delivered
+}
