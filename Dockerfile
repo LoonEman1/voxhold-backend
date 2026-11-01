@@ -36,6 +36,7 @@ RUN addgroup -S -g 10001 voxhold && \
 
 COPY --from=builder /out/voxhold /usr/local/bin/voxhold
 COPY --from=builder /out/voxhold-bootstrap /usr/local/bin/voxhold-bootstrap
+COPY --from=builder /out/voxhold-admin /usr/local/bin/voxhold-admin
 COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY migrations /app/migrations
 COPY LICENSE /usr/share/licenses/voxhold-backend/LICENSE
