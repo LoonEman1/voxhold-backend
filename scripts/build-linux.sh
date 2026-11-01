@@ -15,3 +15,4 @@ export CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOAMD64="$mode"
 mkdir -p "$out"
 go build -trimpath -ldflags='-s -w' -pgo="${PGO:-auto}" -o "$out/voxhold" ./cmd/api
 go build -trimpath -ldflags='-s -w' -pgo=off -o "$out/voxhold-bootstrap" ./cmd/bootstrap
+go build -trimpath -ldflags='-s -w' -pgo=off -o "$out/voxhold-admin" ./cmd/admin
