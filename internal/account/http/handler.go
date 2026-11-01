@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"voxhold-backend/internal/account"
+	"voxhold-backend/internal/antiabuse"
 	"voxhold-backend/internal/httpapi"
 )
 
@@ -70,6 +71,7 @@ type loginRequest struct {
 type Handler struct {
 	service        Service
 	loginProtector LoginProtector
+	sessions       SessionService
 }
 
 type LoginProtector interface {
@@ -94,6 +96,9 @@ func NewHandler(
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	if h.sessions != nil {
+		h.registerSessionRoutes(mux)
+	}
 	mux.HandleFunc(
 		"POST /api/v1/auth/register",
 		h.register,
@@ -123,7 +128,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.service.Register(
-		r.Context(),
+		clientMetaContext(r, antiabuse.ClientIP(r)),
 		account.RegisterInput{
 			Username:        request.Username,
 			Password:        request.Password,
@@ -236,7 +241,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.service.Login(
-		r.Context(),
+		clientMetaContext(r, antiabuse.ClientIP(r)),
 		account.LoginInput{
 			Username: request.Username,
 			Password: request.Password,

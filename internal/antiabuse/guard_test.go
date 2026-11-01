@@ -160,6 +160,25 @@ func TestWebSocketEventLimiterRejectsBurstOverflow(t *testing.T) {
 	}
 }
 
+func TestAccountDeletionSharesTheAuthBudget(t *testing.T) {
+	config := DefaultConfig()
+	config.AuthBurst = 2
+	handler := New(config).ProtectHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	codes := []int{}
+	for range 3 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/account", nil)
+		req.RemoteAddr = "198.51.100.7:1"
+		handler.ServeHTTP(rec, req)
+		codes = append(codes, rec.Code)
+	}
+	if codes[2] != http.StatusTooManyRequests {
+		t.Fatalf("password attempts through account deletion are not limited: %v", codes)
+	}
+}
+
 func TestIPv6ClientsShareBucketWithinPrefix(t *testing.T) {
 	config := DefaultConfig()
 	config.HTTPRequestsPerSecond = 1

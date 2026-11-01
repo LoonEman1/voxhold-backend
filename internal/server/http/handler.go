@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/server"
 )
@@ -69,7 +70,14 @@ type Service interface {
 }
 
 type Handler struct {
-	service Service
+	service        Service
+	verifyPassword func(ctx context.Context, userID int64, password string) error
+}
+
+// WithPasswordVerifier requires the account password to delete the account.
+func (h *Handler) WithPasswordVerifier(verify func(ctx context.Context, userID int64, password string) error) *Handler {
+	h.verifyPassword = verify
+	return h
 }
 
 func NewHandler(service Service) *Handler {
@@ -242,6 +250,24 @@ func (h *Handler) deleteAccount(
 	userID, ok := httpapi.AuthenticatedUserID(w, r)
 	if !ok {
 		return
+	}
+
+	if h.verifyPassword != nil {
+		var request struct {
+			Password string `json:"password"`
+		}
+		if !httpapi.DecodeJSON(w, r, &request) {
+			return
+		}
+		if err := h.verifyPassword(r.Context(), userID, request.Password); err != nil {
+			if errors.Is(err, account.ErrWrongCurrentPassword) {
+				httpapi.WriteError(w, http.StatusForbidden, "password is incorrect")
+				return
+			}
+			log.Printf("verify password for account deletion: %v", err)
+			httpapi.WriteError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
 	}
 
 	if err := h.service.DeleteAccount(
