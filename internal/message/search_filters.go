@@ -8,8 +8,8 @@ import (
 // SearchFilters are the operators extracted from a query string. Everything
 // else stays in Rest and goes to the full-text index.
 type SearchFilters struct {
-	From   string
-	In     string
+	From                       string
+	In                         string
 	HasFile, HasImage, HasLink bool
 	Before, After              *time.Time
 	Rest                       string
