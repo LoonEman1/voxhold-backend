@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"strings"
-	"unicode/utf8"
 )
 
 var (
@@ -32,9 +31,8 @@ func (input RegisterInput) Normalize() RegisterInput {
 
 func (input RegisterInput) Validate() error {
 
-	usernameLength := utf8.RuneCountInString(input.Username) // длина рун
-	if usernameLength < 3 || usernameLength > 32 {
-		return ErrUsernameInvalid
+	if _, _, err := NormalizeUsername(input.Username); err != nil {
+		return err
 	}
 
 	if len(input.Password) < 8 {

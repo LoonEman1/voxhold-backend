@@ -210,6 +210,8 @@ func (s *Service) Authenticate(ctx context.Context, token string) (int64, error)
 		return 0, fmt.Errorf("authenticate session: %w", err)
 	}
 
+	_ = s.sessions.Touch(ctx, tokenHash, time.Now().Unix())
+
 	return userID, nil
 }
 

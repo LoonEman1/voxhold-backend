@@ -116,6 +116,14 @@ func ConfigFromEnv() (Config, error) {
 		config.IPv6PrefixBits = bits
 	}
 
+	if raw := os.Getenv("RATE_LIMIT_IPV6_PREFIX"); raw != "" {
+		bits, err := strconv.Atoi(raw)
+		if err != nil || bits < 32 || bits > 128 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_IPV6_PREFIX must be an integer in 32..128")
+		}
+		config.IPv6PrefixBits = bits
+	}
+
 	for _, value := range values {
 		raw := os.Getenv(value.name)
 		if raw == "" {
