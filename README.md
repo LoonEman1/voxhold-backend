@@ -13,7 +13,7 @@ SQLite and is distributed as a multi-platform container image.
 
 Saved messages and notes, cross-scope forwarding, scheduled messages, polls,
 server events, administrative audit and personal calls are described in
-[the community features guide](docs/community-features.md). The current source also requires migration **000033**. See
+[the community features guide](docs/community-features.md). The current source also requires migration **000040**. See
 [audit fixes and upgrade order](docs/audit-2.5-fixes.md).
 
 
