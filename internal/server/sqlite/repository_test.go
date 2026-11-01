@@ -245,7 +245,8 @@ func openServerTestDB(t *testing.T) *sql.DB {
 	CREATE TABLE user_bans (
 		user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 		banned_by_user_id INTEGER NOT NULL REFERENCES users(id),
-		created_at INTEGER NOT NULL DEFAULT (unixepoch())
+		created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+		reason TEXT NOT NULL DEFAULT ''
 	);
 	CREATE TABLE scheduled_messages (
 		id INTEGER PRIMARY KEY,

@@ -62,6 +62,10 @@ type Service interface {
 		requesterUserID int64,
 		targetUserID int64,
 	) error
+
+	BanMemberWithReason(ctx context.Context, serverID, requesterUserID, targetUserID int64, reason string) error
+	ListBans(ctx context.Context, serverID, requesterUserID int64) ([]server.Ban, error)
+	Unban(ctx context.Context, serverID, requesterUserID, targetUserID int64) error
 }
 
 type Handler struct {
@@ -106,6 +110,16 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"PATCH /api/v1/servers/{serverID}/members/{userID}/role",
 		requireAuth(http.HandlerFunc(h.updateMemberRole)),
+	)
+
+	mux.Handle(
+		"GET /api/v1/servers/{serverID}/bans",
+		requireAuth(http.HandlerFunc(h.listBans)),
+	)
+
+	mux.Handle(
+		"DELETE /api/v1/servers/{serverID}/bans/{userID}",
+		requireAuth(http.HandlerFunc(h.unbanMember)),
 	)
 
 	mux.Handle(
@@ -543,11 +557,21 @@ func (h *Handler) banMember(
 		return
 	}
 
-	if err := h.service.BanMember(
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+		if !httpapi.DecodeJSON(w, r, &body) {
+			return
+		}
+	}
+
+	if err := h.service.BanMemberWithReason(
 		r.Context(),
 		serverID,
 		requesterUserID,
 		targetUserID,
+		body.Reason,
 	); err != nil {
 		writeManageMemberError(
 			w, "ban member", serverID, err,
@@ -574,6 +598,12 @@ func writeManageMemberError(
 		httpapi.WriteError(
 			w, http.StatusNotFound, "server member not found",
 		)
+
+	case errors.Is(err, server.ErrBanNotFound):
+		httpapi.WriteError(w, http.StatusNotFound, "ban not found")
+
+	case errors.Is(err, server.ErrBanReasonTooLong):
+		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
 
 	case errors.Is(err, server.ErrManageMembersForbidden):
 		httpapi.WriteError(
@@ -602,4 +632,41 @@ func writeManageMemberError(
 			"internal server error",
 		)
 	}
+}
+
+func (h *Handler) listBans(w http.ResponseWriter, r *http.Request) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := httpapi.PositiveInt64PathValue(w, r, "serverID", "server")
+	if !ok {
+		return
+	}
+	bans, err := h.service.ListBans(r.Context(), serverID, requesterUserID)
+	if err != nil {
+		writeManageMemberError(w, "list bans", serverID, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"bans": bans})
+}
+
+func (h *Handler) unbanMember(w http.ResponseWriter, r *http.Request) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := httpapi.PositiveInt64PathValue(w, r, "serverID", "server")
+	if !ok {
+		return
+	}
+	targetUserID, ok := httpapi.PositiveInt64PathValue(w, r, "userID", "user")
+	if !ok {
+		return
+	}
+	if err := h.service.Unban(r.Context(), serverID, requesterUserID, targetUserID); err != nil {
+		writeManageMemberError(w, "unban member", serverID, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

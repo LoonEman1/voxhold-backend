@@ -139,6 +139,16 @@ func (r *Repository) BanMember(
 	requesterUserID int64,
 	targetUserID int64,
 ) error {
+	return r.BanMemberWithReason(ctx, serverID, requesterUserID, targetUserID, "")
+}
+
+func (r *Repository) BanMemberWithReason(
+	ctx context.Context,
+	serverID int64,
+	requesterUserID int64,
+	targetUserID int64,
+	reason string,
+) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf(
@@ -204,8 +214,8 @@ func (r *Repository) BanMember(
 	}
 
 	const banQuery = `
-	INSERT INTO user_bans (user_id, banned_by_user_id)
-	VALUES (?, ?)
+	INSERT INTO user_bans (user_id, banned_by_user_id, reason)
+	VALUES (?, ?, ?)
 	`
 
 	if _, err := tx.ExecContext(
@@ -213,6 +223,7 @@ func (r *Repository) BanMember(
 		banQuery,
 		targetUserID,
 		requesterUserID,
+		reason,
 	); err != nil {
 		return fmt.Errorf(
 			"create instance ban: %w",
@@ -349,4 +360,66 @@ func findServerMember(
 	}
 
 	return member, nil
+}
+
+// ListBans returns the instance bans visible to server owners and admins.
+func (r *Repository) ListBans(ctx context.Context, serverID, requesterUserID int64) ([]server.Ban, error) {
+	var role server.Role
+	err := r.db.QueryRowContext(ctx, `SELECT role FROM server_members WHERE server_id=? AND user_id=?`, serverID, requesterUserID).Scan(&role)
+	if err != nil || (role != server.RoleOwner && role != server.RoleAdmin) {
+		return nil, server.ErrManageMembersForbidden
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT b.user_id, u.username, b.banned_by_user_id, b.reason, b.created_at
+ FROM user_bans b JOIN users u ON u.id=b.user_id ORDER BY b.created_at DESC, b.user_id DESC LIMIT 500`)
+	if err != nil {
+		return nil, fmt.Errorf("list bans: %w", err)
+	}
+	defer rows.Close()
+	bans := []server.Ban{}
+	for rows.Next() {
+		var ban server.Ban
+		if err = rows.Scan(&ban.UserID, &ban.Username, &ban.BannedBy, &ban.Reason, &ban.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan ban: %w", err)
+		}
+		bans = append(bans, ban)
+	}
+	return bans, rows.Err()
+}
+
+// Unban removes an instance ban. Owners may lift any ban; admins only bans
+// they issued. Membership is not restored: the user needs a new invitation.
+func (r *Repository) Unban(ctx context.Context, serverID, requesterUserID, targetUserID int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin unban transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	requesterRole, err := findMemberRole(ctx, tx, serverID, requesterUserID)
+	if err != nil {
+		if errors.Is(err, server.ErrMemberNotFound) {
+			return server.ErrManageMembersForbidden
+		}
+		return err
+	}
+	var bannedBy int64
+	err = tx.QueryRowContext(ctx, `SELECT banned_by_user_id FROM user_bans WHERE user_id=?`, targetUserID).Scan(&bannedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return server.ErrBanNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("find ban: %w", err)
+	}
+	if requesterRole != server.RoleOwner && !(requesterRole == server.RoleAdmin && bannedBy == requesterUserID) {
+		return server.ErrManageMembersForbidden
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM user_bans WHERE user_id=?`, targetUserID); err != nil {
+		return fmt.Errorf("delete ban: %w", err)
+	}
+	if err = audit.Record(ctx, tx, serverID, requesterUserID, "member.unbanned", "user", targetUserID, "", nil); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit unban transaction: %w", err)
+	}
+	return nil
 }

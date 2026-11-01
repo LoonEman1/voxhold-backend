@@ -37,3 +37,15 @@ func (i UpdateMemberRoleInput) Validate() error {
 
 	return nil
 }
+
+var ErrBanNotFound = errors.New("ban not found")
+
+// Ban is an instance-wide ban shown in the server settings.
+type Ban struct {
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	BannedBy  int64  `json:"banned_by"`
+	Reason    string `json:"reason"`
+	CreatedAt int64  `json:"created_at"`
+}
+var ErrBanReasonTooLong = errors.New("ban reason must not exceed 500 characters")
