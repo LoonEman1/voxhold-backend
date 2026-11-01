@@ -1,0 +1,1 @@
+ALTER TABLE user_bans ADD COLUMN reason TEXT NOT NULL DEFAULT '';
