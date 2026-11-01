@@ -231,3 +231,33 @@ func TestLoginBlockWorksWhenFailureTableIsFull(t *testing.T) {
 		t.Fatal("login should be blocked after repeated failures")
 	}
 }
+
+func TestAuthenticatedUsersBehindOneIPHaveSeparateBudgets(t *testing.T) {
+	config := DefaultConfig()
+	config.HTTPRequestsPerSecond = 1
+	config.HTTPBurst = 1
+	config.IPMultiplier = 4
+	handler := New(config).ProtectHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	status := func(token string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = "192.0.2.50:1"
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if status("alice") != http.StatusNoContent || status("bob") != http.StatusNoContent {
+		t.Fatal("two users behind one IP must each get a request")
+	}
+	if status("alice") != http.StatusTooManyRequests {
+		t.Fatal("a user must still be limited by their own budget")
+	}
+	for _, token := range []string{"c", "d", "e"} {
+		status(token)
+	}
+	if status("f") != http.StatusTooManyRequests {
+		t.Fatal("the outer IP budget must still apply to many fake tokens")
+	}
+}
