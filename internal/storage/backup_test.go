@@ -33,3 +33,20 @@ func TestBackupCreatesVerifiedSnapshot(t *testing.T) {
 		t.Fatalf("name=%q err=%v", name, err)
 	}
 }
+
+func TestBackupRefusesToOverwriteTheLiveDatabase(t *testing.T) {
+	db := testdb.OpenFile(t)
+	var live string
+	if err := db.QueryRow(`SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&live); err != nil || live == "" {
+		t.Fatalf("live=%q err=%v", live, err)
+	}
+	for _, target := range []string{live, live + "-wal"} {
+		if err := storage.Backup(context.Background(), db, target); err == nil {
+			t.Fatalf("snapshot into %s was accepted", target)
+		}
+	}
+	var users int
+	if err := db.QueryRow(`SELECT count(*) FROM users`).Scan(&users); err != nil || users == 0 {
+		t.Fatalf("live database damaged: users=%d err=%v", users, err)
+	}
+}

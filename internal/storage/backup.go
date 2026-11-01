@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,22 @@ import (
 // VACUUM INTO and verifies it with PRAGMA integrity_check. A snapshot that
 // fails verification is removed.
 func Backup(ctx context.Context, db *sql.DB, path string) error {
+	// The stale snapshot is removed first, so a target pointing at the live
+	// database (or its WAL files) would delete it.
+	var live string
+	if err := db.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&live); err != nil {
+		return fmt.Errorf("locate live database: %w", err)
+	}
+	if target, err := filepath.Abs(path); err != nil {
+		return fmt.Errorf("resolve snapshot path: %w", err)
+	} else if live != "" {
+		live, _ = filepath.Abs(live)
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+			if strings.EqualFold(target, live+suffix) {
+				return fmt.Errorf("snapshot path %s is the live database", path)
+			}
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create backup directory: %w", err)
 	}
