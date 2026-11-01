@@ -44,7 +44,6 @@ func TestIdleDeadlineWriterLetsSlowClientFinish(t *testing.T) {
 	}
 }
 
-
 func TestIdleDeadlineWriterFailsOnStalledClient(t *testing.T) {
 	done := make(chan error, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
