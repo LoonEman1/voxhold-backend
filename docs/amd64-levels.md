@@ -11,6 +11,11 @@ and ARM64). Matching minor/latest aliases exist for both AMD64 variants. Each
 image contains exactly one API executable and one bootstrap executable; there
 is no second CPU copy or v2 variant. The migration tool stays on the v1 baseline.
 
+Since 2.6 the `-amd64-v1` tags are aliases of the portable multi-platform image
+(the same digest): its AMD64 half already is the v1 build, so CI no longer builds
+it twice. Docker on an AMD64 host pulls the identical AMD64 v1 image as before.
+Only `-amd64-v3` is a separate build.
+
 `voxhold-deploy` selects the appropriate official image in both `install.sh`
 and `update.sh`. The glibc loader verifies the complete x86-64-v3 level, including
 OS support. If that detector is unavailable (for example, on a musl host), auto

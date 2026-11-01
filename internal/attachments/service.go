@@ -218,7 +218,7 @@ func (s *Service) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "upload metadata unavailable")
 		return
 	}
-	name := strings.TrimSpace(filepath.Base(strings.ReplaceAll(r.URL.Query().Get("filename"), "\\", "/")))
+	name := sanitizeFilename(filepath.Base(strings.ReplaceAll(r.URL.Query().Get("filename"), "\\", "/")))
 	if name == "" || name == "." || utf8.RuneCountInString(name) > 200 || strings.ContainsAny(name, "\r\n\x00") {
 		fail(w, 400, "invalid filename")
 		return
@@ -406,7 +406,7 @@ func (s *Service) content(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, name, stat.ModTime(), f)
+	http.ServeContent(idleDeadlineWriter{ResponseWriter: w, idle: 20 * time.Second}, r, name, stat.ModTime(), f)
 }
 
 // Only passive media may open in the application's origin. Keep legacy SVG

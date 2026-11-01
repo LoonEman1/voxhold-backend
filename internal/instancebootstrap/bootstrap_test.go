@@ -74,7 +74,8 @@ func openBootstrapDB(t *testing.T) *sql.DB {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL,
-		deleted_at INTEGER
+		deleted_at INTEGER,
+		username_key TEXT
 	);
 	CREATE TABLE servers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

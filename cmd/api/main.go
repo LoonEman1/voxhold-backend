@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -73,6 +74,14 @@ const (
 )
 
 func main() {
+	// os.Exit skips deferred cleanup, so a failing server only records the code
+	// here; this defer is registered first and therefore runs last.
+	exitCode := 0
+	defer func() {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+	}()
 	// The Go runtime validates GOAMD64 before main. This preflight therefore
 	// verifies the actual image on its target CPU without opening the database.
 	if len(os.Args) == 2 && os.Args[1] == "--check-cpu" {
@@ -87,6 +96,19 @@ func main() {
 		fmt.Printf("arch=%s level=%s\n", runtime.GOARCH, level)
 		return
 	}
+	// Online snapshot for backup.sh: consistent while the server keeps writing.
+	if len(os.Args) == 3 && os.Args[1] == "--backup-db" {
+		db, err := storage.Open()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := storage.Backup(context.Background(), db, os.Args[2]); err != nil {
+			db.Close()
+			log.Fatal(err)
+		}
+		db.Close()
+		return
+	}
 	configureMemoryLimit()
 	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
 	if err != nil {
@@ -99,6 +121,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	if err := accountSqlite.BackfillUsernameKeys(context.Background(), db); err != nil {
+		log.Fatal(err)
+	}
 	if err := instancebootstrap.Validate(context.Background(), db); err != nil {
 		log.Fatal(err)
 	}
@@ -450,6 +475,24 @@ func main() {
 		clientICEUsername,
 		clientICECredential,
 	)
+	if turnSecret := strings.TrimSpace(os.Getenv("WEBRTC_TURN_SECRET")); turnSecret != "" {
+		turnTTL := 12 * time.Hour
+		if raw := os.Getenv("WEBRTC_TURN_CREDENTIAL_TTL"); raw != "" {
+			turnTTL, err = time.ParseDuration(raw)
+			if err != nil || turnTTL < 10*time.Minute || turnTTL > 48*time.Hour {
+				log.Fatal("WEBRTC_TURN_CREDENTIAL_TTL must be a duration between 10m and 48h")
+			}
+		}
+		if clientICEUsername != "" {
+			log.Print("WEBRTC_TURN_SECRET is set: static client ICE credentials are ignored")
+		}
+		for _, entry := range splitICEURLs(serverICEServers) {
+			if (strings.HasPrefix(entry, "turn:") || strings.HasPrefix(entry, "turns:")) && serverICEUsername == "" {
+				log.Fatal("WEBRTC_SERVER_ICE_SERVERS contains TURN without credentials; the server does not need TURN, remove it")
+			}
+		}
+		webrtcConfigHandler.WithTURNSecret(turnSecret, turnTTL)
+	}
 
 	mux := http.NewServeMux()
 	previews := linkpreview.New()
@@ -560,7 +603,9 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			log.Printf("http server: %v", err)
+			exitCode = 1
+			return
 		}
 		return
 

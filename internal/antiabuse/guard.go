@@ -15,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"voxhold-backend/internal/httpapi"
+	"voxhold-backend/internal/telemetry"
 )
 
 type clientIPContextKey struct{}
@@ -67,6 +68,7 @@ func New(config Config) *Guard {
 func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP := g.resolveClientIP(r)
+		rateIP := g.rateKey(clientIP)
 		r = r.WithContext(context.WithValue(
 			r.Context(),
 			clientIPContextKey{},
@@ -78,7 +80,7 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 		// ordinary API budget. The route still performs normal authentication
 		// and validates both current call memberships and session identifiers.
 		if conversationCallSignal(r) {
-			if !g.limiters.allow("http:call-signal:"+clientIP, rate.Limit(g.config.CallSignalsPerSecond), g.config.CallSignalBurst) {
+			if !g.limiters.allow("http:call-signal:"+rateIP, rate.Limit(g.config.CallSignalsPerSecond), g.config.CallSignalBurst) {
 				writeRateLimitError(w, time.Second)
 				return
 			}
@@ -87,7 +89,7 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 		}
 
 		if !g.limiters.allow(
-			"http:all:"+clientIP,
+			"http:all:"+rateIP,
 			rate.Limit(g.config.HTTPRequestsPerSecond),
 			g.config.HTTPBurst,
 		) {
@@ -99,7 +101,7 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 			r.Method != http.MethodHead &&
 			r.Method != http.MethodOptions &&
 			!g.limiters.allow(
-				"http:write:"+clientIP,
+				"http:write:"+rateIP,
 				rate.Limit(g.config.HTTPWritesPerSecond),
 				g.config.HTTPWriteBurst,
 			) {
@@ -119,7 +121,7 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 					r.URL.Path == "/api/v1/auth/refresh")):
 
 			if !g.limiters.allow(
-				"http:auth:"+clientIP,
+				"http:auth:"+rateIP,
 				rate.Limit(float64(g.config.AuthRequestsPerMinute)/60),
 				g.config.AuthBurst,
 			) {
@@ -131,7 +133,7 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 			r.URL.Path == "/api/v1/invite-links/resolve":
 
 			if !g.limiters.allow(
-				"http:invite:"+clientIP,
+				"http:invite:"+rateIP,
 				rate.Limit(float64(g.config.InviteRequestsPerMinute)/60),
 				g.config.InviteBurst,
 			) {
@@ -143,7 +145,7 @@ func (g *Guard) ProtectHTTP(next http.Handler) http.Handler {
 			r.URL.Path == "/api/v1/ws":
 
 			if !g.limiters.allow(
-				"http:ws:"+clientIP,
+				"http:ws:"+rateIP,
 				rate.Limit(float64(g.config.WebSocketConnectsPerMinute)/60),
 				g.config.WebSocketConnectBurst,
 			) {
@@ -216,7 +218,7 @@ func (g *Guard) RecordLoginFailure(
 			entry = failureEntry{}
 		}
 		if !exists && len(g.failures) >= g.config.MaxRateEntries {
-			continue
+			g.evictFailureLocked(now)
 		}
 		entry.failures++
 		entry.lastSeen = now
@@ -242,7 +244,7 @@ func (g *Guard) RecordLoginSuccess(
 func (g *Guard) AcquireWebSocketIP(
 	r *http.Request,
 ) (func(), bool) {
-	clientIP := ClientIP(r)
+	clientIP := g.rateKey(ClientIP(r))
 
 	g.connectionsMu.Lock()
 	defer g.connectionsMu.Unlock()
@@ -348,7 +350,7 @@ func (g *Guard) loginFailureKeys(
 		strings.TrimSpace(username),
 	)))
 	identity := hex.EncodeToString(digest[:])
-	clientIP := ClientIP(r)
+	clientIP := g.rateKey(ClientIP(r))
 
 	return []string{
 		"login:ip:" + clientIP,
@@ -388,7 +390,7 @@ func (s *limiterStore) allow(
 	entry, ok := s.entries[key]
 	if !ok {
 		if len(s.entries) >= s.maxEntries {
-			return false
+			s.evictOldestLocked()
 		}
 
 		entry = &limiterEntry{
@@ -420,4 +422,68 @@ func writeRateLimitError(
 		http.StatusTooManyRequests,
 		"too many requests; try again later",
 	)
+}
+
+// rateKey groups IPv6 clients by prefix so rotating addresses inside one
+// subscriber allocation does not yield fresh rate-limit buckets.
+func (g *Guard) rateKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || addr.Is4() {
+		return ip
+	}
+	bits := g.config.IPv6PrefixBits
+	if bits < 32 || bits > 128 {
+		bits = 64
+	}
+	prefix, err := addr.Prefix(bits)
+	if err != nil {
+		return ip
+	}
+	return prefix.String()
+}
+
+const evictionSample = 16
+
+// evictOldestLocked drops the least recently seen of a few random entries so a
+// full table keeps admitting new clients in O(1).
+func (s *limiterStore) evictOldestLocked() {
+	var oldestKey string
+	var oldest time.Time
+	seen := 0
+	for key, entry := range s.entries {
+		if seen == 0 || entry.lastSeen.Before(oldest) {
+			oldestKey, oldest = key, entry.lastSeen
+		}
+		if seen++; seen >= evictionSample {
+			break
+		}
+	}
+	if seen > 0 {
+		delete(s.entries, oldestKey)
+		telemetry.Observe(telemetry.RateEvict, 0, false)
+	}
+}
+
+// evictFailureLocked prefers entries whose block already expired; entries that
+// are still blocking are evicted last.
+func (g *Guard) evictFailureLocked(now time.Time) {
+	var victim string
+	var victimSeen time.Time
+	victimBlocked, seen := true, 0
+	for key, entry := range g.failures {
+		blocked := now.Before(entry.blockedUntil)
+		better := seen == 0 ||
+			(victimBlocked && !blocked) ||
+			(blocked == victimBlocked && entry.lastSeen.Before(victimSeen))
+		if better {
+			victim, victimSeen, victimBlocked = key, entry.lastSeen, blocked
+		}
+		if seen++; seen >= evictionSample {
+			break
+		}
+	}
+	if seen > 0 {
+		delete(g.failures, victim)
+		telemetry.Observe(telemetry.RateEvict, 0, false)
+	}
 }

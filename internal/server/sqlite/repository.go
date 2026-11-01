@@ -377,6 +377,7 @@ func (r *Repository) DeleteAccount(
 	const anonymizeQuery = `
 	UPDATE users
 	SET username = 'Удалённый #' || lower(hex(randomblob(10))),
+		username_key = NULL,
 		password_hash = '',
 		deleted_at = unixepoch()
 	WHERE id = ?
