@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -453,6 +454,24 @@ func main() {
 		clientICEUsername,
 		clientICECredential,
 	)
+	if turnSecret := strings.TrimSpace(os.Getenv("WEBRTC_TURN_SECRET")); turnSecret != "" {
+		turnTTL := 12 * time.Hour
+		if raw := os.Getenv("WEBRTC_TURN_CREDENTIAL_TTL"); raw != "" {
+			turnTTL, err = time.ParseDuration(raw)
+			if err != nil || turnTTL < 10*time.Minute || turnTTL > 48*time.Hour {
+				log.Fatal("WEBRTC_TURN_CREDENTIAL_TTL must be a duration between 10m and 48h")
+			}
+		}
+		if clientICEUsername != "" {
+			log.Print("WEBRTC_TURN_SECRET is set: static client ICE credentials are ignored")
+		}
+		for _, entry := range splitICEURLs(serverICEServers) {
+			if (strings.HasPrefix(entry, "turn:") || strings.HasPrefix(entry, "turns:")) && serverICEUsername == "" {
+				log.Fatal("WEBRTC_SERVER_ICE_SERVERS contains TURN without credentials; the server does not need TURN, remove it")
+			}
+		}
+		webrtcConfigHandler.WithTURNSecret(turnSecret, turnTTL)
+	}
 
 	mux := http.NewServeMux()
 	previews := linkpreview.New()
