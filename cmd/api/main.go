@@ -88,6 +88,19 @@ func main() {
 		fmt.Printf("arch=%s level=%s\n", runtime.GOARCH, level)
 		return
 	}
+	// Online snapshot for backup.sh: consistent while the server keeps writing.
+	if len(os.Args) == 3 && os.Args[1] == "--backup-db" {
+		db, err := storage.Open()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := storage.Backup(context.Background(), db, os.Args[2]); err != nil {
+			db.Close()
+			log.Fatal(err)
+		}
+		db.Close()
+		return
+	}
 	configureMemoryLimit()
 	antiAbuseConfig, err := antiabuse.ConfigFromEnv()
 	if err != nil {
