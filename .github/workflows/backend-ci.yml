@@ -4,7 +4,10 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [main]
+    # dev does not require PR branches to be up to date, so its pushes run the
+    # tests to catch PRs that pass alone but break together. They never build
+    # or publish images.
+    branches: [main, dev]
     tags: ['v*.*.*']
   workflow_dispatch:
 
@@ -13,9 +16,10 @@ permissions:
 
 concurrency:
   group: backend-ci-${{ github.ref }}
-  # Superseded PR runs are cancelled. A main or tag run may be publishing
-  # images and a release, so it always runs to completion.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Superseded PR and dev runs are cancelled: only the latest state matters.
+  # A main or tag run may be publishing images and a release, so it always
+  # runs to completion.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   IMAGE_NAME: ghcr.io/looneman1/voxhold-backend
