@@ -156,3 +156,46 @@ func TestWebSocketEventLimiterRejectsBurstOverflow(t *testing.T) {
 		t.Fatal("event above burst was accepted")
 	}
 }
+
+func TestIPv6ClientsShareBucketWithinPrefix(t *testing.T) {
+	config := DefaultConfig()
+	config.HTTPRequestsPerSecond = 1
+	config.HTTPBurst = 1
+	handler := New(config).ProtectHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	status := func(remote string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.RemoteAddr = remote
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := status("[2001:db8:1:1::1]:1"); got != http.StatusNoContent {
+		t.Fatalf("first = %d", got)
+	}
+	if got := status("[2001:db8:1:1:ffff::2]:1"); got != http.StatusTooManyRequests {
+		t.Fatalf("same /64 = %d", got)
+	}
+	if got := status("[2001:db8:1:2::1]:1"); got != http.StatusNoContent {
+		t.Fatalf("other /64 = %d", got)
+	}
+}
+
+func TestRateKeyKeepsIPv4(t *testing.T) {
+	g := New(DefaultConfig())
+	if got := g.rateKey("192.0.2.1"); got != "192.0.2.1" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestInvalidIPv6PrefixIsConfigError(t *testing.T) {
+	t.Setenv("RATE_LIMIT_IPV6_PREFIX", "16")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("expected error")
+	}
+	t.Setenv("RATE_LIMIT_IPV6_PREFIX", "56")
+	if c, err := ConfigFromEnv(); err != nil || c.IPv6PrefixBits != 56 {
+		t.Fatalf("got %v %v", c.IPv6PrefixBits, err)
+	}
+}
