@@ -17,8 +17,8 @@ import (
 	"voxhold-backend/internal/imagelimit"
 
 	"golang.org/x/image/draw"
-	"golang.org/x/time/rate"
 	_ "golang.org/x/image/webp"
+	"golang.org/x/time/rate"
 	"voxhold-backend/internal/httpapi"
 )
 
@@ -33,13 +33,16 @@ type Service struct {
 	mu     sync.Mutex
 	cache  map[string]entry
 	slots  chan struct{}
-	active map[int64]int
+	users  map[int64]*userSlot
 	rates  map[int64]*userRate
 	client *http.Client
+	// userWait bounds how long a request waits for the same user's earlier
+	// fetch; it slightly exceeds the 5 s client timeout.
+	userWait time.Duration
 }
 
 func New() *Service {
-	return &Service{cache: map[string]entry{}, slots: make(chan struct{}, 4), active: map[int64]int{}, rates: map[int64]*userRate{}, client: newClient()}
+	return &Service{cache: map[string]entry{}, slots: make(chan struct{}, 4), users: map[int64]*userSlot{}, rates: map[int64]*userRate{}, client: newClient(), userWait: 6 * time.Second}
 }
 func (s *Service) Close() { s.client.CloseIdleConnections() }
 func (s *Service) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
@@ -77,10 +80,17 @@ func (s *Service) put(key string, value entry) {
 	}
 	s.cache[key] = value
 }
+
 // maxSlotsPerUser keeps one user from occupying every global fetch slot.
 const maxSlotsPerUser = 1
 
-// acquire reserves a global slot and a per-user slot; release frees both.
+// userSlot serializes one user's uncached fetches; refs counts holders and
+// waiters so the entry disappears with its last request.
+type userSlot struct {
+	ch   chan struct{}
+	refs int
+}
+
 // userRate limits uncached preview fetches to 30 per minute per user.
 type userRate struct {
 	limiter *rate.Limiter
@@ -107,35 +117,56 @@ func (s *Service) allowUser(userID int64) bool {
 	return entry.limiter.AllowN(now, 1)
 }
 
+func previewBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "2")
+	httpapi.WriteError(w, 429, "preview busy")
+}
+
+// acquire reserves the user's slot and then a global slot; release frees
+// both. A message with several links loads its previews in parallel, so a
+// second request of the same user waits for the first fetch (bounded by
+// userWait) instead of failing; only the global slots answer 429 at once.
 func (s *Service) acquire(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
 	userID, _ := account.UserIDFromContext(r.Context())
 	s.mu.Lock()
-	if s.active[userID] >= maxSlotsPerUser {
+	slot := s.users[userID]
+	if slot == nil {
+		slot = &userSlot{ch: make(chan struct{}, maxSlotsPerUser)}
+		s.users[userID] = slot
+	}
+	slot.refs++
+	s.mu.Unlock()
+	leave := func() {
+		s.mu.Lock()
+		if slot.refs--; slot.refs == 0 {
+			delete(s.users, userID)
+		}
 		s.mu.Unlock()
-		w.Header().Set("Retry-After", "2")
-		httpapi.WriteError(w, 429, "preview busy")
+	}
+	wait := time.NewTimer(s.userWait)
+	defer wait.Stop()
+	select {
+	case slot.ch <- struct{}{}:
+	case <-r.Context().Done():
+		leave()
+		previewBusy(w)
+		return nil, false
+	case <-wait.C:
+		leave()
+		previewBusy(w)
 		return nil, false
 	}
-	s.active[userID]++
-	s.mu.Unlock()
 	select {
 	case s.slots <- struct{}{}:
 		return func() {
 			<-s.slots
-			s.mu.Lock()
-			if s.active[userID]--; s.active[userID] <= 0 {
-				delete(s.active, userID)
-			}
-			s.mu.Unlock()
+			<-slot.ch
+			leave()
 		}, true
 	default:
-		s.mu.Lock()
-		if s.active[userID]--; s.active[userID] <= 0 {
-			delete(s.active, userID)
-		}
-		s.mu.Unlock()
-		w.Header().Set("Retry-After", "2")
-		httpapi.WriteError(w, 429, "preview busy")
+		<-slot.ch
+		leave()
+		previewBusy(w)
 		return nil, false
 	}
 }

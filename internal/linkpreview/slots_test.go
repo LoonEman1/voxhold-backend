@@ -1,16 +1,18 @@
 package linkpreview
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"voxhold-backend/internal/account"
 )
 
-
 func TestOneUserCannotTakeEverySlot(t *testing.T) {
 	s := New()
 	defer s.Close()
+	s.userWait = 20 * time.Millisecond
 	acquire := func(user int64) (func(), bool) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/api/v1/link-preview", nil)
@@ -35,6 +37,42 @@ func TestOneUserCannotTakeEverySlot(t *testing.T) {
 	}
 	again()
 	other()
+	if len(s.users) != 0 {
+		t.Fatalf("user slots leaked: %d", len(s.users))
+	}
+}
+
+func TestSameUserWaitsForItsEarlierFetch(t *testing.T) {
+	s := New()
+	defer s.Close()
+	request := func() (*httptest.ResponseRecorder, *http.Request) {
+		r := httptest.NewRequest("GET", "/api/v1/link-preview", nil)
+		return httptest.NewRecorder(), r.WithContext(account.ContextWithUserID(r.Context(), 1))
+	}
+	w, r := request()
+	release, ok := s.acquire(w, r)
+	if !ok {
+		t.Fatal("first slot refused")
+	}
+	done := make(chan bool, 1)
+	go func() {
+		w, r := request()
+		second, ok := s.acquire(w, r)
+		if ok {
+			second()
+		}
+		done <- ok
+	}()
+	time.Sleep(50 * time.Millisecond)
+	release()
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("queued request of the same user was rejected")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued request never got the slot")
+	}
 }
 
 func TestUncachedPreviewsAreRateLimitedPerUser(t *testing.T) {
