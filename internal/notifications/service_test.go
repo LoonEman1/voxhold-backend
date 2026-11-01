@@ -155,3 +155,34 @@ func TestIdempotentMessageRetryOnlyAlertsOnce(t *testing.T) {
 		t.Fatalf("alerts=%d", count)
 	}
 }
+
+func TestRoleMentionsAreIgnoredForPlainMembers(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO users(id,username,password_hash) VALUES(4,'admin','hash'),(5,'Nikita','hash'); INSERT INTO server_members(server_id,user_id,role) VALUES(1,4,'admin'),(1,5,'member')`); err != nil {
+		t.Fatal(err)
+	}
+	var recipients []int64
+	service := NewService(db, func(id int64) bool { return id >= 1 && id <= 5 }, func(id int64, _ Event) {
+		recipients = append(recipients, id)
+	}, nil)
+	send := func(author int64, content string) []int64 {
+		t.Helper()
+		recipients = nil
+		value, err := messagesqlite.NewRepository(db).Create(ctx, 1, 2, author, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Deliver(value); err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(recipients)
+		return recipients
+	}
+	if got := send(5, "<@&member> <@&admin>"); len(got) != 0 {
+		t.Fatalf("member role ping notified %v", got)
+	}
+	if got := send(4, "<@&member>"); !slices.Contains(got, 5) {
+		t.Fatalf("admin role ping notified %v", got)
+	}
+}
