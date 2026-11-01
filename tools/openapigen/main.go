@@ -79,9 +79,6 @@ func writeSpec(routes map[string]route) {
 		fmt.Fprintf(&out, "  %s:\n", path)
 		for _, r := range byPath[path] {
 			fmt.Fprintf(&out, "    %s:\n      operationId: %s\n      summary: %s %s\n      x-source: %s\n", strings.ToLower(r.method), operationID(r), r.method, r.path, r.file)
-			for _, name := range pathParams(path) {
-				_ = name
-			}
 			if params := pathParams(path); len(params) > 0 {
 				out.WriteString("      parameters:\n")
 				for _, name := range params {

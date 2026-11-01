@@ -13,7 +13,8 @@ func TestOpenAPIListsEveryRegisteredRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(spec)
+	// A Windows checkout may convert the YAML to CRLF.
+	text := strings.ReplaceAll(string(spec), "\r\n", "\n")
 	routes := scanRoutes("../../internal")
 	if len(routes) < 100 {
 		t.Fatalf("route scan found only %d routes; the scanner is broken", len(routes))
