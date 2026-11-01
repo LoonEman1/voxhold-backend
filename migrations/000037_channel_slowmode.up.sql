@@ -1,0 +1,1 @@
+ALTER TABLE channels ADD COLUMN slowmode_seconds INTEGER NOT NULL DEFAULT 0 CHECK (slowmode_seconds BETWEEN 0 AND 21600);
