@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"voxhold-backend/internal/account"
 )
 
 type Config struct {
@@ -65,9 +67,11 @@ func Ensure(ctx context.Context, db *sql.DB, config Config) (Result, error) {
 	if config.InstanceName == "" {
 		config.InstanceName = "Voxhold"
 	}
-	if length := utf8.RuneCountInString(config.Username); length < 3 || length > 32 {
-		return Result{}, fmt.Errorf("bootstrap username must contain from 3 to 32 characters")
+	displayName, usernameKey, err := account.NormalizeUsername(config.Username)
+	if err != nil {
+		return Result{}, fmt.Errorf("bootstrap username: %w", err)
 	}
+	config.Username = displayName
 	if length := utf8.RuneCountInString(config.InstanceName); length < 1 || length > 64 {
 		return Result{}, fmt.Errorf("instance name must contain from 1 to 64 characters")
 	}
@@ -92,9 +96,10 @@ func Ensure(ctx context.Context, db *sql.DB, config Config) (Result, error) {
 	var userID int64
 	if err := tx.QueryRowContext(
 		ctx,
-		"INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING id",
+		"INSERT INTO users (username, password_hash, username_key) VALUES (?, ?, ?) RETURNING id",
 		config.Username,
 		string(passwordHash),
+		usernameKey,
 	).Scan(&userID); err != nil {
 		return Result{}, fmt.Errorf("create instance owner: %w", err)
 	}

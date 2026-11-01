@@ -144,6 +144,7 @@ type Handler struct {
 	voiceJoins     userLockSet
 	protector      RealtimeProtector
 	originPatterns func() []string
+	typing         typingLimiter
 }
 
 // SetOriginPatterns installs a runtime source for authorized cross-origin
@@ -720,6 +721,9 @@ func (h *Handler) handleIncomingEvent(
 			client,
 			event,
 		)
+
+	case realtime.EventTypingStart:
+		return h.typingStart(client, event)
 
 	case realtime.EventVoiceJoin:
 		return h.joinVoice(

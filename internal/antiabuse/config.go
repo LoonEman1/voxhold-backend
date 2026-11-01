@@ -33,6 +33,9 @@ type Config struct {
 
 	EntryTTL       time.Duration
 	MaxRateEntries int
+
+	// IPv6PrefixBits groups IPv6 clients by prefix; one /64 normally is one subscriber.
+	IPv6PrefixBits int
 }
 
 func DefaultConfig() Config {
@@ -97,6 +100,14 @@ func ConfigFromEnv() (Config, error) {
 		{"WS_MAX_CONNECTIONS_PER_IP", &config.WebSocketMaxPerIP},
 		{"WS_MAX_CONNECTIONS_PER_USER", &config.WebSocketMaxPerUser},
 		{"RATE_LIMIT_MAX_ENTRIES", &config.MaxRateEntries},
+	}
+
+	if raw := os.Getenv("RATE_LIMIT_IPV6_PREFIX"); raw != "" {
+		bits, err := strconv.Atoi(raw)
+		if err != nil || bits < 32 || bits > 128 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_IPV6_PREFIX must be an integer in 32..128")
+		}
+		config.IPv6PrefixBits = bits
 	}
 
 	for _, value := range values {

@@ -96,8 +96,13 @@ func TestOrdinaryUploadsAllowThreeAccountsButOnlyTwoPerAccount(t *testing.T) {
 	if len(s.userUploads) != 0 {
 		t.Fatal("user counters leaked")
 	}
-	if !s.acquireUserUpload(2) || !s.acquireUserUpload(2) || s.acquireUserUpload(2) {
-		t.Fatal("user limit is not two")
+	for range 2 {
+		if !s.acquireUserUpload(2) {
+			t.Fatal("user limit is below two")
+		}
+	}
+	if s.acquireUserUpload(2) {
+		t.Fatal("user limit is above two")
 	}
 	r := httptest.NewRequest("PUT", "/api/v1/channels/2/attachments/99999999999999999999999999999999?filename=x.txt", bytes.NewReader([]byte("text")))
 	r = r.WithContext(account.ContextWithUserID(r.Context(), 2))

@@ -134,6 +134,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, account.ErrUsernameInvalid),
+			errors.Is(err, account.ErrUsernameCharacters),
 			errors.Is(err, account.ErrPasswordTooShort),
 			errors.Is(err, account.ErrPasswordTooLong),
 			errors.Is(err, account.ErrPasswordsDoNotMatch):

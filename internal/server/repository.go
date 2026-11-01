@@ -54,4 +54,8 @@ type Repository interface {
 	) error
 
 	SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error
+
+	BanMemberWithReason(ctx context.Context, serverID, requesterUserID, targetUserID int64, reason string) error
+	ListBans(ctx context.Context, serverID, requesterUserID int64) ([]Ban, error)
+	Unban(ctx context.Context, serverID, requesterUserID, targetUserID int64) error
 }
