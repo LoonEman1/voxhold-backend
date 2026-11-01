@@ -1,7 +1,6 @@
 package instancebootstrap
 
 import (
-	"voxhold-backend/internal/account"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -11,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"voxhold-backend/internal/account"
 )
 
 type Config struct {

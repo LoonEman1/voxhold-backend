@@ -1,10 +1,11 @@
 package sqlite
 
 import (
-	"errors"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+
 	"voxhold-backend/internal/account"
 )
 
@@ -24,8 +25,8 @@ func (r *UserRepository) Create(
 	passwordHash string,
 ) (account.UserInfo, error) {
 	const query = `
-	INSERT INTO users (username, password_hash)
-	VALUES (?, ?)
+	INSERT INTO users (username, password_hash, username_key)
+	VALUES (?, ?, ?)
 	RETURNING id, username, created_at
 	`
 
@@ -35,6 +36,7 @@ func (r *UserRepository) Create(
 		query,
 		username,
 		passwordHash,
+		account.UsernameKey(username),
 	).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
 		return account.UserInfo{}, fmt.Errorf("create user: %w", err)

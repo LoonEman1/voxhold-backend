@@ -102,7 +102,7 @@ func main() {
 	if err := accountSqlite.BackfillUsernameKeys(context.Background(), db); err != nil {
 		log.Fatal(err)
 	}
-if err := instancebootstrap.Validate(context.Background(), db); err != nil {
+	if err := instancebootstrap.Validate(context.Background(), db); err != nil {
 		log.Fatal(err)
 	}
 

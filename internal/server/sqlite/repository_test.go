@@ -182,7 +182,8 @@ func openServerTestDB(t *testing.T) *sql.DB {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL DEFAULT 'hash',
-		deleted_at INTEGER
+		deleted_at INTEGER,
+		username_key TEXT UNIQUE
 	);
 	CREATE TABLE sessions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
