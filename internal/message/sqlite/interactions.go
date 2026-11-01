@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"voxhold-backend/internal/permissions"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -150,10 +149,14 @@ func (r *Repository) SetReaction(ctx context.Context, serverID, channelID, messa
 	if err = requireInteraction(ctx, tx, serverID, channelID, messageID, userID); err != nil {
 		return message.ReactionState{}, false, err
 	}
+	// A timed-out member may not add reactions. This checks the timeout itself,
+	// not the Publish bit: read-only custom roles could always react.
 	if active {
-		if allowed, perr := permissions.Allowed(ctx, tx, serverID, userID, permissions.Publish); perr != nil {
-			return message.ReactionState{}, false, perr
-		} else if !allowed {
+		var timedOut bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_members WHERE server_id=? AND user_id=? AND timeout_until>unixepoch())`, serverID, userID).Scan(&timedOut); err != nil {
+			return message.ReactionState{}, false, err
+		}
+		if timedOut {
 			return message.ReactionState{}, false, message.ErrForbidden
 		}
 	}

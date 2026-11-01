@@ -39,10 +39,36 @@ func TestMemberTimeoutRemovesPublishUntilItEnds(t *testing.T) {
 	if _, err := messagesqlite.NewRepository(db).Create(ctx, 1, 2, 32, "hi"); err == nil {
 		t.Fatal("timed-out member posted a message")
 	}
+	posted, err := messagesqlite.NewRepository(db).Create(ctx, 1, 2, 31, "react to me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = messagesqlite.NewRepository(db).SetReaction(ctx, 1, 2, posted.ID, 32, "👍", true); err == nil {
+		t.Fatal("timed-out member added a reaction")
+	}
 	if err := repo.SetMemberTimeout(ctx, 1, 31, 32, nil); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := permissions.Allowed(ctx, db, 1, 32, permissions.Publish); !ok {
 		t.Fatal("publish not restored after clearing the timeout")
+	}
+}
+
+func TestReadOnlyRoleCanStillReact(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO users(id,username,password_hash) VALUES(34,'reader','h');
+ INSERT INTO server_members(server_id,user_id,role) VALUES(1,34,'member');
+ INSERT INTO server_roles(id,server_id,name,permissions) VALUES(90,1,'readers',1);
+ INSERT INTO member_roles(server_id,user_id,role_id) VALUES(1,34,90)`); err != nil {
+		t.Fatal(err)
+	}
+	repo := messagesqlite.NewRepository(db)
+	posted, err := repo.Create(ctx, 1, 2, 1, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = repo.SetReaction(ctx, 1, 2, posted.ID, 34, "👍", true); err != nil {
+		t.Fatalf("a member without Publish lost reactions: %v", err)
 	}
 }
