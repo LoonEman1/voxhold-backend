@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -298,4 +299,22 @@ func (s *Service) ListBans(ctx context.Context, serverID, requesterUserID int64)
 
 func (s *Service) Unban(ctx context.Context, serverID, requesterUserID, targetUserID int64) error {
 	return s.repository.Unban(ctx, serverID, requesterUserID, targetUserID)
+}
+
+const maxTimeout = 28 * 24 * time.Hour
+
+func (s *Service) SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error {
+	if until != nil {
+		at := time.Unix(*until, 0)
+		if !at.After(time.Now()) || at.After(time.Now().Add(maxTimeout)) {
+			return ErrTimeoutInvalid
+		}
+	}
+	if serverID <= 0 || requesterUserID <= 0 {
+		return ErrManageMembersForbidden
+	}
+	if targetUserID <= 0 {
+		return ErrMemberNotFound
+	}
+	return s.repository.SetMemberTimeout(ctx, serverID, requesterUserID, targetUserID, until)
 }

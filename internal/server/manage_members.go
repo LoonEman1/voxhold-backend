@@ -38,6 +38,8 @@ func (i UpdateMemberRoleInput) Validate() error {
 	return nil
 }
 
+var ErrTimeoutInvalid = errors.New("timeout must end in the future, within 28 days")
+
 var ErrBanNotFound = errors.New("ban not found")
 
 // Ban is an instance-wide ban shown in the server settings.

@@ -423,3 +423,45 @@ func (r *Repository) Unban(ctx context.Context, serverID, requesterUserID, targe
 	}
 	return nil
 }
+
+// SetMemberTimeout mutes a member until the given Unix time (nil clears it).
+// The hierarchy matches bans: owners act on anyone but themselves, admins only
+// on plain members.
+func (r *Repository) SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin timeout transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	requesterRole, err := findMemberRole(ctx, tx, serverID, requesterUserID)
+	if err != nil {
+		if errors.Is(err, server.ErrMemberNotFound) {
+			return server.ErrManageMembersForbidden
+		}
+		return err
+	}
+	if requesterUserID == targetUserID {
+		return server.ErrCannotBanSelf
+	}
+	targetRole, err := findMemberRole(ctx, tx, serverID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if targetRole == server.RoleOwner {
+		return server.ErrOwnerCannotBeBanned
+	}
+	if !(requesterRole == server.RoleOwner || (requesterRole == server.RoleAdmin && targetRole == server.RoleMember)) {
+		return server.ErrManageMembersForbidden
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE server_members SET timeout_until=? WHERE server_id=? AND user_id=?`, until, serverID, targetUserID); err != nil {
+		return fmt.Errorf("set member timeout: %w", err)
+	}
+	details := map[string]any{"until": until}
+	if err = audit.Record(ctx, tx, serverID, requesterUserID, "member.timeout", "user", targetUserID, "", details); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit timeout transaction: %w", err)
+	}
+	return nil
+}

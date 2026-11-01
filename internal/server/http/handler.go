@@ -64,6 +64,8 @@ type Service interface {
 		targetUserID int64,
 	) error
 
+	SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error
+
 	BanMemberWithReason(ctx context.Context, serverID, requesterUserID, targetUserID int64, reason string) error
 	ListBans(ctx context.Context, serverID, requesterUserID int64) ([]server.Ban, error)
 	Unban(ctx context.Context, serverID, requesterUserID, targetUserID int64) error
@@ -128,6 +130,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"DELETE /api/v1/servers/{serverID}/bans/{userID}",
 		requireAuth(http.HandlerFunc(h.unbanMember)),
+	)
+
+	mux.Handle(
+		"PUT /api/v1/servers/{serverID}/members/{userID}/timeout",
+		requireAuth(http.HandlerFunc(h.setMemberTimeout)),
 	)
 
 	mux.Handle(
@@ -506,6 +513,9 @@ func writeManageMemberError(
 			w, http.StatusBadRequest, err.Error(),
 		)
 
+	case errors.Is(err, server.ErrTimeoutInvalid):
+		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
+
 	case errors.Is(err, server.ErrMemberNotFound):
 		httpapi.WriteError(
 			w, http.StatusNotFound, "server member not found",
@@ -578,6 +588,32 @@ func (h *Handler) unbanMember(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.service.Unban(r.Context(), serverID, requesterUserID, targetUserID); err != nil {
 		writeManageMemberError(w, "unban member", serverID, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) setMemberTimeout(w http.ResponseWriter, r *http.Request) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := httpapi.PositiveInt64PathValue(w, r, "serverID", "server")
+	if !ok {
+		return
+	}
+	targetUserID, ok := httpapi.PositiveInt64PathValue(w, r, "userID", "user")
+	if !ok {
+		return
+	}
+	var body struct {
+		Until *int64 `json:"until"`
+	}
+	if !httpapi.DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.service.SetMemberTimeout(r.Context(), serverID, requesterUserID, targetUserID, body.Until); err != nil {
+		writeManageMemberError(w, "set member timeout", serverID, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
