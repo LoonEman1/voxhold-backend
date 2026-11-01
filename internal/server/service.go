@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 type Service struct {
@@ -268,4 +269,22 @@ func (s *Service) BanMember(
 	)
 
 	return nil
+}
+
+const maxTimeout = 28 * 24 * time.Hour
+
+func (s *Service) SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error {
+	if until != nil {
+		at := time.Unix(*until, 0)
+		if !at.After(time.Now()) || at.After(time.Now().Add(maxTimeout)) {
+			return ErrTimeoutInvalid
+		}
+	}
+	if serverID <= 0 || requesterUserID <= 0 {
+		return ErrManageMembersForbidden
+	}
+	if targetUserID <= 0 {
+		return ErrMemberNotFound
+	}
+	return s.repository.SetMemberTimeout(ctx, serverID, requesterUserID, targetUserID, until)
 }

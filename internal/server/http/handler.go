@@ -62,6 +62,8 @@ type Service interface {
 		requesterUserID int64,
 		targetUserID int64,
 	) error
+
+	SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error
 }
 
 type Handler struct {
@@ -106,6 +108,11 @@ func (h *Handler) RegisterRoutes(
 	mux.Handle(
 		"PATCH /api/v1/servers/{serverID}/members/{userID}/role",
 		requireAuth(http.HandlerFunc(h.updateMemberRole)),
+	)
+
+	mux.Handle(
+		"PUT /api/v1/servers/{serverID}/members/{userID}/timeout",
+		requireAuth(http.HandlerFunc(h.setMemberTimeout)),
 	)
 
 	mux.Handle(
@@ -570,6 +577,9 @@ func writeManageMemberError(
 			w, http.StatusBadRequest, err.Error(),
 		)
 
+	case errors.Is(err, server.ErrTimeoutInvalid):
+		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
+
 	case errors.Is(err, server.ErrMemberNotFound):
 		httpapi.WriteError(
 			w, http.StatusNotFound, "server member not found",
@@ -602,4 +612,30 @@ func writeManageMemberError(
 			"internal server error",
 		)
 	}
+}
+
+func (h *Handler) setMemberTimeout(w http.ResponseWriter, r *http.Request) {
+	requesterUserID, ok := httpapi.AuthenticatedUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := httpapi.PositiveInt64PathValue(w, r, "serverID", "server")
+	if !ok {
+		return
+	}
+	targetUserID, ok := httpapi.PositiveInt64PathValue(w, r, "userID", "user")
+	if !ok {
+		return
+	}
+	var body struct {
+		Until *int64 `json:"until"`
+	}
+	if !httpapi.DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.service.SetMemberTimeout(r.Context(), serverID, requesterUserID, targetUserID, body.Until); err != nil {
+		writeManageMemberError(w, "set member timeout", serverID, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

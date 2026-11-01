@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"voxhold-backend/internal/permissions"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -148,6 +149,13 @@ func (r *Repository) SetReaction(ctx context.Context, serverID, channelID, messa
 	defer tx.Rollback()
 	if err = requireInteraction(ctx, tx, serverID, channelID, messageID, userID); err != nil {
 		return message.ReactionState{}, false, err
+	}
+	if active {
+		if allowed, perr := permissions.Allowed(ctx, tx, serverID, userID, permissions.Publish); perr != nil {
+			return message.ReactionState{}, false, perr
+		} else if !allowed {
+			return message.ReactionState{}, false, message.ErrForbidden
+		}
 	}
 	var result sql.Result
 	if active {

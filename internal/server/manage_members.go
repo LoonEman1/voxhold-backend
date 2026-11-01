@@ -37,3 +37,5 @@ func (i UpdateMemberRoleInput) Validate() error {
 
 	return nil
 }
+
+var ErrTimeoutInvalid = errors.New("timeout must end in the future, within 28 days")

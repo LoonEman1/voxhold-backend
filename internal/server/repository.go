@@ -52,4 +52,6 @@ type Repository interface {
 		requesterUserID int64,
 		targetUserID int64,
 	) error
+
+	SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error
 }
