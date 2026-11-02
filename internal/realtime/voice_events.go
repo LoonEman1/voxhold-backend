@@ -26,6 +26,7 @@ const (
 	// Sent to everyone in a channel whose encryption policy changed: they
 	// rejoin in the new mode instead of mixing encrypted and plain audio.
 	VoiceWebRTCClosedReasonE2EEPolicy = "voice channel encryption changed"
+	VoiceWebRTCClosedReasonE2EEDevice = "voice e2ee device was revoked"
 )
 
 type VoiceJoinData struct {

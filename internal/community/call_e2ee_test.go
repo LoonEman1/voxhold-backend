@@ -1,11 +1,45 @@
 package community
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestRevokedDeviceLeavesConversationCallAndCannotRefreshItsLease(t *testing.T) {
+	f := setup(t)
+	device := strings.Repeat("a", 32)
+	if _, err := f.db.Exec(`INSERT INTO e2ee_device_keys(user_id,device_id,public_key) VALUES(1,?,?)`, device, append([]byte{4}, make([]byte, 64)...)); err != nil {
+		t.Fatal(err)
+	}
+	cid := number(t, f.call(t, 1, "POST", "/api/v1/me/conversations", map[string]any{"user_ids": []int64{2}}, 200), "id")
+	path := fmt.Sprintf("/api/v1/conversations/%d/call", cid)
+	input := map[string]any{"session_id": "session-owner-0000001", "e2ee_device_id": device}
+	f.call(t, 1, "PUT", path, input, 200)
+	f.call(t, 2, "PUT", path, map[string]any{"session_id": "session-member-00001"}, 200)
+	var notifications int
+	f.s.notify = func(_ int64, event string, _ any) {
+		if event == "conversation.call" {
+			notifications++
+		}
+	}
+	if _, err := f.db.Exec(`UPDATE e2ee_device_keys SET revoked_at=unixepoch() WHERE user_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.RevokeInvalidCallDevices(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	state, err := f.s.readCall(context.Background(), cid)
+	if err != nil || len(state.Members) != 1 || state.Members[0].UserID != 2 {
+		t.Fatalf("call=%+v err=%v", state, err)
+	}
+	if notifications != 2 {
+		t.Fatalf("want membership updates for both users, got %d", notifications)
+	}
+	f.call(t, 1, "PUT", path, input, 400)
+}
 
 func TestCallMembersAdvertiseE2EEDevicesAndRelayKeys(t *testing.T) {
 	f := setup(t)

@@ -95,6 +95,7 @@ func (r *room) snapshot() []*Client {
 }
 
 type Hub struct {
+	voiceDeviceActive        func(userID int64, deviceID string) (bool, error)
 	rolePermissions          func(serverID, userID int64) (int, error)
 	channelAccessMu          sync.RWMutex
 	channelAccessLoader      func(int64) (map[int64]struct{}, error)
