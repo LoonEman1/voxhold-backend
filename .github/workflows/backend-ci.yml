@@ -1,4 +1,4 @@
-﻿name: Backend CI
+name: Backend CI
 
 on:
   pull_request:
@@ -156,7 +156,7 @@ jobs:
         run: go test -count=1 ./... -timeout 120s
       - name: Retain leak stack reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: goroutine-leak-reports
           path: leak-reports/
