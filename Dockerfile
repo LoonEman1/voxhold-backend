@@ -34,7 +34,7 @@ COPY . .
 RUN GOARCH=${TARGETARCH} GOAMD64=${GOAMD64} PGO=${PGO} sh scripts/build-linux.sh /out
 
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 WORKDIR /app
 
