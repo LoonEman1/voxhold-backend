@@ -112,6 +112,13 @@ func (r *Repository) CreateReferenced(ctx context.Context, serverID, channelID, 
 	if !allowed {
 		return message.Message{}, message.ErrForbidden
 	}
+	wait, err := checkSlowmode(ctx, tx, serverID, channelID, authorUserID)
+	if err != nil {
+		return message.Message{}, fmt.Errorf("check slowmode: %w", err)
+	}
+	if wait > 0 {
+		return message.Message{}, &message.SlowmodeError{RetryAfter: wait}
+	}
 	if input.ThreadRootID != nil {
 		var root int64
 		if err := tx.QueryRowContext(ctx, `SELECT m.id FROM messages m JOIN channels c ON c.id=m.channel_id WHERE m.id=? AND m.channel_id=? AND m.thread_root_id IS NULL AND c.kind='text' AND (c.is_news=0 OR c.comments_enabled=1)`, *input.ThreadRootID, channelID).Scan(&root); err != nil {
