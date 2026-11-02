@@ -17,6 +17,9 @@ type UserRepository interface {
 		ctx context.Context,
 		username string,
 	) (User, error)
+
+	FindByID(ctx context.Context, userID int64) (User, error)
+	UpdatePasswordHash(ctx context.Context, userID int64, passwordHash string) error
 }
 
 type SessionRepository interface {
@@ -43,6 +46,11 @@ type SessionRepository interface {
 		newTokenHash []byte,
 		newExpiresAt int64,
 	) error
+
+	Touch(ctx context.Context, tokenHash []byte, now int64) error
+	ListByUser(ctx context.Context, userID int64) ([]SessionRecord, error)
+	DeleteByID(ctx context.Context, userID, sessionID int64) ([]byte, error)
+	DeleteOthers(ctx context.Context, userID int64, keepHash []byte) ([][]byte, error)
 }
 
 type InviteRegistrationRepository interface {

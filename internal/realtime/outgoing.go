@@ -93,13 +93,13 @@ func (c *Client) enqueueLocked(event OutgoingEvent) bool {
 		}
 	}
 	if len(c.outgoing) == outgoingBufferSize {
-		// Alerts are transient. A slow client keeps the newest alert per channel
-		// without letting notification traffic disconnect chat or voice.
-		if event.Type == EventNotificationMessage {
+		// Alerts and typing indicators are transient. A slow client keeps the
+		// newest alert per channel without letting them disconnect chat or voice.
+		if event.Type == EventNotificationMessage || event.Type == EventTyping || event.Type == EventChannelActivity {
 			return true
 		}
 		for index, queued := range c.outgoing {
-			if queued.Type == EventNotificationMessage {
+			if queued.Type == EventNotificationMessage || queued.Type == EventTyping || queued.Type == EventChannelActivity {
 				copy(c.outgoing[index:], c.outgoing[index+1:])
 				c.outgoing[len(c.outgoing)-1] = OutgoingEvent{}
 				c.outgoing = c.outgoing[:len(c.outgoing)-1]
@@ -185,6 +185,13 @@ func replacementKey(event OutgoingEvent) string {
 	case ChannelReadData:
 		if event.Type == EventChannelRead {
 			return fmt.Sprintf("read/%d/%d", value.ChannelID, value.UserID)
+		}
+	case ChannelActivityData:
+		// Only the newest message id per channel matters for the unread mark.
+		return fmt.Sprintf("activity/%d", value.ChannelID)
+	case TypingData:
+		if event.Type == EventTyping {
+			return fmt.Sprintf("typing/%d/%d", value.ChannelID, value.UserID)
 		}
 	}
 	return ""

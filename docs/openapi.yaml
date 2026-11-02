@@ -1,0 +1,2156 @@
+openapi: 3.1.0
+info:
+  title: Voxhold API
+  version: 2.6.0
+  description: |
+    Generated route skeleton (tools/openapigen). Bodies and responses are still generic:
+    TODO refine schemas from the json-tagged structs next to each handler.
+servers:
+  - url: /
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+paths:
+  /api/v1/account:
+    delete:
+      operationId: delete_api_v1_account
+      summary: DELETE /api/v1/account
+      x-source: internal/server/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/call:
+    delete:
+      operationId: delete_api_v1_conversations_conversationID_call
+      summary: DELETE /api/v1/conversations/{conversationID}/call
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      operationId: get_api_v1_conversations_conversationID_call
+      summary: GET /api/v1/conversations/{conversationID}/call
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_conversations_conversationID_call
+      summary: PUT /api/v1/conversations/{conversationID}/call
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/members/me:
+    delete:
+      operationId: delete_api_v1_conversations_conversationID_members_me
+      summary: DELETE /api/v1/conversations/{conversationID}/members/me
+      x-source: internal/community/service.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/messages/{messageID}:
+    delete:
+      operationId: delete_api_v1_conversations_conversationID_messages_messageID
+      summary: DELETE /api/v1/conversations/{conversationID}/messages/{messageID}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/messages/{messageID}/reactions/{emoji}:
+    delete:
+      operationId: delete_api_v1_conversations_conversationID_messages_messageID_reactions_emoji
+      summary: DELETE /api/v1/conversations/{conversationID}/messages/{messageID}/reactions/{emoji}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+        - {name: emoji, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      operationId: get_api_v1_conversations_conversationID_messages_messageID_reactions_emoji
+      summary: GET /api/v1/conversations/{conversationID}/messages/{messageID}/reactions/{emoji}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+        - {name: emoji, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_conversations_conversationID_messages_messageID_reactions_emoji
+      summary: PUT /api/v1/conversations/{conversationID}/messages/{messageID}/reactions/{emoji}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+        - {name: emoji, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/avatar:
+    delete:
+      operationId: delete_api_v1_me_avatar
+      summary: DELETE /api/v1/me/avatar
+      x-source: internal/avatar/http.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_me_avatar
+      summary: PUT /api/v1/me/avatar
+      x-source: internal/avatar/http.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/blocks/{userID}:
+    delete:
+      operationId: delete_api_v1_me_blocks_userID
+      summary: DELETE /api/v1/me/blocks/{userID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_me_blocks_userID
+      summary: PUT /api/v1/me/blocks/{userID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/e2ee/devices/{deviceID}:
+    delete:
+      operationId: delete_api_v1_me_e2ee_devices_deviceID
+      summary: DELETE /api/v1/me/e2ee/devices/{deviceID}
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: deviceID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_me_e2ee_devices_deviceID
+      summary: PUT /api/v1/me/e2ee/devices/{deviceID}
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: deviceID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/scheduled-messages/{scheduleID}:
+    delete:
+      operationId: delete_api_v1_me_scheduled_messages_scheduleID
+      summary: DELETE /api/v1/me/scheduled-messages/{scheduleID}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: scheduleID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_me_scheduled_messages_scheduleID
+      summary: PUT /api/v1/me/scheduled-messages/{scheduleID}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: scheduleID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/sessions:
+    delete:
+      operationId: delete_api_v1_me_sessions
+      summary: DELETE /api/v1/me/sessions
+      x-source: internal/account/http/sessions.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      operationId: get_api_v1_me_sessions
+      summary: GET /api/v1/me/sessions
+      x-source: internal/account/http/sessions.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/sessions/{sessionID}:
+    delete:
+      operationId: delete_api_v1_me_sessions_sessionID
+      summary: DELETE /api/v1/me/sessions/{sessionID}
+      x-source: internal/account/http/sessions.go
+      parameters:
+        - {name: sessionID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}:
+    delete:
+      operationId: delete_api_v1_recordings_recordingID
+      summary: DELETE /api/v1/recordings/{recordingID}
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      operationId: get_api_v1_recordings_recordingID
+      summary: GET /api/v1/recordings/{recordingID}
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/bans/{userID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_bans_userID
+      summary: DELETE /api/v1/servers/{serverID}/bans/{userID}
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_bans_userID
+      summary: POST /api/v1/servers/{serverID}/bans/{userID}
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_channels_channelID
+      summary: DELETE /api/v1/servers/{serverID}/channels/{channelID}
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    patch:
+      operationId: patch_api_v1_servers_serverID_channels_channelID
+      summary: PATCH /api/v1/servers/{serverID}/channels/{channelID}
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_channels_channelID_messages_messageID
+      summary: DELETE /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    patch:
+      operationId: patch_api_v1_servers_serverID_channels_channelID_messages_messageID
+      summary: PATCH /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/pin:
+    delete:
+      operationId: delete_api_v1_servers_serverID_channels_channelID_messages_messageID_pin
+      summary: DELETE /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/pin
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_messages_messageID_pin
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/pin
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/events/{eventID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_events_eventID
+      summary: DELETE /api/v1/servers/{serverID}/events/{eventID}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: eventID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_events_eventID
+      summary: PUT /api/v1/servers/{serverID}/events/{eventID}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: eventID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/events/{eventID}/response:
+    delete:
+      operationId: delete_api_v1_servers_serverID_events_eventID_response
+      summary: DELETE /api/v1/servers/{serverID}/events/{eventID}/response
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: eventID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_events_eventID_response
+      summary: PUT /api/v1/servers/{serverID}/events/{eventID}/response
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: eventID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/invite-links/{linkID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_invite_links_linkID
+      summary: DELETE /api/v1/servers/{serverID}/invite-links/{linkID}
+      x-source: internal/invite/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: linkID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/roles/{roleID}:
+    delete:
+      operationId: delete_api_v1_servers_serverID_roles_roleID
+      summary: DELETE /api/v1/servers/{serverID}/roles/{roleID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: roleID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_roles_roleID
+      summary: PUT /api/v1/servers/{serverID}/roles/{roleID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: roleID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/attachments/{attachmentID}/content:
+    get:
+      operationId: get_api_v1_attachments_attachmentID_content
+      summary: GET /api/v1/attachments/{attachmentID}/content
+      x-source: internal/attachments/service.go
+      parameters:
+        - {name: attachmentID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/attachments/{attachmentID}/thumbnail:
+    get:
+      operationId: get_api_v1_attachments_attachmentID_thumbnail
+      summary: GET /api/v1/attachments/{attachmentID}/thumbnail
+      x-source: internal/attachments/service.go
+      parameters:
+        - {name: attachmentID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/channels/{channelID}/threads/{messageID}:
+    get:
+      operationId: get_api_v1_channels_channelID_threads_messageID
+      summary: GET /api/v1/channels/{channelID}/threads/{messageID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_channels_channelID_threads_messageID
+      summary: PUT /api/v1/channels/{channelID}/threads/{messageID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}:
+    get:
+      operationId: get_api_v1_conversations_conversationID
+      summary: GET /api/v1/conversations/{conversationID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/messages:
+    get:
+      operationId: get_api_v1_conversations_conversationID_messages
+      summary: GET /api/v1/conversations/{conversationID}/messages
+      x-source: internal/community/service.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_conversations_conversationID_messages
+      summary: POST /api/v1/conversations/{conversationID}/messages
+      x-source: internal/community/service.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/notifications:
+    get:
+      operationId: get_api_v1_conversations_conversationID_notifications
+      summary: GET /api/v1/conversations/{conversationID}/notifications
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_conversations_conversationID_notifications
+      summary: PUT /api/v1/conversations/{conversationID}/notifications
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/diagnostics/client-events:
+    get:
+      operationId: get_api_v1_diagnostics_client_events
+      summary: GET /api/v1/diagnostics/client-events
+      x-source: internal/diagnostics/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_diagnostics_client_events
+      summary: POST /api/v1/diagnostics/client-events
+      x-source: internal/diagnostics/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/instance:
+    get:
+      operationId: get_api_v1_instance
+      summary: GET /api/v1/instance
+      x-source: internal/server/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/instance/cors-origins:
+    get:
+      operationId: get_api_v1_instance_cors_origins
+      summary: GET /api/v1/instance/cors-origins
+      x-source: internal/cors/http.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_instance_cors_origins
+      summary: PUT /api/v1/instance/cors-origins
+      x-source: internal/cors/http.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/instance/recording-storage:
+    get:
+      operationId: get_api_v1_instance_recording_storage
+      summary: GET /api/v1/instance/recording-storage
+      x-source: internal/recordings/http.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_instance_recording_storage
+      summary: PUT /api/v1/instance/recording-storage
+      x-source: internal/recordings/http.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/instance/storage:
+    get:
+      operationId: get_api_v1_instance_storage
+      summary: GET /api/v1/instance/storage
+      x-source: internal/attachments/service.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_instance_storage
+      summary: PUT /api/v1/instance/storage
+      x-source: internal/attachments/service.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/link-preview:
+    get:
+      operationId: get_api_v1_link_preview
+      summary: GET /api/v1/link-preview
+      x-source: internal/linkpreview/service.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/link-preview/images/{key}:
+    get:
+      operationId: get_api_v1_link_preview_images_key
+      summary: GET /api/v1/link-preview/images/{key}
+      x-source: internal/linkpreview/service.go
+      parameters:
+        - {name: key, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/conversations:
+    get:
+      operationId: get_api_v1_me_conversations
+      summary: GET /api/v1/me/conversations
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_me_conversations
+      summary: POST /api/v1/me/conversations
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/conversations/search:
+    get:
+      operationId: get_api_v1_me_conversations_search
+      summary: GET /api/v1/me/conversations/search
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/favorites:
+    get:
+      operationId: get_api_v1_me_favorites
+      summary: GET /api/v1/me/favorites
+      x-source: internal/community/message_features.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/forward-destinations:
+    get:
+      operationId: get_api_v1_me_forward_destinations
+      summary: GET /api/v1/me/forward-destinations
+      x-source: internal/community/message_features.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/inbox:
+    get:
+      operationId: get_api_v1_me_inbox
+      summary: GET /api/v1/me/inbox
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/message-privacy:
+    get:
+      operationId: get_api_v1_me_message_privacy
+      summary: GET /api/v1/me/message-privacy
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_me_message_privacy
+      summary: PUT /api/v1/me/message-privacy
+      x-source: internal/community/service.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/profile:
+    get:
+      operationId: get_api_v1_me_profile
+      summary: GET /api/v1/me/profile
+      x-source: internal/profile/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    patch:
+      operationId: patch_api_v1_me_profile
+      summary: PATCH /api/v1/me/profile
+      x-source: internal/profile/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/scheduled-messages:
+    get:
+      operationId: get_api_v1_me_scheduled_messages
+      summary: GET /api/v1/me/scheduled-messages
+      x-source: internal/community/message_features.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_me_scheduled_messages
+      summary: POST /api/v1/me/scheduled-messages
+      x-source: internal/community/message_features.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/server-invites:
+    get:
+      operationId: get_api_v1_me_server_invites
+      summary: GET /api/v1/me/server-invites
+      x-source: internal/invite/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/servers:
+    get:
+      operationId: get_api_v1_me_servers
+      summary: GET /api/v1/me/servers
+      x-source: internal/server/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/polls/{pollID}:
+    get:
+      operationId: get_api_v1_polls_pollID
+      summary: GET /api/v1/polls/{pollID}
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: pollID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recording-downloads/{ticket}:
+    get:
+      operationId: get_api_v1_recording_downloads_ticket
+      summary: GET /api/v1/recording-downloads/{ticket}
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: ticket, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/preview:
+    get:
+      operationId: get_api_v1_recordings_recordingID_preview
+      summary: GET /api/v1/recordings/{recordingID}/preview
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_recordings_recordingID_preview
+      summary: PUT /api/v1/recordings/{recordingID}/preview
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/upload:
+    get:
+      operationId: get_api_v1_recordings_recordingID_upload
+      summary: GET /api/v1/recordings/{recordingID}/upload
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/audit:
+    get:
+      operationId: get_api_v1_servers_serverID_audit
+      summary: GET /api/v1/servers/{serverID}/audit
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/bans:
+    get:
+      operationId: get_api_v1_servers_serverID_bans
+      summary: GET /api/v1/servers/{serverID}/bans
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels:
+    get:
+      operationId: get_api_v1_servers_serverID_channels
+      summary: GET /api/v1/servers/{serverID}/channels
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_channels
+      summary: POST /api/v1/servers/{serverID}/channels
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/access:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_access
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/access
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_access
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/access
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/e2ee:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_e2ee
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/e2ee
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_e2ee
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/e2ee
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/members:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_members
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/members
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_messages
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/messages
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_channels_channelID_messages
+      summary: POST /api/v1/servers/{serverID}/channels/{channelID}/messages
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages/sync:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_messages_sync
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/messages/sync
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/comments:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_messages_messageID_comments
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/comments
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/context:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_messages_messageID_context
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/messages/{messageID}/context
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/news:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_news
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/news
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_news
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/news
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/pins:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_pins
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/pins
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/role-grants:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_role_grants
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/role-grants
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_role_grants
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/role-grants
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/slowmode:
+    get:
+      operationId: get_api_v1_servers_serverID_channels_channelID_slowmode
+      summary: GET /api/v1/servers/{serverID}/channels/{channelID}/slowmode
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_slowmode
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/slowmode
+      x-source: internal/channel/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/events:
+    get:
+      operationId: get_api_v1_servers_serverID_events
+      summary: GET /api/v1/servers/{serverID}/events
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_events
+      summary: POST /api/v1/servers/{serverID}/events
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/invite-links:
+    get:
+      operationId: get_api_v1_servers_serverID_invite_links
+      summary: GET /api/v1/servers/{serverID}/invite-links
+      x-source: internal/invite/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_invite_links
+      summary: POST /api/v1/servers/{serverID}/invite-links
+      x-source: internal/invite/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/members:
+    get:
+      operationId: get_api_v1_servers_serverID_members
+      summary: GET /api/v1/servers/{serverID}/members
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/messages/search:
+    get:
+      operationId: get_api_v1_servers_serverID_messages_search
+      summary: GET /api/v1/servers/{serverID}/messages/search
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/notification-counts:
+    get:
+      operationId: get_api_v1_servers_serverID_notification_counts
+      summary: GET /api/v1/servers/{serverID}/notification-counts
+      x-source: internal/notifications/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/recordings:
+    get:
+      operationId: get_api_v1_servers_serverID_recordings
+      summary: GET /api/v1/servers/{serverID}/recordings
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/roles:
+    get:
+      operationId: get_api_v1_servers_serverID_roles
+      summary: GET /api/v1/servers/{serverID}/roles
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      operationId: post_api_v1_servers_serverID_roles
+      summary: POST /api/v1/servers/{serverID}/roles
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/roles/{roleID}/preview:
+    get:
+      operationId: get_api_v1_servers_serverID_roles_roleID_preview
+      summary: GET /api/v1/servers/{serverID}/roles/{roleID}/preview
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: roleID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/users/{userID}/avatar:
+    get:
+      operationId: get_api_v1_users_userID_avatar
+      summary: GET /api/v1/users/{userID}/avatar
+      x-source: internal/avatar/http.go
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/users/{userID}/e2ee/devices:
+    get:
+      operationId: get_api_v1_users_userID_e2ee_devices
+      summary: GET /api/v1/users/{userID}/e2ee/devices
+      x-source: internal/e2ee/http.go
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/users/{userID}/profile:
+    get:
+      operationId: get_api_v1_users_userID_profile
+      summary: GET /api/v1/users/{userID}/profile
+      x-source: internal/profile/http/handler.go
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/webrtc/config:
+    get:
+      operationId: get_api_v1_webrtc_config
+      summary: GET /api/v1/webrtc/config
+      x-source: internal/webrtcconfig/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/ws:
+    get:
+      operationId: get_api_v1_ws
+      summary: GET /api/v1/ws
+      x-source: internal/realtime/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/messages/{messageID}/note:
+    patch:
+      operationId: patch_api_v1_conversations_conversationID_messages_messageID_note
+      summary: PATCH /api/v1/conversations/{conversationID}/messages/{messageID}/note
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/content:
+    patch:
+      operationId: patch_api_v1_recordings_recordingID_content
+      summary: PATCH /api/v1/recordings/{recordingID}/content
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}:
+    patch:
+      operationId: patch_api_v1_servers_serverID
+      summary: PATCH /api/v1/servers/{serverID}
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/members/{userID}/role:
+    patch:
+      operationId: patch_api_v1_servers_serverID_members_userID_role
+      summary: PATCH /api/v1/servers/{serverID}/members/{userID}/role
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/auth/login:
+    post:
+      operationId: post_api_v1_auth_login
+      summary: POST /api/v1/auth/login
+      x-source: internal/account/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/auth/logout:
+    post:
+      operationId: post_api_v1_auth_logout
+      summary: POST /api/v1/auth/logout
+      x-source: internal/account/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/auth/refresh:
+    post:
+      operationId: post_api_v1_auth_refresh
+      summary: POST /api/v1/auth/refresh
+      x-source: internal/account/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/auth/register:
+    post:
+      operationId: post_api_v1_auth_register
+      summary: POST /api/v1/auth/register
+      x-source: internal/account/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/call/signal:
+    post:
+      operationId: post_api_v1_conversations_conversationID_call_signal
+      summary: POST /api/v1/conversations/{conversationID}/call/signal
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/instance/storage/cleanup:
+    post:
+      operationId: post_api_v1_instance_storage_cleanup
+      summary: POST /api/v1/instance/storage/cleanup
+      x-source: internal/attachments/service.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/instance/storage/preview:
+    post:
+      operationId: post_api_v1_instance_storage_preview
+      summary: POST /api/v1/instance/storage/preview
+      x-source: internal/attachments/service.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/invite-links/accept:
+    post:
+      operationId: post_api_v1_invite_links_accept
+      summary: POST /api/v1/invite-links/accept
+      x-source: internal/invite/http/handler.go
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/invite-links/resolve:
+    post:
+      operationId: post_api_v1_invite_links_resolve
+      summary: POST /api/v1/invite-links/resolve
+      x-source: internal/invite/http/handler.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/forward:
+    post:
+      operationId: post_api_v1_me_forward
+      summary: POST /api/v1/me/forward
+      x-source: internal/community/message_features.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/server-invites/{inviteID}/accept:
+    post:
+      operationId: post_api_v1_me_server_invites_inviteID_accept
+      summary: POST /api/v1/me/server-invites/{inviteID}/accept
+      x-source: internal/invite/http/handler.go
+      parameters:
+        - {name: inviteID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/server-invites/{inviteID}/decline:
+    post:
+      operationId: post_api_v1_me_server_invites_inviteID_decline
+      summary: POST /api/v1/me/server-invites/{inviteID}/decline
+      x-source: internal/invite/http/handler.go
+      parameters:
+        - {name: inviteID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/complete:
+    post:
+      operationId: post_api_v1_recordings_recordingID_complete
+      summary: POST /api/v1/recordings/{recordingID}/complete
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/download:
+    post:
+      operationId: post_api_v1_recordings_recordingID_download
+      summary: POST /api/v1/recordings/{recordingID}/download
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/heartbeat:
+    post:
+      operationId: post_api_v1_recordings_recordingID_heartbeat
+      summary: POST /api/v1/recordings/{recordingID}/heartbeat
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/recordings/{recordingID}/stop:
+    post:
+      operationId: post_api_v1_recordings_recordingID_stop
+      summary: POST /api/v1/recordings/{recordingID}/stop
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: recordingID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/messages/forward:
+    post:
+      operationId: post_api_v1_servers_serverID_channels_channelID_messages_forward
+      summary: POST /api/v1/servers/{serverID}/channels/{channelID}/messages/forward
+      x-source: internal/message/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/recordings:
+    post:
+      operationId: post_api_v1_servers_serverID_channels_channelID_recordings
+      summary: POST /api/v1/servers/{serverID}/channels/{channelID}/recordings
+      x-source: internal/recordings/http.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/invites:
+    post:
+      operationId: post_api_v1_servers_serverID_invites
+      summary: POST /api/v1/servers/{serverID}/invites
+      x-source: internal/invite/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/channels/{channelID}/attachments/{attachmentID}:
+    put:
+      operationId: put_api_v1_channels_channelID_attachments_attachmentID
+      summary: PUT /api/v1/channels/{channelID}/attachments/{attachmentID}
+      x-source: internal/attachments/service.go
+      parameters:
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+        - {name: attachmentID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/attachments/{attachmentID}:
+    put:
+      operationId: put_api_v1_conversations_conversationID_attachments_attachmentID
+      summary: PUT /api/v1/conversations/{conversationID}/attachments/{attachmentID}
+      x-source: internal/attachments/service.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+        - {name: attachmentID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/conversations/{conversationID}/read:
+    put:
+      operationId: put_api_v1_conversations_conversationID_read
+      summary: PUT /api/v1/conversations/{conversationID}/read
+      x-source: internal/community/service.go
+      parameters:
+        - {name: conversationID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/inbox/{messageID}:
+    put:
+      operationId: put_api_v1_me_inbox_messageID
+      summary: PUT /api/v1/me/inbox/{messageID}
+      x-source: internal/community/service.go
+      parameters:
+        - {name: messageID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/me/password:
+    put:
+      operationId: put_api_v1_me_password
+      summary: PUT /api/v1/me/password
+      x-source: internal/account/http/sessions.go
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/polls/{pollID}/votes:
+    put:
+      operationId: put_api_v1_polls_pollID_votes
+      summary: PUT /api/v1/polls/{pollID}/votes
+      x-source: internal/community/message_features.go
+      parameters:
+        - {name: pollID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/channels/{channelID}/read:
+    put:
+      operationId: put_api_v1_servers_serverID_channels_channelID_read
+      summary: PUT /api/v1/servers/{serverID}/channels/{channelID}/read
+      x-source: internal/readstate/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: channelID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/members/{userID}/roles:
+    put:
+      operationId: put_api_v1_servers_serverID_members_userID_roles
+      summary: PUT /api/v1/servers/{serverID}/members/{userID}/roles
+      x-source: internal/community/service.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/servers/{serverID}/members/{userID}/timeout:
+    put:
+      operationId: put_api_v1_servers_serverID_members_userID_timeout
+      summary: PUT /api/v1/servers/{serverID}/members/{userID}/timeout
+      x-source: internal/server/http/handler.go
+      parameters:
+        - {name: serverID, in: path, required: true, schema: {type: string}}
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      security:
+        - bearer: []
+      responses:
+        '200': {description: OK}
+        default:
+          description: Error
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}

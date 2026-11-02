@@ -39,6 +39,7 @@ func (s *voiceState) join(
 	channelID int64,
 	selfMute bool,
 	selfDeaf bool,
+	e2eeDeviceID string,
 ) voiceJoinResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -53,13 +54,15 @@ func (s *voiceState) join(
 			ChannelID:    channelID,
 			SelfMute:     selfMute,
 			SelfDeaf:     selfDeaf,
+			E2EEDeviceID: e2eeDeviceID,
 		},
 	}
 
 	previous, exists := s.byClient[client]
 	if exists &&
 		previous.ServerID == serverID &&
-		previous.ChannelID == channelID {
+		previous.ChannelID == channelID &&
+		previous.E2EEDeviceID == e2eeDeviceID {
 
 		result.updated =
 			previous.SelfMute != selfMute ||
@@ -298,4 +301,35 @@ func sortVoiceParticipants(
 			return cmp.Compare(a.ConnectionID, b.ConnectionID)
 		},
 	)
+}
+
+// e2eeRecipient returns the client of recipientUserID when both it and sender
+// are in channelID and the recipient joined with recipientDeviceID.
+func (s *voiceState) e2eeRecipient(sender *Client, channelID, recipientUserID int64, recipientDeviceID string) (VoiceParticipantData, *Client, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	from, ok := s.byClient[sender]
+	if !ok || from.ChannelID != channelID || from.E2EEDeviceID == "" {
+		return VoiceParticipantData{}, nil, false
+	}
+	recipient := s.byUser[recipientUserID]
+	if recipient == nil || recipient == sender {
+		return VoiceParticipantData{}, nil, false
+	}
+	to, ok := s.byClient[recipient]
+	if !ok || to.ChannelID != channelID || to.E2EEDeviceID == "" || to.E2EEDeviceID != recipientDeviceID {
+		return VoiceParticipantData{}, nil, false
+	}
+	return from, recipient, true
+}
+
+// channelClients lists the clients currently in a voice channel.
+func (s *voiceState) channelClients(channelID int64) []*Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	clients := make([]*Client, 0, len(s.byChannel[channelID]))
+	for client := range s.byChannel[channelID] {
+		clients = append(clients, client)
+	}
+	return clients
 }

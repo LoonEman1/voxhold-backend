@@ -27,3 +27,17 @@ func TestDeleteAccountClearsPrivateDataAndRetainsExpiringRecordings(t *testing.T
 		}
 	}
 }
+
+func TestDeleteAccountReleasesTheUsernameKey(t *testing.T) {
+	db := testdb.Open(t)
+	if _, err := db.Exec(`UPDATE users SET username_key='member' WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := serversqlite.NewRepository(db).DeleteAccount(context.Background(), 2); err != nil {
+		t.Fatal(err)
+	}
+	var keys int
+	if err := db.QueryRow(`SELECT count(*) FROM users WHERE username_key='member'`).Scan(&keys); err != nil || keys != 0 {
+		t.Fatalf("deleted account still reserves its name: keys=%d err=%v", keys, err)
+	}
+}

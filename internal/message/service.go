@@ -42,6 +42,10 @@ func (s *Service) Create(
 		return Message{}, err
 	}
 
+	if err := s.checkSlowmode(ctx, serverID, channelID, authorUserID); err != nil {
+		return Message{}, err
+	}
+
 	var createdMessage Message
 	var err error
 	if input.Poll != nil || input.ReplyToMessageID != nil || input.ThreadRootID != nil || len(input.AttachmentIDs) > 0 {
@@ -63,6 +67,7 @@ func (s *Service) Create(
 	s.events.PublishMessageCreated(
 		createdMessage,
 	)
+	s.publishActivity(serverID, createdMessage)
 
 	s.publishCommentRoot(ctx, serverID, channelID, authorUserID, createdMessage)
 	return createdMessage, nil

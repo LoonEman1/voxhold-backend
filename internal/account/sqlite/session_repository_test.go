@@ -51,3 +51,34 @@ func TestDeleteExpiredIsBoundedAndPreservesRotatedSession(t *testing.T) {
 		t.Fatal("canceled cleanup succeeded")
 	}
 }
+
+func TestTouchWritesActivityAtMostEveryFiveMinutes(t *testing.T) {
+	db := testdb.Open(t)
+	r := NewSessionRepository(db)
+	ctx := context.Background()
+	hash := sha256.Sum256([]byte("touch"))
+	now := time.Now().Unix()
+	if err := r.Create(ctx, 1, hash[:], now+3600); err != nil {
+		t.Fatal(err)
+	}
+	lastUsed := func() int64 {
+		t.Helper()
+		var value int64
+		if err := db.QueryRow(`SELECT COALESCE(last_used_at,0) FROM sessions WHERE token_hash=?`, hash[:]).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	for _, step := range []struct{ at, want int64 }{{now, now}, {now + 299, now}, {now + 301, now + 301}} {
+		if err := r.Touch(ctx, hash[:], step.at); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastUsed(); got != step.want {
+			t.Fatalf("touch at +%d: last_used_at=%d want %d", step.at-now, got, step.want)
+		}
+	}
+	missing := sha256.Sum256([]byte("missing"))
+	if err := r.Touch(ctx, missing[:], now); err != nil {
+		t.Fatalf("unknown session: %v", err)
+	}
+}

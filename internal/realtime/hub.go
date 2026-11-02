@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"crypto/sha256"
 	"slices"
 	"sync"
 	"time"
@@ -326,7 +327,20 @@ func (h *Hub) Unregister(client *Client) {
 }
 
 func (h *Hub) RevokeSession(token string) {
-	key := newSessionKey(token)
+	h.revokeSessionKey(newSessionKey(token))
+}
+
+// RevokeSessionHash revokes by the stored SHA-256 token hash.
+func (h *Hub) RevokeSessionHash(hash []byte) {
+	if len(hash) != sha256.Size {
+		return
+	}
+	var key [sha256.Size]byte
+	copy(key[:], hash)
+	h.revokeSessionKey(key)
+}
+
+func (h *Hub) revokeSessionKey(key [sha256.Size]byte) {
 
 	h.clientsMu.RLock()
 	clients := clientSetSnapshot(
@@ -956,4 +970,29 @@ func (h *Hub) Stats() map[string]int {
 type presenceStamp struct {
 	at     int64
 	status PresenceStatus
+}
+
+// PublishExcept publishes to a channel room without echoing to one client.
+func (h *Hub) PublishExcept(channelID int64, event OutgoingEvent, except *Client) int {
+	room := h.getRoom(channelID)
+	if channelID <= 0 || room == nil {
+		return 0
+	}
+	event = event.shareEncoding()
+	delivered := 0
+	var failed []*Client
+	for _, client := range room.snapshot() {
+		if client == except {
+			continue
+		}
+		if client.enqueue(event) {
+			delivered++
+		} else {
+			failed = append(failed, client)
+		}
+	}
+	for _, client := range failed {
+		h.Unregister(client)
+	}
+	return delivered
 }
