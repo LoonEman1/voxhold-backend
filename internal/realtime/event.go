@@ -70,6 +70,7 @@ type AuthenticateData struct {
 type ReadyData struct {
 	UserID          int64 `json:"user_id"`
 	ProtocolVersion int   `json:"protocol_version"`
+	E2EEBatch       bool  `json:"e2ee_batch,omitempty"`
 }
 
 type ChannelSubscriptionData struct {

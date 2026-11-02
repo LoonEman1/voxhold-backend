@@ -48,9 +48,14 @@ Voxhold **2.4.0** требует миграции **000031** и соответс
 ## Отложенная отправка
 
 Под полем ввода в каналах, ЛС, группах и избранном есть «Отложить сообщение».
-В левой панели находится список с изменением времени/текста и отменой.
+Кнопка «Отложенные» в конкретном чате открывает его сообщения с изменением
+времени/текста и отменой отправки.
 
 - `GET/POST /api/v1/me/scheduled-messages`.
+- GET принимает необязательную пару `destination_kind=channel|conversation` и
+  `destination_id=<положительный ID>`. Фильтр применяется до пагинации и только
+  к сообщениям текущего пользователя. Без пары сохраняется общий список;
+  неполная или некорректная пара возвращает 400.
 - `PUT/DELETE /api/v1/me/scheduled-messages/{ID}`.
 - Тело POST/PUT: `{destination:{kind,id},payload:{content,attachment_ids?,poll?,client_message_id?},send_at}`.
 
@@ -109,6 +114,11 @@ POST. Задания сохраняются в SQLite и отправляютс�
 или удалять. Имена действовавших пользователей сохраняются независимо от их
 текущего участия в сообществе.
 
+Клиент предлагает выбрать автора по имени и показывает отдельно автора действия,
+объект изменения, дату и причину. Числовые ID остаются внутренними параметрами API.
+Для новых записей сохраняются имена каналов/ролей и указанная при бане причина;
+старые записи без этих данных автоматически не восстанавливаются.
+
 ## Звонки в ЛС и группах
 
 Кнопка «Позвонить / присоединиться» открывает звонок с микрофоном, отключением
@@ -160,8 +170,9 @@ Voxhold **2.4.0** requires migration **000031** and the matching frontend. Back 
 SQLite database and attachment directory together; deploy the backend before
 the client. The migration's downgrade removes the new feature data.
 
-- The left personal rail contains private Favorites with notes and Unicode
-  search, scheduled messages, server events and the administrator audit log.
+- The left personal rail contains direct/group conversations, private Favorites
+  with notes and Unicode search, server events and the administrator audit log.
+  Scheduled messages are opened from their destination chat.
 - Messages can be forwarded between channels, direct/group conversations and
   Favorites. Attachments are copied independently and count toward storage quotas.
   Forwarding preserves attribution without exporting private source identifiers.
