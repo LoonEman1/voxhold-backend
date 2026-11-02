@@ -105,6 +105,43 @@ func TestCallReplacementAndScreenStateAreScopedToCurrentSession(t *testing.T) {
 	f.call(t, 1, "POST", url+"/signal", data, 400)
 }
 
+func TestLeavingConversationImmediatelyUpdatesCallForAllParticipants(t *testing.T) {
+	f := setup(t)
+	cid := number(t, f.call(t, 1, "POST", "/api/v1/me/conversations", map[string]any{"user_ids": []int64{2}}, 200), "id")
+	url := fmt.Sprintf("/api/v1/conversations/%d", cid)
+	f.call(t, 1, "PUT", url+"/call", map[string]any{"session_id": "first-call-session"}, 200)
+	f.call(t, 2, "PUT", url+"/call", map[string]any{"session_id": "second-call-session"}, 200)
+	before, err := f.s.readCall(context.Background(), cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notified := map[int64]bool{}
+	f.s.notify = func(uid int64, event string, value any) {
+		if event != "conversation.call" {
+			return
+		}
+		state, ok := value.(CallState)
+		if !ok || state.Revision <= before.Revision || len(state.Members) != 1 || state.Members[0].UserID != 1 {
+			t.Fatalf("invalid leave snapshot: %+v", value)
+		}
+		notified[uid] = true
+	}
+	f.call(t, 2, "DELETE", url+"/members/me", nil, 200)
+	var count int
+	if err := f.db.QueryRow(`SELECT count(*) FROM conversation_call_members WHERE conversation_id=? AND user_id=2`, cid).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("call lease survived leaving: %d %v", count, err)
+	}
+	if !notified[1] || !notified[2] {
+		t.Fatalf("both remaining peers and leaving user's tabs need the new call state: %v", notified)
+	}
+	f.call(t, 2, "PUT", url+"/call", map[string]any{"session_id": "second-call-session"}, 403)
+	notified = map[int64]bool{}
+	f.call(t, 3, "DELETE", url+"/members/me", nil, 200)
+	if len(notified) != 0 {
+		t.Fatal("nonmember received or triggered a private call snapshot")
+	}
+}
+
 func TestCallStateRevisionOrdersMembershipSnapshots(t *testing.T) {
 	f := setup(t)
 	cid := number(t, f.call(t, 1, "POST", "/api/v1/me/conversations", map[string]any{"user_ids": []int64{2}}, 200), "id")

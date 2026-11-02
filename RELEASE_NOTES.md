@@ -1,3 +1,19 @@
+# Voxhold Backend 2.6.3
+
+Патч совместимости и надёжности от 2 ноября 2026 года, подготовлен поверх dev 2.6.2.
+Порядок обновления: backend 2.6.3 → frontend 2.6.3. Новых миграций поверх 000040 нет.
+
+- Исправлено согласование AV1 с Firefox: совместимые профили больше не отклоняются из-за различий FMTP.
+- Сохранены AV1/RTX и проверки несовместимых профилей; учтены различия параметров приёма Opus.
+- Смена пароля и отзыв остальных сессий выполняются одной транзакцией; ошибка не оставляет частично изменённый аккаунт.
+- Выход из беседы сразу обновляет состав звонка у участников и других вкладок вышедшего пользователя.
+
+Fixes Firefox AV1/Opus negotiation without changing codecs, preserves AV1 RTX,
+and commits password/session updates atomically. Conversation leave immediately
+publishes the revised call membership. No HTTP API or schema changes.
+See [AV1 interoperability](docs/firefox-av1.md), [password transactions](docs/password-change.md)
+and [call membership](docs/call-membership.md).
+
 # Voxhold Backend 2.6.2
 
 Общий патч проекта от 2 ноября 2026 года. Новых миграций поверх 000040 нет. Порядок обновления: бэкап → backend → frontend 2.6.2.

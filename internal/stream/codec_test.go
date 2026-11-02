@@ -1,11 +1,60 @@
 package stream
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/pion/webrtc/v4"
 )
+
+func TestAV1RelayAcceptsFirefoxAnswerAndKeepsRTX(t *testing.T) {
+	capability := webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeAV1, ClockRate: 90000, SDPFmtpLine: "level-idx=5;profile=0;tier=0"}
+	track := newRelayTrack(capability, "video", "av1", legacySDRRendition(CodecAV1))
+	context := newTestTrackLocalContext("firefox", 100, av1PrimaryPT, 0, &captureTrackWriter{})
+	context.codec.RTPCodecCapability = webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeAV1, ClockRate: 90000}
+	if _, err := track.Bind(context); err != nil {
+		t.Fatalf("Firefox omits AV1 FMTP for default Main profile: %v", err)
+	}
+	if err := track.Unbind(context); err != nil {
+		t.Fatal(err)
+	}
+	context.codec.SDPFmtpLine = "profile=1"
+	if _, err := track.Bind(context); !errors.Is(err, webrtc.ErrUnsupportedCodec) {
+		t.Fatalf("different AV1 profiles must not bind: %v", err)
+	}
+	manager := &Manager{videoCodecDescriptors: streamVideoCodecDescriptors()}
+	preferences := manager.viewerCodecPreferences(capability)
+	if len(preferences) != 2 || preferences[0].PayloadType != av1PrimaryPT || preferences[0].SDPFmtpLine != capability.SDPFmtpLine || preferences[1].PayloadType != webrtc.PayloadType(av1RTXPT) {
+		t.Fatalf("Chromium AV1 FMTP must retain the registered primary + RTX pair: %+v", preferences)
+	}
+}
+
+func TestRelayCodecCompatibilityKeepsProfileBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name, mime, first, second string
+		matches                   bool
+	}{
+		{"av1-default", webrtc.MimeTypeAV1, "", "level-idx=5;profile=0;tier=0", true},
+		{"av1-order", webrtc.MimeTypeAV1, "tier=0; PROFILE = 0 ; level-idx=5", "profile=0;level-idx=7", true},
+		{"av1-high", webrtc.MimeTypeAV1, "profile=1", "profile=0", false},
+		{"opus-preferences", webrtc.MimeTypeOpus, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;maxaveragebitrate=128000", "maxplaybackrate=48000;stereo=1;useinbandfec=1", true},
+		{"h264-profile", webrtc.MimeTypeH264, "profile-level-id=42e01f", "profile-level-id=42001f", false},
+		{"vp9-profile", webrtc.MimeTypeVP9, "profile-id=2", "profile-id=0", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a := webrtc.RTPCodecCapability{MimeType: test.mime, ClockRate: 90000, SDPFmtpLine: test.first}
+			b := webrtc.RTPCodecCapability{MimeType: test.mime, ClockRate: 90000, SDPFmtpLine: test.second}
+			if got := relayCodecCompatible(a, b); got != test.matches {
+				t.Fatalf("match = %v, want %v", got, test.matches)
+			}
+			b.ClockRate = 48000
+			if relayCodecCompatible(a, b) {
+				t.Fatal("clock rate mismatch accepted")
+			}
+		})
+	}
+}
 
 func TestStreamVideoCodecsHaveUniquePayloadTypes(t *testing.T) {
 	descriptors := streamVideoCodecDescriptors()
@@ -143,8 +192,8 @@ func TestViewerCodecPreferencesMatchesExactCapability(t *testing.T) {
 	}
 
 	unknown := manager.viewerCodecPreferences(webrtc.RTPCodecCapability{
-		MimeType:  webrtc.MimeTypeVP8,
-		ClockRate: 90000,
+		MimeType:    webrtc.MimeTypeVP8,
+		ClockRate:   90000,
 		SDPFmtpLine: "unknown-profile",
 	})
 	if len(unknown) != 1 || unknown[0].RTPCodecCapability.SDPFmtpLine != "unknown-profile" {

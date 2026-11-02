@@ -62,11 +62,7 @@ func newRelayTrack(
 
 func (t *relayTrack) Bind(context webrtc.TrackLocalContext) (webrtc.RTPCodecParameters, error) {
 	for _, codec := range context.CodecParameters() {
-		if !strings.EqualFold(codec.MimeType, t.codec.MimeType) ||
-			codec.ClockRate != t.codec.ClockRate ||
-			codec.Channels != t.codec.Channels ||
-			!strings.EqualFold(codec.SDPFmtpLine, t.codec.SDPFmtpLine) {
-
+		if !relayCodecCompatible(codec.RTPCodecCapability, t.codec) {
 			continue
 		}
 		var colorSpaceExtensionID uint8
@@ -86,7 +82,36 @@ func (t *relayTrack) Bind(context webrtc.TrackLocalContext) (webrtc.RTPCodecPara
 		t.mu.Unlock()
 		return codec, nil
 	}
-	return webrtc.RTPCodecParameters{}, webrtc.ErrUnsupportedCodec
+	return webrtc.RTPCodecParameters{}, fmt.Errorf("%w: %s", webrtc.ErrUnsupportedCodec, t.codec.MimeType)
+}
+
+// AV1 receivers may omit FMTP entirely (Firefox) or include level/tier
+// limits (Chromium). AV1's RTP specification defines an absent profile as
+// Main (0); those equivalent descriptions must not prevent binding a track.
+// Keep other codecs' existing profile checks and never cross AV1 profiles.
+func relayCodecCompatible(a, b webrtc.RTPCodecCapability) bool {
+	if !strings.EqualFold(a.MimeType, b.MimeType) || a.ClockRate != b.ClockRate || a.Channels != b.Channels {
+		return false
+	}
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeAV1) {
+		return av1Profile(a.SDPFmtpLine) == av1Profile(b.SDPFmtpLine)
+	}
+	// Opus FMTP describes receiver/encoder preferences, not different payload
+	// formats. Firefox and Chromium serialize stereo/FEC/bitrate differently.
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeOpus) {
+		return true
+	}
+	return strings.EqualFold(a.SDPFmtpLine, b.SDPFmtpLine)
+}
+
+func av1Profile(fmtp string) string {
+	for _, part := range strings.Split(fmtp, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "profile") {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "0"
 }
 
 func (t *relayTrack) Unbind(context webrtc.TrackLocalContext) error {
