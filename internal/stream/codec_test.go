@@ -41,6 +41,13 @@ func TestRelayCodecCompatibilityKeepsProfileBoundaries(t *testing.T) {
 		{"opus-preferences", webrtc.MimeTypeOpus, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;maxaveragebitrate=128000", "maxplaybackrate=48000;stereo=1;useinbandfec=1", true},
 		{"h264-profile", webrtc.MimeTypeH264, "profile-level-id=42e01f", "profile-level-id=42001f", false},
 		{"vp9-profile", webrtc.MimeTypeVP9, "profile-id=2", "profile-id=0", false},
+		{"vp8-receiver-limits", webrtc.MimeTypeVP8, "", "max-fs=12288;max-fr=60", true},
+		{"vp9-default", webrtc.MimeTypeVP9, "profile-id=0", "max-fs=12288;max-fr=60", true},
+		{"vp9-default-not-hdr", webrtc.MimeTypeVP9, "profile-id=2", "max-fs=12288;max-fr=60", false},
+		{"h264-order", webrtc.MimeTypeH264, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", "profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1", true},
+		{"h264-packetization", webrtc.MimeTypeH264, "profile-level-id=42e01f;packetization-mode=1", "profile-level-id=42e01f", false},
+		{"h264-receive-level", webrtc.MimeTypeH264, "profile-level-id=42e01f;packetization-mode=1", "profile-level-id=42e033;packetization-mode=1", true},
+		{"h264-malformed", webrtc.MimeTypeH264, "profile-level-id=42e01f;packetization-mode=1", "profile-level-id=42e0zz;packetization-mode=1", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a := webrtc.RTPCodecCapability{MimeType: test.mime, ClockRate: 90000, SDPFmtpLine: test.first}
@@ -53,6 +60,29 @@ func TestRelayCodecCompatibilityKeepsProfileBoundaries(t *testing.T) {
 				t.Fatal("clock rate mismatch accepted")
 			}
 		})
+	}
+}
+
+func TestFirefoxDefaultVP9RenditionAndViewerRTX(t *testing.T) {
+	capability := webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000, SDPFmtpLine: "max-fs=12288;max-fr=60"}
+	if !codecMatchesRendition(capability, legacySDRRendition(CodecVP9)) {
+		t.Fatal("Firefox omits the default VP9 profile-id=0")
+	}
+	hdr := legacySDRRendition(CodecVP9)
+	hdr.Profile = "2"
+	if codecMatchesRendition(capability, hdr) {
+		t.Fatal("default VP9 must not be accepted as HDR profile 2")
+	}
+	manager := &Manager{videoCodecDescriptors: streamVideoCodecDescriptors()}
+	for _, capability := range []webrtc.RTPCodecCapability{
+		capability,
+		{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, SDPFmtpLine: "max-fs=12288;max-fr=60"},
+		{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1"},
+	} {
+		preferences := manager.viewerCodecPreferences(capability)
+		if len(preferences) != 2 || preferences[0].PayloadType == 0 || preferences[0].SDPFmtpLine != capability.SDPFmtpLine || preferences[1].MimeType != "video/rtx" {
+			t.Fatalf("Firefox %s lost its registered payload/RTX pair: %+v", capability.MimeType, preferences)
+		}
 	}
 }
 
@@ -192,7 +222,7 @@ func TestViewerCodecPreferencesMatchesExactCapability(t *testing.T) {
 	}
 
 	unknown := manager.viewerCodecPreferences(webrtc.RTPCodecCapability{
-		MimeType:    webrtc.MimeTypeVP8,
+		MimeType:    "video/unknown",
 		ClockRate:   90000,
 		SDPFmtpLine: "unknown-profile",
 	})

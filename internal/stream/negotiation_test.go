@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -144,5 +145,63 @@ func TestAV1ViewerNegotiatesFirefoxAnswer(t *testing.T) {
 	}
 	if err := s.acceptAnswer(answer.SDP); err != nil {
 		t.Fatalf("Firefox AV1 + Opus answer rejected: %v", err)
+	}
+}
+
+func TestViewerNegotiatesFirefoxVideoFormats(t *testing.T) {
+	for _, test := range []struct {
+		codec                           Codec
+		mime, publisherFMTP, viewerFMTP string
+	}{
+		{CodecVP8, webrtc.MimeTypeVP8, "", "max-fs=12288;max-fr=60"},
+		{CodecVP9, webrtc.MimeTypeVP9, "profile-id=0", "max-fs=12288;max-fr=60"},
+		{CodecH264, webrtc.MimeTypeH264, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", "profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1"},
+	} {
+		t.Run(string(test.codec), func(t *testing.T) {
+			peer, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			remote, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+			if err != nil {
+				_ = peer.Close()
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = remote.Close(); _ = peer.Close() })
+			sink := &testSink{}
+			r := newRoom(1, test.codec)
+			r.publisher = &session{}
+			codec := webrtc.RTPCodecCapability{MimeType: test.mime, ClockRate: 90000, SDPFmtpLine: test.publisherFMTP}
+			key := roomTrackKey{renditionID: "sdr", kind: webrtc.RTPCodecTypeVideo}
+			rendition := legacySDRRendition(test.codec)
+			r.tracks[key] = roomTrack{key: key, codec: codec, track: newRelayTrack(codec, "video", "firefox-test", rendition), rendition: rendition}
+			s := newSession(&Manager{sink: sink, videoCodecDescriptors: streamVideoCodecDescriptors()}, r, peer, "viewer", 2, 1, 1, sessionViewer)
+			s.selectedRenditionID = "sdr"
+			t.Cleanup(s.close)
+			if err := s.synchronizeViewerTracks(true); err != nil {
+				t.Fatal(err)
+			}
+			if err := remote.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sink.offer("viewer")}); err != nil {
+				t.Fatal(err)
+			}
+			answer, err := remote.CreateAnswer(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preferences := s.manager.viewerCodecPreferences(codec)
+			prefix := fmt.Sprintf("a=fmtp:%d ", preferences[0].PayloadType)
+			if test.publisherFMTP == "" {
+				rtpmap := fmt.Sprintf("a=rtpmap:%d VP8/90000\r\n", preferences[0].PayloadType)
+				answer.SDP = strings.Replace(answer.SDP, rtpmap, rtpmap+prefix+test.viewerFMTP+"\r\n", 1)
+			} else {
+				answer.SDP = strings.Replace(answer.SDP, prefix+test.publisherFMTP, prefix+test.viewerFMTP, 1)
+			}
+			if !strings.Contains(answer.SDP, prefix+test.viewerFMTP) {
+				t.Fatal("missing Firefox FMTP fixture")
+			}
+			if err := s.acceptAnswer(answer.SDP); err != nil {
+				t.Fatalf("Firefox %s answer rejected: %v", test.codec, err)
+			}
+		})
 	}
 }
