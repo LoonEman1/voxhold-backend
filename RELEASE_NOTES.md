@@ -1,3 +1,12 @@
+# Voxhold Backend 2.6.1
+
+Согласованный патч от 2 ноября 2026 года для frontend 2.6.1, исправляющего
+искажённое воспроизведение E2EE-голоса. Код backend и протокол не изменены;
+актуальная схема остаётся **000040**, новых миграций нет.
+
+Paired release for the frontend encrypted-voice receiver fix. Backend behavior
+is unchanged from 2.6.0; no new database migration or configuration is required.
+
 # Voxhold Backend 2.6.0
 
 Релиз от 2 ноября 2026 года. Миграции **000034–000040**. Порядок обновления:
