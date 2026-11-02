@@ -974,6 +974,10 @@ paths:
       operationId: get_api_v1_me_scheduled_messages
       summary: GET /api/v1/me/scheduled-messages
       x-source: internal/community/message_features.go
+      description: Lists your scheduled messages; destination_kind and destination_id scope the result to one chat before pagination. Both filters must be provided together.
+      parameters:
+        - {name: destination_kind, in: query, schema: {type: string, enum: [channel, conversation]}}
+        - {name: destination_id, in: query, schema: {type: integer, minimum: 1}}
       responses:
         '200': {description: OK}
         default:

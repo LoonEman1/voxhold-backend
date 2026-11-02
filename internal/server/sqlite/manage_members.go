@@ -261,7 +261,11 @@ func (r *Repository) BanMemberWithReason(
 		return fmt.Errorf("revoke banned account access: %w", err)
 	}
 
-	if err := audit.Record(ctx, tx, serverID, requesterUserID, "member.banned", "user", targetUserID, "", nil); err != nil {
+	var banDetails any
+	if reason != "" {
+		banDetails = map[string]any{"reason": reason}
+	}
+	if err := audit.Record(ctx, tx, serverID, requesterUserID, "member.banned", "user", targetUserID, "", banDetails); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET status='cancelled',error='' WHERE user_id=? AND status IN('pending','failed')`, targetUserID); err != nil {

@@ -21,6 +21,10 @@ func TestBanReasonListAndUnbanPermissions(t *testing.T) {
 	if err := repo.BanMemberWithReason(ctx, 1, 12, 14, "spam"); err != nil {
 		t.Fatal(err)
 	}
+	var auditReason string
+	if err := db.QueryRow(`SELECT json_extract(details,'$.reason') FROM admin_audit WHERE action='member.banned' AND target_id=14`).Scan(&auditReason); err != nil || auditReason != "spam" {
+		t.Fatalf("ban reason missing from audit: %q err=%v", auditReason, err)
+	}
 	if err := repo.BanMember(ctx, 1, 1, 15); err != nil {
 		t.Fatal(err)
 	}
