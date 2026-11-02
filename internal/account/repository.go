@@ -51,6 +51,9 @@ type SessionRepository interface {
 	ListByUser(ctx context.Context, userID int64) ([]SessionRecord, error)
 	DeleteByID(ctx context.Context, userID, sessionID int64) ([]byte, error)
 	DeleteOthers(ctx context.Context, userID int64, keepHash []byte) ([][]byte, error)
+	// ReplacePasswordAndRevokeOthers commits both changes together. expectedHash
+	// rejects a concurrent password change verified against an older credential.
+	ReplacePasswordAndRevokeOthers(ctx context.Context, userID int64, expectedHash, passwordHash string, keepHash []byte) ([][]byte, error)
 }
 
 type InviteRegistrationRepository interface {
