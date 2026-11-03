@@ -4,6 +4,7 @@
 Новых миграций поверх 000040 нет; прежние HTTP API и клиенты совместимы.
 
 - До восьми независимых показов экрана в одном голосовом канале. Каталог, события, P2P-связи и SFU-комнаты сохраняют идентификатор издателя.
+- Вебкамеры в голосовых каналах и личных звонках: независимая видеодорожка, совместная работа с показом экрана и три пресета качества с изменением разрешения во время звонка. Камера заменяет карточку участника в клиенте; [протокол и проверки](docs/webcam.md).
 - Просмотр и переключение выбирают конкретный поток. Остановка чужого показа или отзыв его прав не закрывают остальные трансляции; сохранены лимиты зрителей/битрейта и одна роль соединения.
 - Capability `multi_streams` согласуется при подключении. Старые вкладки получают основной поток и корректную смену основного издателя.
 - Обновлены Pion WebRTC до 4.2.26 и interceptor до 0.1.51: исправления гонки SDP, повторных NACK и управления потоком. SQLite обновлён до 1.61.1, включая исправление регрессии prepared statements в 1.61.0; обновлены связанные Go-модули.
@@ -17,7 +18,8 @@ Linux race detector, goroutine leak checks и сборки Docker. Тесты п
 Подробности: [параллельные трансляции](docs/parallel-channel-streams.md) и
 [SQLite-замеры](docs/sqlite-benchmarks-2.6.4.md).
 
-English: independent, capability-negotiated screen publishers per channel;
+English: webcams in voice channels and conversation calls; independent,
+capability-negotiated screen publishers per channel;
 isolated viewer lifecycle and permissions; updated Pion/SQLite/container
 dependencies. No new schema migration. Publish and update the backend first.
 

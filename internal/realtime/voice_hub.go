@@ -126,6 +126,7 @@ func (h *Hub) UpdateVoiceState(
 	client *Client,
 	selfMute bool,
 	selfDeaf bool,
+	selfVideo ...bool,
 ) (VoiceParticipantData, bool) {
 	if client == nil {
 		return VoiceParticipantData{}, false
@@ -135,6 +136,7 @@ func (h *Hub) UpdateVoiceState(
 		client,
 		selfMute,
 		selfDeaf,
+		selfVideo...,
 	)
 	if !exists {
 		return VoiceParticipantData{}, false

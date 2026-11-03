@@ -39,8 +39,9 @@ type VoiceJoinData struct {
 }
 
 type VoiceStateUpdateData struct {
-	SelfMute bool `json:"self_mute"`
-	SelfDeaf bool `json:"self_deaf"`
+	SelfMute  bool  `json:"self_mute"`
+	SelfDeaf  bool  `json:"self_deaf"`
+	SelfVideo *bool `json:"self_video,omitempty"`
 }
 
 type VoiceParticipantData struct {
@@ -51,6 +52,7 @@ type VoiceParticipantData struct {
 	ChannelID    int64  `json:"channel_id"`
 	SelfMute     bool   `json:"self_mute"`
 	SelfDeaf     bool   `json:"self_deaf"`
+	SelfVideo    bool   `json:"self_video,omitempty"`
 	// E2EEDeviceID tells the other members whose device key wraps this
 	// participant's sender key.
 	E2EEDeviceID string `json:"e2ee_device_id,omitempty"`
