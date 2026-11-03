@@ -140,3 +140,24 @@ func newMessageData(
 		Reply:     value.Reply, Forward: value.Forward,
 	}
 }
+
+// EventChannelActivity tells channel members (not only subscribers) that a
+// channel has a new top-level message. It carries no content.
+const EventChannelActivity EventType = "channel.activity"
+
+type ChannelActivityData struct {
+	ServerID     int64 `json:"server_id"`
+	ChannelID    int64 `json:"channel_id"`
+	MessageID    int64 `json:"message_id"`
+	AuthorUserID int64 `json:"author_user_id"`
+}
+
+// EventChannelID limits the event to clients that can read the channel.
+func (d ChannelActivityData) EventChannelID() int64 { return d.ChannelID }
+
+func (p *MessageEventPublisher) PublishChannelActivity(serverID int64, value message.Message) {
+	p.hub.PublishToServer(serverID, OutgoingEvent{
+		Type: EventChannelActivity,
+		Data: ChannelActivityData{ServerID: serverID, ChannelID: value.ChannelID, MessageID: value.ID, AuthorUserID: value.Author.UserID},
+	})
+}

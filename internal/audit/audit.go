@@ -13,6 +13,15 @@ func Record(ctx context.Context, tx *sql.Tx, serverID, actorID int64, action, ta
 			return err
 		}
 	}
+	if targetName == "" && (targetType == "channel" || targetType == "role") {
+		query := `SELECT name FROM channels WHERE id=? AND server_id=?`
+		if targetType == "role" {
+			query = `SELECT name FROM server_roles WHERE id=? AND server_id=?`
+		}
+		if err := tx.QueryRowContext(ctx, query, targetID, serverID).Scan(&targetName); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(details)
 	if err != nil {
 		return err

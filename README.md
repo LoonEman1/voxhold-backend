@@ -13,7 +13,7 @@ SQLite and is distributed as a multi-platform container image.
 
 Saved messages and notes, cross-scope forwarding, scheduled messages, polls,
 server events, administrative audit and personal calls are described in
-[the community features guide](docs/community-features.md). The current source also requires migration **000033**. See
+[the community features guide](docs/community-features.md). The current source also requires migration **000040**. See
 [audit fixes and upgrade order](docs/audit-2.5-fixes.md).
 
 
@@ -44,6 +44,7 @@ The container includes three commands:
 
 - `voxhold` — API, WebSocket and WebRTC server;
 - `voxhold-bootstrap` — creates the initial instance and owner;
+- `voxhold-admin reset-password --username <name>` — operator recovery: sets a random password (printed once) and revokes all sessions of that account. Run it in the backend container, e.g. `docker compose run --rm --entrypoint voxhold-admin backend reset-password --username owner`.
 - `migrate` — applies SQLite schema migrations.
 
 ## Quick local start
@@ -236,6 +237,26 @@ only TCP 80/443 plus the configured WebRTC UDP ports.
 
 Please do not report vulnerabilities in a public issue. Follow
 [SECURITY.md](SECURITY.md) instead.
+
+### End-to-end encrypted voice
+
+Owners and administrators can require end-to-end encryption for a voice
+channel; calls in direct conversations encrypt voice automatically when every
+member's client supports it. Each client encrypts its Opus frames with its own
+AES-256-GCM sender key and shares that key with the other devices, wrapped with
+ECDH P-256 device keys. The server stores only public device keys and relays
+the wrapped keys without reading them; the SFU forwards ciphertext. Wrapped
+keys carry an authenticated generation, so the relay cannot roll a sender back
+to an older key. A user keeps up to 10 device keys; registering another one
+revokes the device used least recently.
+
+This protects voice against eavesdropping by the server, leaked SFU memory or
+traffic dumps, and a host administrator who only watches traffic. It does
+**not** protect against a server that actively replaces public keys unless the
+users compare their security codes, against metadata (who talked to whom, when,
+for how long and how much), against recordings (a participant's recording is
+stored on the server without end-to-end encryption, and the interface says so),
+against video or audio of screen streams, or against text messages.
 
 ## License
 

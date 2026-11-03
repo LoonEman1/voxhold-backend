@@ -62,11 +62,7 @@ func newRelayTrack(
 
 func (t *relayTrack) Bind(context webrtc.TrackLocalContext) (webrtc.RTPCodecParameters, error) {
 	for _, codec := range context.CodecParameters() {
-		if !strings.EqualFold(codec.MimeType, t.codec.MimeType) ||
-			codec.ClockRate != t.codec.ClockRate ||
-			codec.Channels != t.codec.Channels ||
-			!strings.EqualFold(codec.SDPFmtpLine, t.codec.SDPFmtpLine) {
-
+		if !relayCodecCompatible(codec.RTPCodecCapability, t.codec) {
 			continue
 		}
 		var colorSpaceExtensionID uint8
@@ -86,7 +82,61 @@ func (t *relayTrack) Bind(context webrtc.TrackLocalContext) (webrtc.RTPCodecPara
 		t.mu.Unlock()
 		return codec, nil
 	}
-	return webrtc.RTPCodecParameters{}, webrtc.ErrUnsupportedCodec
+	return webrtc.RTPCodecParameters{}, fmt.Errorf("%w: %s", webrtc.ErrUnsupportedCodec, t.codec.MimeType)
+}
+
+// Compare RTP format configuration rather than serialized receiver limits.
+// Firefox includes max-fs/max-fr for VP8/VP9, omits default VP9 profile 0,
+// and orders H.264 parameters differently. Pion already negotiates receive
+// limits; relay binding must keep the same codec/profile/packetization checks.
+func relayCodecCompatible(a, b webrtc.RTPCodecCapability) bool {
+	if !strings.EqualFold(a.MimeType, b.MimeType) || a.ClockRate != b.ClockRate || a.Channels != b.Channels {
+		return false
+	}
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeAV1) {
+		return codecFMTPParameter(a.SDPFmtpLine, "profile", "0") == codecFMTPParameter(b.SDPFmtpLine, "profile", "0")
+	}
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeVP8) {
+		return true
+	}
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeVP9) {
+		return codecFMTPParameter(a.SDPFmtpLine, "profile-id", "0") == codecFMTPParameter(b.SDPFmtpLine, "profile-id", "0")
+	}
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeH264) {
+		if codecFMTPParameter(a.SDPFmtpLine, "packetization-mode", "0") != codecFMTPParameter(b.SDPFmtpLine, "packetization-mode", "0") {
+			return false
+		}
+		first := codecFMTPParameter(a.SDPFmtpLine, "profile-level-id", "42e01f")
+		second := codecFMTPParameter(b.SDPFmtpLine, "profile-level-id", "42e01f")
+		if len(first) != 6 || len(second) != 6 {
+			return false
+		}
+		if _, err := strconv.ParseUint(first, 16, 24); err != nil {
+			return false
+		}
+		if _, err := strconv.ParseUint(second, 16, 24); err != nil {
+			return false
+		}
+		// RFC 6184 8.2.2: profile and packetization are symmetric; level is
+		// negotiated independently. Match profile bytes as Pion does.
+		return strings.EqualFold(first[:4], second[:4])
+	}
+	// Opus FMTP describes receiver/encoder preferences, not different payload
+	// formats. Firefox and Chromium serialize stereo/FEC/bitrate differently.
+	if strings.EqualFold(a.MimeType, webrtc.MimeTypeOpus) {
+		return true
+	}
+	return strings.EqualFold(a.SDPFmtpLine, b.SDPFmtpLine)
+}
+
+func codecFMTPParameter(fmtp, parameter, fallback string) string {
+	for _, part := range strings.Split(fmtp, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), parameter) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return fallback
 }
 
 func (t *relayTrack) Unbind(context webrtc.TrackLocalContext) error {
@@ -164,13 +214,7 @@ func codecMatchesRendition(
 	if rendition.Codec != CodecVP9 {
 		return true
 	}
-	expected := "profile-id=" + rendition.Profile
-	for _, part := range strings.Split(capability.SDPFmtpLine, ";") {
-		if strings.EqualFold(strings.TrimSpace(part), expected) {
-			return true
-		}
-	}
-	return false
+	return codecFMTPParameter(capability.SDPFmtpLine, "profile-id", "0") == rendition.Profile
 }
 
 const (

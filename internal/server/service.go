@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 type Service struct {
@@ -267,5 +270,57 @@ func (s *Service) BanMember(
 		serverID,
 	)
 
+	return nil
+}
+
+const maxBanReasonRunes = 500
+
+func (s *Service) BanMemberWithReason(ctx context.Context, serverID, requesterUserID, targetUserID int64, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if utf8.RuneCountInString(reason) > maxBanReasonRunes {
+		return ErrBanReasonTooLong
+	}
+	if serverID <= 0 || requesterUserID <= 0 {
+		return ErrManageMembersForbidden
+	}
+	if targetUserID <= 0 {
+		return ErrMemberNotFound
+	}
+	if err := s.repository.BanMemberWithReason(ctx, serverID, requesterUserID, targetUserID, reason); err != nil {
+		return fmt.Errorf("ban instance member: %w", err)
+	}
+	s.accessRevoker.RevokeUserFromServer(targetUserID, serverID)
+	return nil
+}
+
+func (s *Service) ListBans(ctx context.Context, serverID, requesterUserID int64) ([]Ban, error) {
+	return s.repository.ListBans(ctx, serverID, requesterUserID)
+}
+
+func (s *Service) Unban(ctx context.Context, serverID, requesterUserID, targetUserID int64) error {
+	return s.repository.Unban(ctx, serverID, requesterUserID, targetUserID)
+}
+
+const maxTimeout = 28 * 24 * time.Hour
+
+func (s *Service) SetMemberTimeout(ctx context.Context, serverID, requesterUserID, targetUserID int64, until *int64) error {
+	if until != nil {
+		at := time.Unix(*until, 0)
+		if !at.After(time.Now()) || at.After(time.Now().Add(maxTimeout)) {
+			return ErrTimeoutInvalid
+		}
+	}
+	if serverID <= 0 || requesterUserID <= 0 {
+		return ErrManageMembersForbidden
+	}
+	if targetUserID <= 0 {
+		return ErrMemberNotFound
+	}
+	if err := s.repository.SetMemberTimeout(ctx, serverID, requesterUserID, targetUserID, until); err != nil {
+		return err
+	}
+	if refresher, ok := s.accessRevoker.(interface{ RefreshRolePermissions(int64) }); ok {
+		refresher.RefreshRolePermissions(serverID)
+	}
 	return nil
 }

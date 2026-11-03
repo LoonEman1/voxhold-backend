@@ -31,4 +31,5 @@ type Channel struct {
 	UnreadCount      int64
 	CommentsEnabled  bool
 	CanPublish       bool
+	E2EERequired     bool
 }

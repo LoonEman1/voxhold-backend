@@ -33,6 +33,13 @@ type Config struct {
 
 	EntryTTL       time.Duration
 	MaxRateEntries int
+
+	// IPv6PrefixBits groups IPv6 clients by prefix; one /64 normally is one subscriber.
+	IPv6PrefixBits int
+
+	// IPMultiplier scales the per-IP HTTP budget for authenticated clients,
+	// which are additionally limited per session token.
+	IPMultiplier int
 }
 
 func DefaultConfig() Config {
@@ -53,10 +60,11 @@ func DefaultConfig() Config {
 		WebSocketConnectBurst:      5,
 		WebSocketEventsPerSecond:   30,
 		WebSocketEventBurst:        60,
-		WebSocketMaxPerIP:          20,
+		WebSocketMaxPerIP:          50,
 		WebSocketMaxPerUser:        5,
 		EntryTTL:                   30 * time.Minute,
 		MaxRateEntries:             20_000,
+		IPMultiplier:               4,
 	}
 }
 
@@ -97,6 +105,23 @@ func ConfigFromEnv() (Config, error) {
 		{"WS_MAX_CONNECTIONS_PER_IP", &config.WebSocketMaxPerIP},
 		{"WS_MAX_CONNECTIONS_PER_USER", &config.WebSocketMaxPerUser},
 		{"RATE_LIMIT_MAX_ENTRIES", &config.MaxRateEntries},
+		{"HTTP_IP_MULTIPLIER", &config.IPMultiplier},
+	}
+
+	if raw := os.Getenv("RATE_LIMIT_IPV6_PREFIX"); raw != "" {
+		bits, err := strconv.Atoi(raw)
+		if err != nil || bits < 32 || bits > 128 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_IPV6_PREFIX must be an integer in 32..128")
+		}
+		config.IPv6PrefixBits = bits
+	}
+
+	if raw := os.Getenv("RATE_LIMIT_IPV6_PREFIX"); raw != "" {
+		bits, err := strconv.Atoi(raw)
+		if err != nil || bits < 32 || bits > 128 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_IPV6_PREFIX must be an integer in 32..128")
+		}
+		config.IPv6PrefixBits = bits
 	}
 
 	for _, value := range values {

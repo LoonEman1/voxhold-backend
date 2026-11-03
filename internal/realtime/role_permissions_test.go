@@ -2,6 +2,25 @@ package realtime
 
 import "testing"
 
+func TestRefreshingPermissionsDoesNotCloseVoiceForAnIdleReadOnlyMember(t *testing.T) {
+	hub := NewHub()
+	defer hub.Close()
+	client := NewClient(2, "reader", []int64{1})
+	hub.Register(client)
+	drainOutgoingEvents(client)
+	hub.SetRolePermissionLoader(func(int64, int64) (int, error) { return 1, nil })
+	hub.RefreshRolePermissions(1)
+	for {
+		event, ok := client.PopOutgoing()
+		if !ok {
+			break
+		}
+		if event.Type == EventVoiceWebRTCClosed {
+			t.Fatal("idle reader received a voice teardown")
+		}
+	}
+}
+
 func TestRoleChangesPreserveAllowedMediaAndRevokeOnlyLostPermission(t *testing.T) {
 	hub := NewHub()
 	defer hub.Close()

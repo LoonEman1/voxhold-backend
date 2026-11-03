@@ -1,10 +1,13 @@
-﻿name: Backend CI
+name: Backend CI
 
 on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [main]
+    # dev does not require PR branches to be up to date, so its pushes run the
+    # tests to catch PRs that pass alone but break together. They never build
+    # or publish images.
+    branches: [main, dev]
     tags: ['v*.*.*']
   workflow_dispatch:
 
@@ -13,7 +16,10 @@ permissions:
 
 concurrency:
   group: backend-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR and dev runs are cancelled: only the latest state matters.
+  # A main or tag run may be publishing images and a release, so it always
+  # runs to completion.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   IMAGE_NAME: ghcr.io/looneman1/voxhold-backend
@@ -28,7 +34,7 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       release: ${{ steps.plan.outputs.release }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Test release planning
@@ -39,25 +45,60 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/release-plan.py
 
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Classify changed files
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        # Documentation-only PRs skip tests and image builds. Skipped required
+        # jobs report success, so these PRs still merge. Any doubt runs everything.
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo code=true >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files="$(gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only)" || [ -z "$files" ]; then
+            echo '::warning::Cannot list changed files; running every check.'
+            echo code=true >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$files"
+          if printf '%s\n' "$files" | grep -Evq '(\.md$|^docs/|^LICENSE$)'; then
+            echo code=true >> "$GITHUB_OUTPUT"
+          else
+            echo 'Documentation-only change: tests and image builds are skipped.'
+            echo code=false >> "$GITHUB_OUTPUT"
+          fi
+
+  # The full test suite runs in test-race and test-leaks; this job keeps the
+  # required "Test" check for static analysis instead of a third identical run.
   test:
     name: Test
+    needs: changes
+    # Runs unless the change is documentation-only; a failed classification
+    # leaves the output empty and therefore runs the checks.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Test
-        run: go test ./...
 
       - name: Vet
         run: go vet ./...
@@ -65,32 +106,46 @@ jobs:
       - name: Check reachable vulnerabilities (Linux production packages)
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./cmd/... ./internal/...
 
+  staticcheck:
+    name: Staticcheck (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Advisory until the existing findings are fixed: they are printed as
+      # annotations, but the step does not turn the PR check red.
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+        continue-on-error: true
+
   test-race:
     name: Test with race detector
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Download dependencies
-        run: go mod download
 
       - name: Test with race detector
         run: go test -race ./...
 
   test-leaks:
     name: Goroutine leak checks
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -101,7 +156,7 @@ jobs:
         run: go test -count=1 ./... -timeout 120s
       - name: Retain leak stack reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: goroutine-leak-reports
           path: leak-reports/
@@ -109,57 +164,91 @@ jobs:
           retention-days: 7
 
   container-variants:
-    name: Build Docker image (${{ matrix.goamd64 }})
-    if: github.event_name == 'pull_request'
-    needs: test
+    name: Build Docker image (${{ matrix.name }})
+    needs: changes
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goamd64: [v1, v3]
+        include:
+          - name: amd64-v1
+            platform: linux/amd64
+            goamd64: v1
+            scope: amd64-v1
+          - name: amd64-v3
+            platform: linux/amd64
+            goamd64: v3
+            scope: amd64-v3
+          # Release builds publish ARM64; validate it before a release PR.
+          - name: arm64
+            platform: linux/arm64
+            goamd64: v1
+            scope: arm64
 
     permissions:
       contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Validate AMD64 image
+      - name: Validate image
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           build-args: GOAMD64=${{ matrix.goamd64 }}
           push: false
           load: true
-          tags: voxhold-backend:ci-${{ matrix.goamd64 }}
-          cache-from: type=gha,scope=amd64-${{ matrix.goamd64 }}
-          cache-to: type=gha,mode=max,scope=amd64-${{ matrix.goamd64 }}
+          tags: voxhold-backend:ci-${{ matrix.name }}
+          cache-from: type=gha,scope=${{ matrix.scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.scope }}
           provenance: false
           sbom: false
 
       - name: Check image CPU requirements without database access
+        if: matrix.platform == 'linux/amd64'
         env:
           GOAMD64: ${{ matrix.goamd64 }}
+          IMAGE: voxhold-backend:ci-${{ matrix.name }}
         run: |
           if [ "$GOAMD64" = v3 ] && ! /lib64/ld-linux-x86-64.so.2 --help | grep -Fq 'x86-64-v3 (supported, searched)'; then
             echo 'Runner lacks v3; image was built, execution is covered on compatible hosts.'
             exit 0
           fi
-          docker run --rm --network none --read-only voxhold-backend:ci-$GOAMD64 voxhold --check-cpu | grep -Fx "arch=amd64 level=$GOAMD64"
-          count=$(docker run --rm --entrypoint sh voxhold-backend:ci-$GOAMD64 -c 'find /usr/local/bin -name voxhold -type f | wc -l')
+          docker run --rm --network none --read-only "$IMAGE" voxhold --check-cpu | grep -Fx "arch=amd64 level=$GOAMD64"
+          count=$(docker run --rm --entrypoint sh "$IMAGE" -c 'find /usr/local/bin -name voxhold -type f | wc -l')
           test "$count" -eq 1
+
+      - name: Check cross-compiled ARM64 executables
+        if: matrix.platform == 'linux/arm64'
+        env:
+          IMAGE: voxhold-backend:ci-${{ matrix.name }}
+        run: |
+          container=$(docker create "$IMAGE")
+          trap 'docker rm -f "$container" >/dev/null' EXIT
+          for binary in voxhold voxhold-bootstrap migrate; do
+            docker cp "$container:/usr/local/bin/$binary" "$RUNNER_TEMP/$binary"
+            file "$RUNNER_TEMP/$binary" | tee /dev/stderr | grep -Fq 'ARM aarch64'
+          done
 
   container:
     name: Build Docker image
     if: always() && github.event_name == 'pull_request'
-    needs: container-variants
+    needs: [changes, container-variants]
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.container-variants.result }}" = success
+      - env:
+          RESULT: ${{ needs.container-variants.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+        run: test "$RESULT" = success || { test "$RESULT" = skipped && test "$CODE" = false; }
 
   publish:
     name: Publish Docker image (${{ matrix.variant }})
@@ -170,18 +259,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The AMD64 half of the portable image is the v1 build, so the
+          # -amd64-v1 tags are aliases of this image instead of a second build.
           - variant: portable
             goamd64: v1
             platforms: linux/amd64,linux/arm64
             suffix: ''
-          - variant: amd64-v1
-            goamd64: v1
-            platforms: linux/amd64
-            suffix: '-amd64-v1'
+            alias: '-amd64-v1'
           - variant: amd64-v3
             goamd64: v3
             platforms: linux/amd64
             suffix: '-amd64-v3'
+            alias: ''
 
     permissions:
       contents: read
@@ -189,8 +278,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
+      # The builder stage runs natively; QEMU only runs the small final-stage
+      # RUN for ARM64.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -206,6 +297,9 @@ jobs:
             type=raw,value=${{ needs.release-plan.outputs.version }}${{ matrix.suffix }},priority=900
             type=raw,value=${{ needs.release-plan.outputs.minor }}${{ matrix.suffix }},priority=800
             type=raw,value=latest${{ matrix.suffix }},priority=700
+            type=raw,value=${{ needs.release-plan.outputs.version }}${{ matrix.alias }},priority=600,enable=${{ matrix.alias != '' }}
+            type=raw,value=${{ needs.release-plan.outputs.minor }}${{ matrix.alias }},priority=500,enable=${{ matrix.alias != '' }}
+            type=raw,value=latest${{ matrix.alias }},priority=400,enable=${{ matrix.alias != '' }}
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -240,7 +334,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Publish immutable tag and GitHub release

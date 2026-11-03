@@ -13,6 +13,9 @@ type CallMember struct {
 	UserID    int64  `json:"user_id"`
 	Username  string `json:"username"`
 	SessionID string `json:"session_id"`
+	// E2EEDeviceID is the registered device key the member encrypts voice
+	// with; the call is end-to-end encrypted when every member has one.
+	E2EEDeviceID string `json:"e2ee_device_id,omitempty"`
 }
 type CallState struct {
 	ConversationID int64        `json:"conversation_id"`
@@ -22,19 +25,19 @@ type CallState struct {
 
 func (s *Service) readCall(ctx context.Context, cid int64) (CallState, error) {
 	v := CallState{ConversationID: cid, Members: []CallMember{}}
-	rows, err := s.db.QueryContext(ctx, `SELECT c.call_revision,m.user_id,u.username,m.session_id FROM conversations c LEFT JOIN conversation_call_members m ON m.conversation_id=c.id AND m.heartbeat_at>? LEFT JOIN users u ON u.id=m.user_id WHERE c.id=? ORDER BY m.user_id`, time.Now().Unix()-45, cid)
+	rows, err := s.db.QueryContext(ctx, `SELECT c.call_revision,m.user_id,u.username,m.session_id,m.e2ee_device_id FROM conversations c LEFT JOIN conversation_call_members m ON m.conversation_id=c.id AND m.heartbeat_at>? LEFT JOIN users u ON u.id=m.user_id WHERE c.id=? ORDER BY m.user_id`, time.Now().Unix()-45, cid)
 	if err != nil {
 		return v, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var userID sql.NullInt64
-		var username, sessionID sql.NullString
-		if err = rows.Scan(&v.Revision, &userID, &username, &sessionID); err != nil {
+		var username, sessionID, device sql.NullString
+		if err = rows.Scan(&v.Revision, &userID, &username, &sessionID, &device); err != nil {
 			return v, err
 		}
 		if userID.Valid {
-			v.Members = append(v.Members, CallMember{UserID: userID.Int64, Username: username.String, SessionID: sessionID.String})
+			v.Members = append(v.Members, CallMember{UserID: userID.Int64, Username: username.String, SessionID: sessionID.String, E2EEDeviceID: device.String})
 		}
 	}
 	return v, rows.Err()
@@ -49,8 +52,9 @@ func (s *Service) callState(r *http.Request, uid int64) (any, error) {
 func (s *Service) joinCall(r *http.Request, uid int64) (any, error) {
 	cid := path(r, "conversationID")
 	var input struct {
-		SessionID string `json:"session_id"`
-		Replace   bool   `json:"replace"`
+		SessionID    string `json:"session_id"`
+		Replace      bool   `json:"replace"`
+		E2EEDeviceID string `json:"e2ee_device_id"`
 	}
 	if err := decode(r, &input); err != nil {
 		return nil, err
@@ -76,6 +80,15 @@ func (s *Service) joinCall(r *http.Request, uid int64) (any, error) {
 	if err = canSendTransaction(r.Context(), tx, cid, uid); err != nil {
 		return nil, err
 	}
+	if input.E2EEDeviceID != "" {
+		var active bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM e2ee_device_keys WHERE user_id=? AND device_id=? AND revoked_at IS NULL)`, uid, input.E2EEDeviceID).Scan(&active); err != nil {
+			return nil, err
+		}
+		if !active {
+			return nil, ErrInvalid
+		}
+	}
 	if _, err = tx.ExecContext(r.Context(), `DELETE FROM conversation_call_members WHERE heartbeat_at<?`, time.Now().Unix()-45); err != nil {
 		return nil, err
 	}
@@ -91,7 +104,9 @@ func (s *Service) joinCall(r *http.Request, uid int64) (any, error) {
 	if previous != "" && previous != input.SessionID && !input.Replace {
 		return nil, ErrConflict
 	}
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO conversation_call_members(conversation_id,user_id,session_id) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET session_id=excluded.session_id,heartbeat_at=unixepoch()`, cid, uid, input.SessionID); err != nil {
+	var previousDevice sql.NullString
+	_ = tx.QueryRowContext(r.Context(), `SELECT e2ee_device_id FROM conversation_call_members WHERE conversation_id=? AND user_id=?`, cid, uid).Scan(&previousDevice)
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO conversation_call_members(conversation_id,user_id,session_id,e2ee_device_id) VALUES(?,?,?,NULLIF(?,'')) ON CONFLICT(conversation_id,user_id) DO UPDATE SET session_id=excluded.session_id,e2ee_device_id=excluded.e2ee_device_id,heartbeat_at=unixepoch()`, cid, uid, input.SessionID, input.E2EEDeviceID); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -101,7 +116,7 @@ func (s *Service) joinCall(r *http.Request, uid int64) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if previous != input.SessionID {
+	if previous != input.SessionID || previousDevice.String != input.E2EEDeviceID {
 		s.emitConversation(r.Context(), cid, "conversation.call", v)
 	}
 	return v, nil
@@ -138,6 +153,12 @@ func (s *Service) callSignal(r *http.Request, uid int64) (any, error) {
 			Screen   bool  `json:"screen"`
 			Revision int64 `json:"revision"`
 		} `json:"media,omitempty"`
+		// E2EE carries a wrapped voice sender key (Payload) or asks the
+		// target to send its key again (Request). The server never reads it.
+		E2EE *struct {
+			Payload string `json:"payload,omitempty"`
+			Request bool   `json:"request,omitempty"`
+		} `json:"e2ee,omitempty"`
 	}
 	if err := decode(r, &input); err != nil {
 		return nil, err
@@ -151,6 +172,12 @@ func (s *Service) callSignal(r *http.Request, uid int64) (any, error) {
 	}
 	if input.Media != nil {
 		count++
+	}
+	if input.E2EE != nil {
+		count++
+		if input.E2EE.Request == (input.E2EE.Payload != "") || len(input.E2EE.Payload) > 1024 || !base64Text(input.E2EE.Payload) {
+			return nil, ErrInvalid
+		}
 	}
 	if input.Media != nil && (input.Media.Revision < 0 || input.Media.Revision > 1000000000) {
 		return nil, ErrInvalid
@@ -172,6 +199,15 @@ func (s *Service) callSignal(r *http.Request, uid int64) (any, error) {
 	if err = canContact(r.Context(), s.db, uid, input.TargetID); err != nil {
 		return nil, err
 	}
-	s.emit(input.TargetID, "conversation.call-signal", map[string]any{"conversation_id": cid, "from_user_id": uid, "session_id": input.SessionID, "target_session_id": input.TargetSessionID, "description": input.Description, "candidate": input.Candidate, "media": input.Media})
+	s.emit(input.TargetID, "conversation.call-signal", map[string]any{"conversation_id": cid, "from_user_id": uid, "session_id": input.SessionID, "target_session_id": input.TargetSessionID, "description": input.Description, "candidate": input.Candidate, "media": input.Media, "e2ee": input.E2EE})
 	return map[string]bool{"ok": true}, nil
+}
+
+func base64Text(value string) bool {
+	for _, r := range value {
+		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '+' || r == '/' || r == '=') {
+			return false
+		}
+	}
+	return true
 }

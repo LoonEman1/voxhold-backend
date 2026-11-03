@@ -17,10 +17,30 @@ func (h *Hub) JoinVoice(
 	selfMute bool,
 	selfDeaf bool,
 ) (VoiceJoinedData, bool) {
+	return h.JoinVoiceWithDevice(client, serverID, channelID, selfMute, selfDeaf, "")
+}
+
+// JoinVoiceWithDevice joins like JoinVoice and records the E2EE device the
+// client encrypts with; the caller has checked the channel policy.
+func (h *Hub) JoinVoiceWithDevice(
+	client *Client,
+	serverID int64,
+	channelID int64,
+	selfMute bool,
+	selfDeaf bool,
+	e2eeDeviceID string,
+) (VoiceJoinedData, bool) {
 	if client == nil {
 		return VoiceJoinedData{}, false
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	// Recheck registration inside the same user transition lock used by live
+	// revocation. A join validated before a revoke must not appear afterwards.
+	if e2eeDeviceID != "" && h.voiceDeviceActive != nil {
+		if active, err := h.voiceDeviceActive(client.UserID(), e2eeDeviceID); err != nil || !active {
+			return VoiceJoinedData{}, false
+		}
+	}
 	if !client.canAccessChannel(channelID) {
 		return VoiceJoinedData{}, false
 	}
@@ -49,6 +69,7 @@ func (h *Hub) JoinVoice(
 		channelID,
 		selfMute,
 		selfDeaf,
+		e2eeDeviceID,
 	)
 
 	if result.previous != nil {
@@ -245,5 +266,65 @@ func newVoiceLeftData(
 		UserID:       participant.UserID,
 		ServerID:     participant.ServerID,
 		ChannelID:    participant.ChannelID,
+	}
+}
+
+// RelayVoiceE2EE forwards a wrapped sender key (or a request for one) from
+// sender to the recipient's connection when both are in the same encrypted
+// voice channel. The payload is opaque to the server.
+func (h *Hub) RelayVoiceE2EE(sender *Client, eventType EventType, data E2EERelayData) bool {
+	from, recipient, ok := h.voice.e2eeRecipient(sender, data.ChannelID, data.RecipientUserID, data.RecipientDeviceID)
+	if !ok {
+		return false
+	}
+	data.SenderUserID = from.UserID
+	data.SenderDeviceID = from.E2EEDeviceID
+	data.SenderConnectionID = from.ConnectionID
+	data.RecipientUserID = 0
+	data.RecipientDeviceID = ""
+	if recipient.enqueue(OutgoingEvent{Type: eventType, Data: data}) {
+		return true
+	}
+	h.Unregister(recipient)
+	return false
+}
+
+// ResetVoiceChannel disconnects everyone in a voice channel, e.g. after its
+// encryption policy changed, so clients rejoin in the new mode.
+func (h *Hub) ResetVoiceChannel(channelID int64, reason string) {
+	for _, client := range h.voice.channelClients(channelID) {
+		if _, left := h.leaveVoice(client); !left {
+			continue
+		}
+		h.SendToConnection(client.ConnectionID(), OutgoingEvent{
+			Type: EventVoiceWebRTCClosed,
+			Data: VoiceWebRTCClosedData{Reason: reason},
+		})
+	}
+}
+
+// SetVoiceDeviceValidator is configured before accepting connections.
+func (h *Hub) SetVoiceDeviceValidator(check func(int64, string) (bool, error)) {
+	h.voiceDeviceActive = check
+}
+
+// RevalidateVoiceE2EE applies explicit revocation and LRU device eviction to
+// the current call as well as future joins. Media packet forwarding stays free
+// of database lookups.
+func (h *Hub) RevalidateVoiceE2EE(userID int64) {
+	defer h.mediaTransitions.Lock(userID)()
+	client := h.voice.userClient(userID)
+	if client == nil || h.voiceDeviceActive == nil {
+		return
+	}
+	current, ok := h.voice.current(client)
+	if !ok || current.E2EEDeviceID == "" {
+		return
+	}
+	if active, err := h.voiceDeviceActive(userID, current.E2EEDeviceID); err == nil && active {
+		return
+	}
+	if _, left := h.leaveVoice(client); left {
+		h.SendToConnection(client.ConnectionID(), OutgoingEvent{Type: EventVoiceWebRTCClosed, Data: VoiceWebRTCClosedData{Reason: VoiceWebRTCClosedReasonE2EEDevice}})
 	}
 }

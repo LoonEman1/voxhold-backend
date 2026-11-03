@@ -22,6 +22,10 @@ const (
 	EventChannelUnsubscribe  EventType = "channel.unsubscribe"
 	EventChannelUnsubscribed EventType = "channel.unsubscribed"
 
+	// Ephemeral typing indicator: nothing is stored.
+	EventTypingStart EventType = "typing.start"
+	EventTyping      EventType = "typing"
+
 	EventServerMemberRemoved     EventType = "server.member_removed"
 	EventServerMemberJoined      EventType = "server.member_joined"
 	EventServerMemberRoleUpdated EventType = "server.member_role_updated"
@@ -66,6 +70,7 @@ type AuthenticateData struct {
 type ReadyData struct {
 	UserID          int64 `json:"user_id"`
 	ProtocolVersion int   `json:"protocol_version"`
+	E2EEBatch       bool  `json:"e2ee_batch,omitempty"`
 }
 
 type ChannelSubscriptionData struct {
@@ -190,3 +195,15 @@ func (e OutgoingEvent) QueueAge() time.Duration {
 	}
 	return time.Since(e.queuedAt)
 }
+
+// TypingData is both the typing.start payload (server_id, channel_id) and the
+// outgoing typing event (user_id, expires_at are set by the server).
+type TypingData struct {
+	ServerID  int64 `json:"server_id"`
+	ChannelID int64 `json:"channel_id"`
+	UserID    int64 `json:"user_id,omitempty"`
+	ExpiresAt int64 `json:"expires_at,omitempty"`
+}
+
+// EventChannelID lets the outgoing filter apply channel access to typing.
+func (d TypingData) EventChannelID() int64 { return d.ChannelID }

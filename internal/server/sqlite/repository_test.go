@@ -182,7 +182,8 @@ func openServerTestDB(t *testing.T) *sql.DB {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL DEFAULT 'hash',
-		deleted_at INTEGER
+		deleted_at INTEGER,
+		username_key TEXT UNIQUE
 	);
 	CREATE TABLE sessions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -245,7 +246,8 @@ func openServerTestDB(t *testing.T) *sql.DB {
 	CREATE TABLE user_bans (
 		user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 		banned_by_user_id INTEGER NOT NULL REFERENCES users(id),
-		created_at INTEGER NOT NULL DEFAULT (unixepoch())
+		created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+		reason TEXT NOT NULL DEFAULT ''
 	);
 	CREATE TABLE scheduled_messages (
 		id INTEGER PRIMARY KEY,

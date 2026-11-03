@@ -29,6 +29,7 @@ type listedChannelResponse struct {
 	CreatedAt        int64        `json:"created_at"`
 	LastMessageID    int64        `json:"last_message_id"`
 	AccessRestricted bool         `json:"access_restricted"`
+	E2EERequired     bool         `json:"e2ee_required"`
 }
 
 func newChannelResponse(value channel.Channel) channelResponse {
@@ -70,6 +71,7 @@ func newChannelsResponse(
 				LastMessageID:    value.LastMessageID,
 				AccessRestricted: value.AccessRestricted,
 				CommentsEnabled:  value.CommentsEnabled,
+				E2EERequired:     value.E2EERequired,
 			},
 		)
 	}

@@ -10,6 +10,7 @@ run:
 build:
 	go build -trimpath -ldflags="-s -w" -pgo="$(PGO)" -o bin/voxhold ./cmd/api
 	go build -trimpath -ldflags="-s -w" -o bin/voxhold-bootstrap ./cmd/bootstrap
+	go build -trimpath -ldflags="-s -w" -o bin/voxhold-admin ./cmd/admin
 
 build-linux:
 	PGO="$(PGO)" sh scripts/build-linux.sh

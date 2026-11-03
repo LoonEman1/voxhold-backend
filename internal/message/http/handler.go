@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/message"
@@ -215,6 +216,11 @@ func (h *Handler) create(
 		},
 	)
 	if err != nil {
+		if wait, slow := message.IsSlowmode(err); slow {
+			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(wait.Round(time.Second)/time.Second))))
+			httpapi.WriteError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		switch {
 		case errors.Is(err, message.ErrIdempotencyConflict):
 			httpapi.WriteError(w, http.StatusConflict, message.ErrIdempotencyConflict.Error())

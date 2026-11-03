@@ -168,6 +168,15 @@ func (s *Service) deliver(parent context.Context, value message.Message) error {
 	if kind != "text" {
 		return nil
 	}
+	// Role mentions (<@&member>) fan out to many people: only owners and admins may use them.
+	var authorRole string
+	err = tx.QueryRowContext(ctx, `SELECT role FROM server_members WHERE server_id=? AND user_id=?`, base.ServerID, value.Author.UserID).Scan(&authorRole)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("notification author role: %w", err)
+	}
+	if authorRole != "owner" && authorRole != "admin" {
+		targets.Roles = map[string]bool{}
+	}
 	users := make([]int64, 0, len(targets.Users)+1)
 	names := make([]string, 0, len(targets.Names))
 	roles := make([]string, 0, len(targets.Roles))

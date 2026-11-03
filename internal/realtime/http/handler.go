@@ -11,9 +11,11 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"golang.org/x/time/rate"
 
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/channel"
+	"voxhold-backend/internal/e2ee"
 	"voxhold-backend/internal/httpapi"
 	"voxhold-backend/internal/readstate"
 	"voxhold-backend/internal/realtime"
@@ -144,6 +146,20 @@ type Handler struct {
 	voiceJoins     userLockSet
 	protector      RealtimeProtector
 	originPatterns func() []string
+	typing         typingLimiter
+	encryption     VoiceEncryption
+}
+
+// VoiceEncryption reports the end-to-end encryption policy of voice channels
+// and which device keys are registered (FEAT-13).
+type VoiceEncryption interface {
+	ChannelRequired(ctx context.Context, channelID int64) (bool, error)
+	DeviceActive(ctx context.Context, userID int64, deviceID string) (bool, error)
+}
+
+// SetVoiceEncryption enables encrypted voice channels.
+func (h *Handler) SetVoiceEncryption(encryption VoiceEncryption) {
+	h.encryption = encryption
 }
 
 // SetOriginPatterns installs a runtime source for authorized cross-origin
@@ -452,6 +468,7 @@ func (h *Handler) connect(
 			Data: realtime.ReadyData{
 				UserID:          userID,
 				ProtocolVersion: realtime.ProtocolVersion,
+				E2EEBatch:       true,
 			},
 		},
 	); err != nil {
@@ -578,6 +595,9 @@ func (h *Handler) readLoop(
 	if h.protector != nil {
 		allowEvent = h.protector.NewWebSocketEventLimiter()
 	}
+	// A batch must not multiply the per-connection relay budget without bound.
+	// This allows full-room key/ACK bursts while counting every recipient.
+	relayBudget := rate.NewLimiter(120, 240)
 
 	for {
 		var event realtime.IncomingEvent
@@ -596,6 +616,19 @@ func (h *Handler) readLoop(
 				"event rate limit exceeded",
 			)
 			return errors.New("WebSocket event rate limit exceeded")
+		}
+		relayCount := 0
+		if event.Type == realtime.EventE2EEKey || event.Type == realtime.EventE2EEKeyRequest {
+			relayCount = 1
+		} else if event.Type == realtime.EventE2EEKeys {
+			var batch realtime.E2EEKeyBatchData
+			if json.Unmarshal(event.Data, &batch) == nil && len(batch.Keys) <= realtime.MaxE2EEBatchRecipients {
+				relayCount = len(batch.Keys)
+			}
+		}
+		if relayCount > 0 && !relayBudget.AllowN(time.Now(), relayCount) {
+			_ = connection.Close(websocket.StatusPolicyViolation, "e2ee relay rate limit exceeded")
+			return errors.New("E2EE recipient rate limit exceeded")
 		}
 
 		if err := h.handleIncomingEvent(
@@ -721,6 +754,14 @@ func (h *Handler) handleIncomingEvent(
 			event,
 		)
 
+	case realtime.EventTypingStart:
+		return h.typingStart(client, event)
+
+	case realtime.EventE2EEKey, realtime.EventE2EEKeyRequest:
+		return h.relayE2EE(client, event)
+	case realtime.EventE2EEKeys:
+		return h.relayE2EEBatch(client, event)
+
 	case realtime.EventVoiceJoin:
 		return h.joinVoice(
 			ctx,
@@ -827,6 +868,11 @@ func (h *Handler) joinVoice(
 		return err
 	}
 
+	required, ok, err := h.checkVoiceEncryption(ctx, client, event.RequestID, data)
+	if err != nil || !ok {
+		return err
+	}
+
 	unlockVoiceJoin := h.voiceJoins.lock(client.UserID())
 	defer unlockVoiceJoin()
 
@@ -841,13 +887,15 @@ func (h *Handler) joinVoice(
 		return err
 	}
 
-	joined, ok := h.hub.JoinVoice(
+	joined, ok := h.hub.JoinVoiceWithDevice(
 		client,
 		data.ServerID,
 		data.ChannelID,
 		data.SelfMute,
 		data.SelfDeaf,
+		data.E2EEDeviceID,
 	)
+	joined.E2EERequired = required
 	if !ok {
 		return queueError(
 			client,
@@ -1433,4 +1481,65 @@ func writeEvent(
 		connection,
 		event,
 	)
+}
+
+// checkVoiceEncryption makes the whole channel use one mode: an encrypted
+// channel admits only clients with a registered device key, and a plain one
+// rejects encrypting clients, whose audio nobody else could decode.
+func (h *Handler) checkVoiceEncryption(ctx context.Context, client *realtime.Client, requestID string, data realtime.VoiceJoinData) (required bool, ok bool, err error) {
+	if h.encryption == nil {
+		if data.E2EEDeviceID != "" {
+			return false, false, queueError(client, requestID, realtime.ErrorInvalidState, "voice channel does not use end-to-end encryption")
+		}
+		return false, true, nil
+	}
+	required, err = h.encryption.ChannelRequired(ctx, data.ChannelID)
+	if err != nil {
+		log.Printf("check voice channel encryption: %v", err)
+		return false, false, queueError(client, requestID, realtime.ErrorInternal, "internal server error")
+	}
+	switch {
+	case required && data.E2EEDeviceID == "":
+		return true, false, queueError(client, requestID, realtime.ErrorInvalidState, "voice channel requires end-to-end encryption")
+	case !required && data.E2EEDeviceID != "":
+		return false, false, queueError(client, requestID, realtime.ErrorInvalidState, "voice channel does not use end-to-end encryption")
+	case !required:
+		return false, true, nil
+	}
+	active, err := h.encryption.DeviceActive(ctx, client.UserID(), data.E2EEDeviceID)
+	if err != nil {
+		log.Printf("check e2ee device: %v", err)
+		return true, false, queueError(client, requestID, realtime.ErrorInternal, "internal server error")
+	}
+	if !active {
+		return true, false, queueError(client, requestID, realtime.ErrorInvalidState, "e2ee device is not registered")
+	}
+	return true, true, nil
+}
+
+// relayE2EE forwards a wrapped sender key or a key request to one device in
+// the sender's encrypted voice channel. Unroutable messages (the recipient
+// left meanwhile) are dropped silently; the payload is never parsed or logged.
+func (h *Handler) relayE2EE(client *realtime.Client, event realtime.IncomingEvent) error {
+	var data realtime.E2EERelayData
+	if err := json.Unmarshal(event.Data, &data); err != nil || data.ChannelID <= 0 || data.RecipientUserID <= 0 || !e2ee.ValidDeviceID(data.RecipientDeviceID) {
+		return queueError(client, event.RequestID, realtime.ErrorInvalidPayload, "invalid e2ee relay payload")
+	}
+	if event.Type == realtime.EventE2EEKeyRequest {
+		data.Payload = ""
+	} else if data.Payload == "" || len(data.Payload) > e2ee.MaxRelayPayload || !base64Text(data.Payload) {
+		return queueError(client, event.RequestID, realtime.ErrorInvalidPayload, "e2ee payload must be base64 up to 1 KiB")
+	}
+	data.SenderUserID, data.SenderDeviceID, data.SenderConnectionID = 0, "", ""
+	h.hub.RelayVoiceE2EE(client, event.Type, data)
+	return nil
+}
+
+func base64Text(value string) bool {
+	for _, r := range value {
+		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '+' || r == '/' || r == '=') {
+			return false
+		}
+	}
+	return true
 }

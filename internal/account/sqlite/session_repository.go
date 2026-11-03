@@ -3,7 +3,10 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+
+	"voxhold-backend/internal/account"
 )
 
 type SessionRepository struct {
@@ -39,17 +42,22 @@ func (r *SessionRepository) Create(
 	INSERT INTO SESSIONS (
 		user_id,
 		token_hash,
-		expires_at
+		expires_at,
+		user_agent,
+		client_ip
 	)
-	VALUES(?, ?, ?)
+	VALUES(?, ?, ?, ?, ?)
 	`
 
+	meta := account.ClientMetaFromContext(ctx)
 	_, err := r.db.ExecContext(
 		ctx,
 		query,
 		userID,
 		tokenHash,
 		expiresAt,
+		meta.UserAgent,
+		meta.IP,
 	)
 
 	if err != nil {
@@ -152,4 +160,124 @@ func (r *SessionRepository) Rotate(
 	}
 
 	return nil
+}
+
+// Touch records activity at most every five minutes. The read comes first:
+// even an UPDATE that matches no row takes SQLite's single write lock, which
+// would serialize every authenticated request behind the writer.
+func (r *SessionRepository) Touch(ctx context.Context, tokenHash []byte, now int64) error {
+	var last sql.NullInt64
+	err := r.db.QueryRowContext(ctx, `SELECT last_used_at FROM sessions WHERE token_hash=?`, tokenHash).Scan(&last)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && last.Valid && last.Int64 >= now-300 {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read session activity: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE sessions SET last_used_at=? WHERE token_hash=? AND (last_used_at IS NULL OR last_used_at < ?)`,
+		now, tokenHash, now-300)
+	if err != nil {
+		return fmt.Errorf("touch session: %w", err)
+	}
+	return nil
+}
+
+func (r *SessionRepository) ListByUser(ctx context.Context, userID int64) ([]account.SessionRecord, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, token_hash, created_at, last_used_at, expires_at,
+		COALESCE(user_agent,''), COALESCE(client_ip,'')
+		FROM sessions WHERE user_id=? AND expires_at > unixepoch() ORDER BY id DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []account.SessionRecord
+	for rows.Next() {
+		var s account.SessionRecord
+		var used sql.NullInt64
+		if err = rows.Scan(&s.ID, &s.TokenHash, &s.CreatedAt, &used, &s.ExpiresAt, &s.UserAgent, &s.ClientIP); err != nil {
+			return nil, err
+		}
+		if used.Valid {
+			s.LastUsedAt = &used.Int64
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DeleteByID removes one session owned by userID and returns its token hash.
+func (r *SessionRepository) DeleteByID(ctx context.Context, userID, sessionID int64) ([]byte, error) {
+	var hash []byte
+	err := r.db.QueryRowContext(ctx, `DELETE FROM sessions WHERE id=? AND user_id=? RETURNING token_hash`, sessionID, userID).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, account.ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("delete session: %w", err)
+	}
+	return hash, nil
+}
+
+// DeleteOthers removes every session of userID except keepHash.
+func (r *SessionRepository) DeleteOthers(ctx context.Context, userID int64, keepHash []byte) ([][]byte, error) {
+	rows, err := r.db.QueryContext(ctx, `DELETE FROM sessions WHERE user_id=? AND token_hash<>? RETURNING token_hash`, userID, keepHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hashes [][]byte
+	for rows.Next() {
+		var h []byte
+		if err = rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, h)
+	}
+	return hashes, rows.Err()
+}
+
+// ReplacePasswordAndRevokeOthers prevents a failed session deletion from leaving
+// the new password committed while other devices remain signed in.
+func (r *SessionRepository) ReplacePasswordAndRevokeOthers(ctx context.Context, userID int64, expectedHash, passwordHash string, keepHash []byte) ([][]byte, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin password change: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND deleted_at IS NULL`, passwordHash, userID, expectedHash)
+	if err != nil {
+		return nil, fmt.Errorf("replace password: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("count changed passwords: %w", err)
+	}
+	if changed != 1 {
+		return nil, account.ErrWrongCurrentPassword
+	}
+	rows, err := tx.QueryContext(ctx, `DELETE FROM sessions WHERE user_id=? AND token_hash<>? RETURNING token_hash`, userID, keepHash)
+	if err != nil {
+		return nil, fmt.Errorf("revoke sessions during password change: %w", err)
+	}
+	var hashes [][]byte
+	for rows.Next() {
+		var hash []byte
+		if err := rows.Scan(&hash); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("read revoked session: %w", err)
+		}
+		hashes = append(hashes, hash)
+	}
+	readErr, closeErr := rows.Err(), rows.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read revoked sessions: %w", readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close revoked sessions: %w", closeErr)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit password change: %w", err)
+	}
+	return hashes, nil
 }
