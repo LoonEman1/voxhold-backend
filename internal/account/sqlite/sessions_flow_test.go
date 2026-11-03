@@ -65,6 +65,28 @@ func TestPasswordChangeAndSessionManagement(t *testing.T) {
 		t.Fatalf("wrong password err=%v", err)
 	}
 	good := account.ChangePasswordInput{CurrentPassword: "old-password", NewPassword: "new-password", NewConfirm: "new-password"}
+	// A database failure while revoking devices must roll back the password too.
+	if _, err = db.ExecContext(ctx, `CREATE TRIGGER fail_session_revoke BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT, 'test revoke failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.ChangePassword(ctx, user.ID, current, good); err == nil {
+		t.Fatal("password change must fail when session deletion fails")
+	}
+	stored, err := users.FindByID(ctx, user.ID)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(stored.PasswordHash), []byte("old-password")) != nil {
+		t.Fatalf("failed revocation changed the password: %v", err)
+	}
+	for _, token := range []string{current, second} {
+		if _, err = service.Authenticate(ctx, token); err != nil {
+			t.Fatalf("rolled-back change revoked a session: %v", err)
+		}
+	}
+	if len(revoker.hashes) != 0 {
+		t.Fatalf("failed transaction revoked %d websocket sessions", len(revoker.hashes))
+	}
+	if _, err = db.ExecContext(ctx, `DROP TRIGGER fail_session_revoke`); err != nil {
+		t.Fatal(err)
+	}
 	if err = service.ChangePassword(ctx, user.ID, current, good); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +98,15 @@ func TestPasswordChangeAndSessionManagement(t *testing.T) {
 	}
 	if len(revoker.hashes) != 1 {
 		t.Fatalf("websocket revocations = %d", len(revoker.hashes))
+	}
+	if _, err = NewSessionRepository(db).ReplacePasswordAndRevokeOthers(ctx, user.ID, string(hash), "stale-change", nil); !errors.Is(err, account.ErrWrongCurrentPassword) {
+		t.Fatalf("stale credentials overwrote the changed password: %v", err)
+	}
+	if _, err = service.Authenticate(ctx, current); err != nil {
+		t.Fatalf("stale change affected the current session: %v", err)
+	}
+	if err = service.VerifyPassword(ctx, user.ID, "new-password"); err != nil {
+		t.Fatalf("new password was lost after rejecting stale credentials: %v", err)
 	}
 
 	// Another user's session cannot be deleted through someone else's id.

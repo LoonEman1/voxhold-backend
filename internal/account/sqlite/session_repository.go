@@ -236,3 +236,48 @@ func (r *SessionRepository) DeleteOthers(ctx context.Context, userID int64, keep
 	}
 	return hashes, rows.Err()
 }
+
+// ReplacePasswordAndRevokeOthers prevents a failed session deletion from leaving
+// the new password committed while other devices remain signed in.
+func (r *SessionRepository) ReplacePasswordAndRevokeOthers(ctx context.Context, userID int64, expectedHash, passwordHash string, keepHash []byte) ([][]byte, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin password change: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND deleted_at IS NULL`, passwordHash, userID, expectedHash)
+	if err != nil {
+		return nil, fmt.Errorf("replace password: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("count changed passwords: %w", err)
+	}
+	if changed != 1 {
+		return nil, account.ErrWrongCurrentPassword
+	}
+	rows, err := tx.QueryContext(ctx, `DELETE FROM sessions WHERE user_id=? AND token_hash<>? RETURNING token_hash`, userID, keepHash)
+	if err != nil {
+		return nil, fmt.Errorf("revoke sessions during password change: %w", err)
+	}
+	var hashes [][]byte
+	for rows.Next() {
+		var hash []byte
+		if err := rows.Scan(&hash); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("read revoked session: %w", err)
+		}
+		hashes = append(hashes, hash)
+	}
+	readErr, closeErr := rows.Err(), rows.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read revoked sessions: %w", readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close revoked sessions: %w", closeErr)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit password change: %w", err)
+	}
+	return hashes, nil
+}
