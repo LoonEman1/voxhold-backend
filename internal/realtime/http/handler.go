@@ -426,6 +426,9 @@ func (h *Handler) connect(
 	if authentication.MessageSync {
 		client.EnableMessageSync()
 	}
+	if authentication.MultipleStreams {
+		client.EnableMultipleStreams()
+	}
 	if !h.hub.Register(client) {
 		_ = connection.Close(
 			websocket.StatusInternalError,
@@ -469,6 +472,7 @@ func (h *Handler) connect(
 				UserID:          userID,
 				ProtocolVersion: realtime.ProtocolVersion,
 				E2EEBatch:       true,
+				MultipleStreams: true,
 			},
 		},
 	); err != nil {
