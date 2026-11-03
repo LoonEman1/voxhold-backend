@@ -576,7 +576,7 @@ func codecParametersForRendition(
 	return result
 }
 
-// viewerCodecPreferences selects the exact registered payload types that match
+// viewerCodecPreferences selects registered payload types compatible with
 // the capability the publisher actually negotiated, plus its paired RTX
 // entry. It never substitutes one H.264 profile for another after ingest.
 func (m *Manager) viewerCodecPreferences(
@@ -584,13 +584,12 @@ func (m *Manager) viewerCodecPreferences(
 ) []webrtc.RTPCodecParameters {
 	for _, descriptor := range m.videoCodecDescriptors {
 		primary := descriptor.primary.RTPCodecCapability
-		if !strings.EqualFold(primary.MimeType, capability.MimeType) ||
-			primary.ClockRate != capability.ClockRate ||
-			!strings.EqualFold(primary.SDPFmtpLine, capability.SDPFmtpLine) {
-
+		if !relayCodecCompatible(primary, capability) {
 			continue
 		}
-		result := []webrtc.RTPCodecParameters{descriptor.primary}
+		selected := descriptor.primary
+		selected.RTPCodecCapability = capability
+		result := []webrtc.RTPCodecParameters{selected}
 		if rtx, ok := rtxForDescriptor(descriptor); ok {
 			result = append(result, rtx)
 		}

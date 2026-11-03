@@ -13,11 +13,19 @@ type Handler struct {
 	repository *Repository
 	// onPolicyChanged lets the realtime layer apply a new policy to live voice
 	// sessions: everyone in the channel reconnects in the new mode.
-	onPolicyChanged func(serverID, channelID int64, required bool)
+	onPolicyChanged  func(serverID, channelID int64, required bool)
+	onDevicesChanged func(userID int64)
 }
 
 func NewHandler(repository *Repository, onPolicyChanged func(serverID, channelID int64, required bool)) *Handler {
 	return &Handler{repository: repository, onPolicyChanged: onPolicyChanged}
+}
+
+// WithDeviceChanges applies both explicit revocation and registration's LRU
+// eviction to active calls after the device transaction commits.
+func (h *Handler) WithDeviceChanges(changed func(userID int64)) *Handler {
+	h.onDevicesChanged = changed
+	return h
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, requireAuth func(http.Handler) http.Handler) {
@@ -43,6 +51,9 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	err := h.repository.Register(r.Context(), userID, r.PathValue("deviceID"), input.PublicKey)
 	switch {
 	case err == nil:
+		if h.onDevicesChanged != nil {
+			h.onDevicesChanged(userID)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrInvalidDevice), errors.Is(err, ErrInvalidPublicKey):
 		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
@@ -62,6 +73,9 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 	err := h.repository.Revoke(r.Context(), userID, r.PathValue("deviceID"))
 	switch {
 	case err == nil:
+		if h.onDevicesChanged != nil {
+			h.onDevicesChanged(userID)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrInvalidDevice):
 		httpapi.WriteError(w, http.StatusBadRequest, err.Error())
