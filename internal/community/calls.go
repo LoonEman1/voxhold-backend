@@ -150,8 +150,10 @@ func (s *Service) callSignal(r *http.Request, uid int64) (any, error) {
 		Description     json.RawMessage `json:"description,omitempty"`
 		Candidate       json.RawMessage `json:"candidate,omitempty"`
 		Media           *struct {
-			Screen   bool  `json:"screen"`
-			Revision int64 `json:"revision"`
+			Screen         bool   `json:"screen"`
+			Revision       int64  `json:"revision"`
+			Camera         bool   `json:"camera,omitempty"`
+			CameraStreamID string `json:"camera_stream_id,omitempty"`
 		} `json:"media,omitempty"`
 		// E2EE carries a wrapped voice sender key (Payload) or asks the
 		// target to send its key again (Request). The server never reads it.
@@ -179,7 +181,7 @@ func (s *Service) callSignal(r *http.Request, uid int64) (any, error) {
 			return nil, ErrInvalid
 		}
 	}
-	if input.Media != nil && (input.Media.Revision < 0 || input.Media.Revision > 1000000000) {
+	if input.Media != nil && (input.Media.Revision < 0 || input.Media.Revision > 1000000000 || len(input.Media.CameraStreamID) > 128 || (input.Media.Camera && input.Media.CameraStreamID == "")) {
 		return nil, ErrInvalid
 	}
 	if input.TargetID == uid || input.TargetID <= 0 || len(input.Description) > 64*1024 || len(input.Candidate) > 4096 || count != 1 {

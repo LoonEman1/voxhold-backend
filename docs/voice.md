@@ -2,8 +2,9 @@
 
 Voxhold uses the authenticated `/api/v1/ws` connection for voice state
 and WebRTC signaling. Audio packets never travel through the WebSocket.
-They use an audio-only WebRTC connection to the server and are relayed to
-the other participants as Opus RTP.
+They use a WebRTC connection to the server and are relayed to the other
+participants as Opus RTP. The same connection supports an optional VP8 webcam
+track; see [webcams](webcam.md). Screen sharing keeps its separate connection.
 
 ## Join flow
 

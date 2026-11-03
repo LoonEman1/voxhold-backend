@@ -121,6 +121,15 @@ func NewManager(
 	}
 
 	mediaEngine := &webrtc.MediaEngine{}
+	for _, codec := range []webrtc.RTPCodecParameters{
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "ccm", Parameter: "fir"}}}, PayloadType: 96},
+		{RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/rtx", ClockRate: 90000, SDPFmtpLine: "apt=96"}, PayloadType: 97},
+	} {
+		if err := mediaEngine.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
+			_ = udpMux.Close()
+			return nil, fmt.Errorf("register webcam codec: %w", err)
+		}
+	}
 	if err := mediaEngine.RegisterCodec(
 		webrtc.RTPCodecParameters{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -255,6 +264,11 @@ func (m *Manager) Join(
 		)
 	}
 
+	if _, err := peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo,
+		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		_ = peerConnection.Close()
+		return fmt.Errorf("add incoming webcam transceiver: %w", err)
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()

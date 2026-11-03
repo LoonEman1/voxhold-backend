@@ -9,6 +9,7 @@ import (
 type roomTrack struct {
 	ownerConnectionID string
 	track             *webrtc.TrackLocalStaticRTP
+	requestKeyframe   func()
 }
 
 type room struct {
@@ -89,7 +90,7 @@ func (r *room) addTrack(value roomTrack) bool {
 	}
 
 	for _, track := range r.tracks {
-		if track.ownerConnectionID == value.ownerConnectionID {
+		if track.ownerConnectionID == value.ownerConnectionID && track.track.Kind() == value.track.Kind() {
 			return false
 		}
 	}

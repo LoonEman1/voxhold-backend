@@ -220,6 +220,7 @@ PR CI выполняет тесты, vet, race и проверку утечек 
 - [Эксплуатационная безопасность](docs/security.md)
 - [Security policy и сообщение об уязвимостях](SECURITY.md)
 - [Голосовой протокол](docs/voice.md)
+- [Вебкамеры в каналах и звонках](docs/webcam.md)
 - [Демонстрация экрана](docs/streaming.md)
 - [Production-развёртывание](https://github.com/LoonEman1/voxhold-deploy)
 

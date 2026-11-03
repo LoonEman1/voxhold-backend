@@ -991,10 +991,15 @@ func (h *Handler) updateVoiceState(
 		)
 	}
 
+	var selfVideo []bool
+	if data.SelfVideo != nil {
+		selfVideo = append(selfVideo, *data.SelfVideo)
+	}
 	participant, ok := h.hub.UpdateVoiceState(
 		client,
 		data.SelfMute,
 		data.SelfDeaf,
+		selfVideo...,
 	)
 	if !ok {
 		return queueError(

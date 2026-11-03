@@ -287,9 +287,7 @@ func (s *testSignalSink) SendOffer(
 	s.offers[connectionID] = sdp
 	s.mu.Unlock()
 
-	if peer == nil ||
-		!strings.Contains(sdp, "m=audio") ||
-		strings.Contains(sdp, "m=video") {
+	if peer == nil || !strings.Contains(sdp, "m=audio") {
 
 		return false
 	}

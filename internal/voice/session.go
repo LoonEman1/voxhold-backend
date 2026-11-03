@@ -14,6 +14,7 @@ import (
 	"voxhold-backend/internal/telemetry"
 	"voxhold-backend/internal/webrtcrecovery"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -33,6 +34,8 @@ type session struct {
 	selfDeaf     atomic.Bool
 	closed       atomic.Bool
 	audioBitrate *audioBitrateLimiter
+	videoBitrate *audioBitrateLimiter
+	lastKeyframe atomic.Int64
 
 	negotiationMu      sync.Mutex
 	offerStarted       time.Time
@@ -66,6 +69,7 @@ func newSession(
 		audioBitrate: newAudioBitrateLimiter(
 			manager.maxAudioBitrateKbps,
 		),
+		videoBitrate: newAudioBitrateLimiter(4000),
 		recovery: webrtcrecovery.New(
 			webrtcrecovery.Policy{
 				InitialDelay: 2 * time.Second,
@@ -129,6 +133,10 @@ func (s *session) installCallbacks() {
 			_ *webrtc.RTPReceiver,
 		) {
 			safego.GuardedRun("voice/onTrack", func() {
+				if remote.Kind() == webrtc.RTPCodecTypeVideo {
+					s.forwardVideo(remote)
+					return
+				}
 				if remote.Kind() != webrtc.RTPCodecTypeAudio {
 					return
 				}
@@ -244,11 +252,9 @@ func (s *session) synchronizeTracks(forceOffer bool) error {
 	tracks := s.room.trackSnapshot()
 
 	desired := make(map[string]roomTrack, len(tracks))
-	if !s.selfDeaf.Load() {
-		for trackID, track := range tracks {
-			if track.ownerConnectionID != s.connectionID {
-				desired[trackID] = track
-			}
+	for trackID, track := range tracks {
+		if track.ownerConnectionID != s.connectionID && (!s.selfDeaf.Load() || track.track.Kind() == webrtc.RTPCodecTypeVideo) {
+			desired[trackID] = track
 		}
 	}
 
@@ -293,7 +299,7 @@ func (s *session) synchronizeTracks(forceOffer bool) error {
 
 		changed = true
 		safego.Go("voice/drainRTCP", func() {
-			drainRTCP(sender)
+			drainMediaRTCP(sender, track.requestKeyframe)
 		})
 	}
 
@@ -391,6 +397,11 @@ func (s *session) acceptAnswer(sdp string) error {
 
 	if pending || restartPending {
 		return s.synchronizeTracks(false)
+	}
+	for _, track := range s.room.trackSnapshot() {
+		if track.ownerConnectionID != s.connectionID && track.requestKeyframe != nil {
+			track.requestKeyframe()
+		}
 	}
 
 	return nil
@@ -546,5 +557,73 @@ func drainRTCP(sender *webrtc.RTPSender) {
 		if _, _, err := sender.Read(buffer); err != nil {
 			return
 		}
+	}
+}
+
+func drainMediaRTCP(sender *webrtc.RTPSender, requestKeyframe func()) {
+	for {
+		packets, _, err := sender.ReadRTCP()
+		if err != nil {
+			return
+		}
+		if requestKeyframe == nil {
+			continue
+		}
+		for _, packet := range packets {
+			switch packet.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				requestKeyframe()
+			}
+		}
+	}
+}
+
+// One bounded VP8 camera track accompanies each microphone. Screen media
+// retains its independent stream session and publisher/viewer limits.
+func (s *session) forwardVideo(remote *webrtc.TrackRemote) {
+	if s.closed.Load() || remote.Codec().MimeType != webrtc.MimeTypeVP8 {
+		return
+	}
+	trackID := "camera-" + s.connectionID
+	local, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, trackID, "camera-"+strconv.FormatInt(s.channelID, 10))
+	if err != nil {
+		s.scheduleFail("failed to create webcam track")
+		return
+	}
+	request := func() {
+		now := time.Now().UnixMilli()
+		previous := s.lastKeyframe.Load()
+		if s.closed.Load() || now-previous < 500 || !s.lastKeyframe.CompareAndSwap(previous, now) {
+			return
+		}
+		_ = s.peer.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(remote.SSRC())}})
+	}
+	if !s.room.addTrack(roomTrack{ownerConnectionID: s.connectionID, track: local, requestKeyframe: request}) {
+		return
+	}
+	s.room.synchronizeSessions()
+	defer func() {
+		if s.room.removeTrack(trackID, s.connectionID) {
+			s.room.synchronizeSessions()
+		}
+	}()
+	buffer := make([]byte, 1500)
+	var packet rtp.Packet
+	for {
+		n, _, err := remote.Read(buffer)
+		if err != nil {
+			return
+		}
+		packet = rtp.Packet{}
+		if packet.Unmarshal(buffer[:n]) != nil {
+			continue
+		}
+		if !s.videoBitrate.allow(len(packet.Payload)) {
+			s.scheduleFail("webcam bitrate limit exceeded")
+			return
+		}
+		packet.Extension = false
+		packet.Extensions = nil
+		_ = local.WriteRTP(&packet)
 	}
 }
