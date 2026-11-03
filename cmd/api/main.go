@@ -437,7 +437,6 @@ func main() {
 		defer maintenanceWorker.Done()
 		timer := time.NewTicker(time.Minute)
 		defer timer.Stop()
-		var lastOptimize time.Time
 		for {
 			runStorageMaintenance(maintenanceContext,
 				maintenanceTask{"diagnostic", 2 * time.Second, diagnosticsRepository.Cleanup},
@@ -449,14 +448,6 @@ func main() {
 				log.Printf("expired session cleanup: %v", err)
 			}
 			cancelSessions()
-			if time.Since(lastOptimize) >= time.Hour {
-				lastOptimize = time.Now()
-				optimizeCtx, cancelOptimize := context.WithTimeout(maintenanceContext, 2*time.Second)
-				if _, err := db.ExecContext(optimizeCtx, "PRAGMA optimize"); err != nil && maintenanceContext.Err() == nil {
-					log.Printf("sqlite optimize: %v", err)
-				}
-				cancelOptimize()
-			}
 			select {
 			case <-maintenanceContext.Done():
 				return
