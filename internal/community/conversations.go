@@ -449,6 +449,25 @@ func (s *Service) readConversation(r *http.Request, userID int64) (any, error) {
 	return input, nil
 }
 func (s *Service) leaveConversation(r *http.Request, userID int64) (any, error) {
-	_, err := s.db.ExecContext(r.Context(), `DELETE FROM conversation_members WHERE conversation_id=? AND user_id=?`, path(r, "conversationID"), userID)
-	return map[string]bool{"ok": true}, err
+	cid := path(r, "conversationID")
+	result, err := s.db.ExecContext(r.Context(), `DELETE FROM conversation_members WHERE conversation_id=? AND user_id=?`, cid, userID)
+	if err != nil {
+		return nil, err
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if removed > 0 {
+		// The membership foreign key atomically removes the call lease too.
+		// Publish immediately so peers stop forwarding media without waiting
+		// for their next heartbeat; notify the leaving user's other tabs as well.
+		state, err := s.readCall(r.Context(), cid)
+		if err != nil {
+			return nil, err
+		}
+		s.emitConversation(r.Context(), cid, "conversation.call", state)
+		s.emit(userID, "conversation.call", state)
+	}
+	return map[string]bool{"ok": true}, nil
 }
