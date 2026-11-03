@@ -63,14 +63,16 @@ type OutgoingEvent struct {
 }
 
 type AuthenticateData struct {
-	Token       string `json:"token"`
-	MessageSync bool   `json:"message_sync,omitempty"`
+	Token           string `json:"token"`
+	MessageSync     bool   `json:"message_sync,omitempty"`
+	MultipleStreams bool   `json:"multi_streams,omitempty"`
 }
 
 type ReadyData struct {
 	UserID          int64 `json:"user_id"`
 	ProtocolVersion int   `json:"protocol_version"`
 	E2EEBatch       bool  `json:"e2ee_batch,omitempty"`
+	MultipleStreams bool  `json:"multi_streams,omitempty"`
 }
 
 type ChannelSubscriptionData struct {

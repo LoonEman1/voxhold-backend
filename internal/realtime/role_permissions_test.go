@@ -37,7 +37,7 @@ func TestRoleChangesPreserveAllowedMediaAndRevokeOnlyLostPermission(t *testing.T
 		t.Fatal(err)
 	}
 	hub.RefreshRolePermissions(1)
-	if _, ok := hub.voice.current(client); !ok || hub.streams.publisherForChannel(1) != client {
+	if _, ok := hub.voice.current(client); !ok || !hub.streams.isPublisher(client) {
 		t.Fatal("unchanged rights interrupted media")
 	}
 	bits = 7
@@ -45,7 +45,7 @@ func TestRoleChangesPreserveAllowedMediaAndRevokeOnlyLostPermission(t *testing.T
 	if _, ok := hub.voice.current(client); !ok {
 		t.Fatal("stream revocation removed voice")
 	}
-	if hub.streams.publisherForChannel(1) != nil {
+	if hub.streams.isPublisher(client) {
 		t.Fatal("revoked stream still running")
 	}
 	bits = 3

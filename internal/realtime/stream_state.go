@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sync"
 	"time"
+	"voxhold-backend/internal/streamcontract"
 )
 
 type activeStream struct {
@@ -29,13 +30,13 @@ type streamClientState struct {
 type streamState struct {
 	nextGeneration uint64
 	mu             sync.RWMutex
-	byChannel      map[int64]*activeStream
+	byChannel      map[int64]map[*Client]*activeStream
 	byClient       map[*Client]streamClientState
 }
 
 func newStreamState() *streamState {
 	return &streamState{
-		byChannel: make(map[int64]*activeStream),
+		byChannel: make(map[int64]map[*Client]*activeStream),
 		byClient:  make(map[*Client]streamClientState),
 	}
 }
@@ -47,14 +48,18 @@ func (s *streamState) start(
 	codec StreamCodec,
 	hasAudio bool,
 	renditions []StreamRenditionData,
-) (StreamData, bool) {
+) (StreamData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.byChannel[participant.ChannelID] != nil ||
-		s.byClient[client].stream != nil {
-
-		return StreamData{}, false
+	if s.byClient[client].stream != nil {
+		return StreamData{}, ErrStreamAlreadyActive
+	}
+	if !client.SupportsMultipleStreams() && len(s.byChannel[participant.ChannelID]) > 0 {
+		return StreamData{}, ErrStreamAlreadyActive
+	}
+	if len(s.byChannel[participant.ChannelID]) >= streamcontract.MaxChannelPublishers {
+		return StreamData{}, ErrStreamPublisherLimit
 	}
 	value := &activeStream{
 		serverID:   participant.ServerID,
@@ -67,14 +72,17 @@ func (s *streamState) start(
 		viewers:    make(map[*Client]struct{}),
 		startedAt:  time.Now(),
 	}
-	s.byChannel[value.channelID] = value
+	if s.byChannel[value.channelID] == nil {
+		s.byChannel[value.channelID] = make(map[*Client]*activeStream)
+	}
+	s.byChannel[value.channelID][client] = value
 	s.nextGeneration++
 	s.byClient[client] = streamClientState{
 		generation: s.nextGeneration,
 		stream:     value,
 		publisher:  true,
 	}
-	return streamData(value), true
+	return streamData(value), nil
 }
 
 func (s *streamState) watch(
@@ -84,11 +92,20 @@ func (s *streamState) watch(
 	maxP2PViewers int,
 	supportedDynamicRanges []StreamDynamicRange,
 	codecProfiles []StreamCodecProfileData,
+	publisherConnectionID string,
 ) (StreamData, *Client, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	value := s.byChannel[participant.ChannelID]
+	var value *activeStream
+	for _, candidate := range s.byChannel[participant.ChannelID] {
+		if publisherConnectionID != "" && candidate.publisher.ConnectionID() != publisherConnectionID {
+			continue
+		}
+		if value == nil || candidate.startedAt.UnixMilli() < value.startedAt.UnixMilli() || (candidate.startedAt.UnixMilli() == value.startedAt.UnixMilli() && candidate.publisher.ConnectionID() < value.publisher.ConnectionID()) {
+			value = candidate
+		}
+	}
 	if value == nil || value.publisher == client ||
 		value.serverID != participant.ServerID ||
 		s.byClient[client].stream != nil {
@@ -132,7 +149,10 @@ func (s *streamState) leave(
 	}
 	value := state.stream
 	if state.publisher {
-		delete(s.byChannel, value.channelID)
+		delete(s.byChannel[value.channelID], value.publisher)
+		if len(s.byChannel[value.channelID]) == 0 {
+			delete(s.byChannel, value.channelID)
+		}
 		delete(s.byClient, value.publisher)
 		for viewer := range value.viewers {
 			delete(s.byClient, viewer)
@@ -180,9 +200,11 @@ func (s *streamState) snapshotForServers(
 
 	s.mu.RLock()
 	result := make([]StreamData, 0, len(s.byChannel))
-	for _, value := range s.byChannel {
-		if _, exists := allowed[value.serverID]; exists {
-			result = append(result, streamData(value))
+	for _, streams := range s.byChannel {
+		for _, value := range streams {
+			if _, exists := allowed[value.serverID]; exists {
+				result = append(result, streamData(value))
+			}
 		}
 	}
 	s.mu.RUnlock()
@@ -190,7 +212,13 @@ func (s *streamState) snapshotForServers(
 		if order := cmp.Compare(a.ServerID, b.ServerID); order != 0 {
 			return order
 		}
-		return cmp.Compare(a.ChannelID, b.ChannelID)
+		if order := cmp.Compare(a.ChannelID, b.ChannelID); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(a.StartedAtMS, b.StartedAtMS); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.PublisherConnectionID, b.PublisherConnectionID)
 	})
 	return result
 }
@@ -226,16 +254,22 @@ func (s *streamState) recoveryViewer(
 	return value, true
 }
 
-func (s *streamState) publisherForChannel(
-	channelID int64,
-) *Client {
+func (s *streamState) isPublisher(client *Client) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	value := s.byChannel[channelID]
-	if value == nil {
-		return nil
+	return s.byClient[client].publisher
+}
+
+func (s *streamState) publishersForChannel(
+	channelID int64,
+) []*Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*Client, 0, len(s.byChannel[channelID]))
+	for publisher := range s.byChannel[channelID] {
+		result = append(result, publisher)
 	}
-	return value.publisher
+	return result
 }
 
 func streamData(value *activeStream) StreamData {

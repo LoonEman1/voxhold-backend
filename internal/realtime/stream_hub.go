@@ -18,7 +18,8 @@ var (
 	ErrStreamViewerLimit = errors.New(
 		"stream viewer limit reached",
 	)
-	ErrStreamP2PRelation = errors.New(
+	ErrStreamPublisherLimit = errors.New("channel stream publisher limit reached")
+	ErrStreamP2PRelation    = errors.New(
 		"P2P stream peers are not related",
 	)
 	ErrStreamRenditionsInvalid = errors.New(
@@ -98,7 +99,7 @@ func (h *Hub) StartStreamWithRenditions(
 		return StreamData{}, ErrStreamRenditionsInvalid
 	}
 
-	data, started := h.streams.start(
+	data, startErr := h.streams.start(
 		client,
 		participant,
 		mode,
@@ -106,8 +107,8 @@ func (h *Hub) StartStreamWithRenditions(
 		hasAudio,
 		normalizedRenditions,
 	)
-	if !started {
-		return StreamData{}, ErrStreamAlreadyActive
+	if startErr != nil {
+		return StreamData{}, startErr
 	}
 
 	current, stillInVoice := h.voice.current(client)
@@ -153,7 +154,18 @@ func (h *Hub) WatchStreamWithCapabilities(
 	channelID int64,
 	supportedDynamicRanges []StreamDynamicRange,
 	codecProfiles []StreamCodecProfileData,
+	publisherConnectionIDs ...string,
 ) (StreamWatchingData, error) {
+	if len(publisherConnectionIDs) > 1 {
+		return StreamWatchingData{}, ErrStreamUnavailable
+	}
+	publisherConnectionID := ""
+	if len(publisherConnectionIDs) == 1 {
+		publisherConnectionID = publisherConnectionIDs[0]
+	}
+	if len(publisherConnectionID) > 128 {
+		return StreamWatchingData{}, ErrStreamUnavailable
+	}
 	if client == nil {
 		return StreamWatchingData{}, ErrStreamUnavailable
 	}
@@ -178,6 +190,7 @@ func (h *Hub) WatchStreamWithCapabilities(
 		h.maxP2PStreamViewers,
 		supportedDynamicRanges,
 		codecProfiles,
+		publisherConnectionID,
 	)
 	if err != nil {
 		return StreamWatchingData{}, err
@@ -308,9 +321,10 @@ func (h *Hub) LeaveStream(
 		return StreamStoppedData{}, false
 	}
 	return StreamStoppedData{
-		ServerID:  value.serverID,
-		ChannelID: value.channelID,
-		Reason:    reason,
+		ServerID:              value.serverID,
+		ChannelID:             value.channelID,
+		PublisherConnectionID: value.publisher.ConnectionID(),
+		Reason:                reason,
 	}, publisher
 }
 
@@ -333,12 +347,14 @@ func (h *Hub) leaveStream(
 			OutgoingEvent{
 				Type: EventStreamStopped,
 				Data: StreamStoppedData{
-					ServerID:  value.serverID,
-					ChannelID: value.channelID,
-					Reason:    reason,
+					ServerID:              value.serverID,
+					ChannelID:             value.channelID,
+					PublisherConnectionID: value.publisher.ConnectionID(),
+					Reason:                reason,
 				},
 			},
 		)
+		h.announceLegacyStreamReplacement(value.serverID, value.channelID)
 		return value, true, true
 	}
 
@@ -370,8 +386,7 @@ func (h *Hub) stopStreamForChannel(
 	channelID int64,
 	reason string,
 ) {
-	publisher := h.streams.publisherForChannel(channelID)
-	if publisher != nil {
+	for _, publisher := range h.streams.publishersForChannel(channelID) {
 		h.leaveStream(publisher, reason)
 	}
 }
