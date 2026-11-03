@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"golang.org/x/time/rate"
 
 	"voxhold-backend/internal/account"
 	"voxhold-backend/internal/channel"
@@ -467,6 +468,7 @@ func (h *Handler) connect(
 			Data: realtime.ReadyData{
 				UserID:          userID,
 				ProtocolVersion: realtime.ProtocolVersion,
+				E2EEBatch:       true,
 			},
 		},
 	); err != nil {
@@ -593,6 +595,9 @@ func (h *Handler) readLoop(
 	if h.protector != nil {
 		allowEvent = h.protector.NewWebSocketEventLimiter()
 	}
+	// A batch must not multiply the per-connection relay budget without bound.
+	// This allows full-room key/ACK bursts while counting every recipient.
+	relayBudget := rate.NewLimiter(120, 240)
 
 	for {
 		var event realtime.IncomingEvent
@@ -611,6 +616,19 @@ func (h *Handler) readLoop(
 				"event rate limit exceeded",
 			)
 			return errors.New("WebSocket event rate limit exceeded")
+		}
+		relayCount := 0
+		if event.Type == realtime.EventE2EEKey || event.Type == realtime.EventE2EEKeyRequest {
+			relayCount = 1
+		} else if event.Type == realtime.EventE2EEKeys {
+			var batch realtime.E2EEKeyBatchData
+			if json.Unmarshal(event.Data, &batch) == nil && len(batch.Keys) <= realtime.MaxE2EEBatchRecipients {
+				relayCount = len(batch.Keys)
+			}
+		}
+		if relayCount > 0 && !relayBudget.AllowN(time.Now(), relayCount) {
+			_ = connection.Close(websocket.StatusPolicyViolation, "e2ee relay rate limit exceeded")
+			return errors.New("E2EE recipient rate limit exceeded")
 		}
 
 		if err := h.handleIncomingEvent(
@@ -741,6 +759,8 @@ func (h *Handler) handleIncomingEvent(
 
 	case realtime.EventE2EEKey, realtime.EventE2EEKeyRequest:
 		return h.relayE2EE(client, event)
+	case realtime.EventE2EEKeys:
+		return h.relayE2EEBatch(client, event)
 
 	case realtime.EventVoiceJoin:
 		return h.joinVoice(

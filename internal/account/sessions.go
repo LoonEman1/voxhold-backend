@@ -62,14 +62,19 @@ type ChangePasswordInput struct {
 }
 
 func (s *Service) VerifyPassword(ctx context.Context, userID int64, password string) error {
+	_, err := s.verifyPassword(ctx, userID, password)
+	return err
+}
+
+func (s *Service) verifyPassword(ctx context.Context, userID int64, password string) (User, error) {
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("find user: %w", err)
+		return User{}, fmt.Errorf("find user: %w", err)
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
-		return ErrWrongCurrentPassword
+		return User{}, ErrWrongCurrentPassword
 	}
-	return nil
+	return user, nil
 }
 
 // ChangePassword replaces the password and signs out every other session.
@@ -83,17 +88,22 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, currentToken
 	if input.NewPassword != input.NewConfirm {
 		return ErrPasswordsDoNotMatch
 	}
-	if err := s.VerifyPassword(ctx, userID, input.CurrentPassword); err != nil {
+	user, err := s.verifyPassword(ctx, userID, input.CurrentPassword)
+	if err != nil {
 		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	if err = s.users.UpdatePasswordHash(ctx, userID, string(hash)); err != nil {
-		return fmt.Errorf("update password: %w", err)
+	hashes, err := s.sessions.ReplacePasswordAndRevokeOthers(ctx, userID, user.PasswordHash, string(hash), hashSessionToken(strings.TrimSpace(currentToken)))
+	if err != nil {
+		return fmt.Errorf("replace password and revoke sessions: %w", err)
 	}
-	return s.revokeOthers(ctx, userID, hashSessionToken(strings.TrimSpace(currentToken)))
+	for _, hash := range hashes {
+		s.sessionRevoker.RevokeSessionHash(hash)
+	}
+	return nil
 }
 
 func (s *Service) ListSessions(ctx context.Context, userID int64, currentToken string) ([]SessionView, error) {

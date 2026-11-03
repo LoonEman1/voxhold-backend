@@ -144,6 +144,12 @@ func (s *voiceState) current(
 	return participant, exists
 }
 
+func (s *voiceState) userClient(userID int64) *Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.byUser[userID]
+}
+
 func (s *voiceState) leave(
 	client *Client,
 ) (VoiceParticipantData, bool) {

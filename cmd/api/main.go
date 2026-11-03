@@ -473,10 +473,22 @@ func main() {
 	// FEAT-13: end-to-end encrypted voice. A policy change reconnects the
 	// channel so nobody mixes encrypted and plain audio.
 	e2eeRepository := e2ee.NewRepository(db)
+	realtimeHub.SetVoiceDeviceValidator(func(userID int64, deviceID string) (bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return e2eeRepository.DeviceActive(ctx, userID, deviceID)
+	})
 	webSocketHandler.SetVoiceEncryption(e2eeRepository)
 	e2eeHandler := e2ee.NewHandler(e2eeRepository, func(serverID, channelID int64, _ bool) {
 		realtimeHub.ResetVoiceChannel(channelID, realtimeDomain.VoiceWebRTCClosedReasonE2EEPolicy)
 		realtimeHub.PublishToServer(serverID, realtimeDomain.OutgoingEvent{Type: realtimeDomain.EventChannelsChanged, Data: realtimeDomain.ServerDeletedData{ServerID: serverID}})
+	}).WithDeviceChanges(func(userID int64) {
+		realtimeHub.RevalidateVoiceE2EE(userID)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := communityService.RevokeInvalidCallDevices(ctx, userID); err != nil {
+			log.Printf("revoke invalid e2ee call devices: %v", err)
+		}
 	})
 
 	webrtcConfigHandler := webrtcconfighttp.NewHandler(
