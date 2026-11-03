@@ -84,6 +84,7 @@ type StreamStartData struct {
 }
 
 type StreamWatchData struct {
+	PublisherConnectionID  string                   `json:"publisher_connection_id,omitempty"`
 	ServerID               int64                    `json:"server_id"`
 	ChannelID              int64                    `json:"channel_id"`
 	SupportedDynamicRanges []StreamDynamicRange     `json:"supported_dynamic_ranges,omitempty"`
@@ -111,9 +112,10 @@ type StreamWatchingData struct {
 }
 
 type StreamStoppedData struct {
-	ServerID  int64  `json:"server_id"`
-	ChannelID int64  `json:"channel_id"`
-	Reason    string `json:"reason,omitempty"`
+	PublisherConnectionID string `json:"publisher_connection_id,omitempty"`
+	ServerID              int64  `json:"server_id"`
+	ChannelID             int64  `json:"channel_id"`
+	Reason                string `json:"reason,omitempty"`
 }
 
 type StreamViewerData struct {

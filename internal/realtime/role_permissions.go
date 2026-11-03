@@ -19,7 +19,7 @@ func (h *Hub) RefreshRolePermissions(serverID int64) {
 					h.SendToConnection(client.ConnectionID(), OutgoingEvent{Type: EventVoiceWebRTCClosed, Data: VoiceWebRTCClosedData{Reason: "voice permission was revoked"}})
 				}
 			} else if bits&8 == 0 {
-				if current, ok := h.voice.current(client); ok && current.ServerID == serverID && h.streams.publisherForChannel(current.ChannelID) == client {
+				if current, ok := h.voice.current(client); ok && current.ServerID == serverID && h.streams.isPublisher(client) {
 					h.leaveStream(client, "stream permission was revoked")
 				}
 			}

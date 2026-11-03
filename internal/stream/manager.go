@@ -30,7 +30,7 @@ type Manager struct {
 	videoCodecDescriptors []videoCodecDescriptor
 
 	mu                        sync.RWMutex
-	rooms                     map[int64]*room
+	rooms                     map[string]*room
 	sessions                  map[string]*session
 	closed                    bool
 	maxViewers                int
@@ -179,7 +179,7 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 		sink:                      sink,
 		udpMux:                    udpMux,
 		videoCodecDescriptors:     descriptors,
-		rooms:                     make(map[int64]*room),
+		rooms:                     make(map[string]*room),
 		sessions:                  make(map[string]*session),
 		maxViewers:                config.MaxViewers,
 		maxVideoBitrateKbps:       config.MaxVideoBitrateKbps,
@@ -243,17 +243,25 @@ func (m *Manager) StartWithRenditions(
 		m.mu.Unlock()
 		return errors.New("stream manager is closed")
 	}
-	if m.rooms[channelID] != nil {
+	publishers := 0
+	for _, current := range m.rooms {
+		if current.id == channelID && current.serverID == serverID {
+			publishers++
+		}
+	}
+	if publishers >= streamcontract.MaxChannelPublishers {
 		m.mu.Unlock()
-		return ErrStreamExists
+		return ErrPublisherLimit
 	}
 	streamRoom := newRoomWithRenditions(channelID, renditions)
-	m.rooms[channelID] = streamRoom
+	streamRoom.serverID = serverID
+	streamRoom.publisherConnectionID = connectionID
+	m.rooms[connectionID] = streamRoom
 	m.mu.Unlock()
 
 	peer, err := m.api.NewPeerConnection(m.configuration)
 	if err != nil {
-		m.removeRoom(channelID, streamRoom)
+		m.removeRoom(connectionID, streamRoom)
 		return fmt.Errorf(
 			"create publisher peer connection: %w",
 			err,
@@ -270,14 +278,14 @@ func (m *Manager) StartWithRenditions(
 		)
 		if transceiverErr != nil {
 			_ = peer.Close()
-			m.removeRoom(channelID, streamRoom)
+			m.removeRoom(connectionID, streamRoom)
 			return fmt.Errorf("add incoming video transceiver: %w", transceiverErr)
 		}
 		if transceiverErr = videoTransceiver.SetCodecPreferences(
 			codecParametersForRendition(m, rendition),
 		); transceiverErr != nil {
 			_ = peer.Close()
-			m.removeRoom(channelID, streamRoom)
+			m.removeRoom(connectionID, streamRoom)
 			return fmt.Errorf(
 				"prefer incoming %s:%s stream codec: %w",
 				rendition.Codec, rendition.Profile, transceiverErr,
@@ -293,7 +301,7 @@ func (m *Manager) StartWithRenditions(
 			},
 		); err != nil {
 			_ = peer.Close()
-			m.removeRoom(channelID, streamRoom)
+			m.removeRoom(connectionID, streamRoom)
 			return fmt.Errorf(
 				"add incoming stream audio transceiver: %w",
 				err,
@@ -314,15 +322,15 @@ func (m *Manager) StartWithRenditions(
 	value.publisherTransceivers = publisherTransceivers
 	if !streamRoom.setPublisher(value) {
 		_ = peer.Close()
-		m.removeRoom(channelID, streamRoom)
+		m.removeRoom(connectionID, streamRoom)
 		return ErrStreamExists
 	}
 
 	m.mu.Lock()
-	if m.closed || m.rooms[channelID] != streamRoom {
+	if m.closed || m.rooms[connectionID] != streamRoom {
 		m.mu.Unlock()
 		_ = peer.Close()
-		m.removeRoom(channelID, streamRoom)
+		m.removeRoom(connectionID, streamRoom)
 		return errors.New("stream manager is closed")
 	}
 	m.sessions[connectionID] = value
@@ -636,15 +644,17 @@ func (m *Manager) Watch(
 	channelID int64,
 ) error {
 	m.mu.RLock()
-	streamRoom := m.rooms[channelID]
+	streamRoom := m.findRoomLocked(serverID, channelID, "")
 	m.mu.RUnlock()
 	selectedRenditionID := "sdr"
 	if streamRoom != nil {
 		selectedRenditionID = streamRoom.defaultSDRRenditionID()
 	}
-	return m.WatchRendition(
-		connectionID, userID, serverID, channelID, selectedRenditionID,
-	)
+	publisherID := ""
+	if streamRoom != nil {
+		publisherID = streamRoom.publisherConnectionID
+	}
+	return m.WatchRenditionForPublisher(connectionID, userID, serverID, channelID, publisherID, selectedRenditionID)
 }
 
 func (m *Manager) WatchRendition(
@@ -654,6 +664,15 @@ func (m *Manager) WatchRendition(
 	channelID int64,
 	selectedRenditionID string,
 ) error {
+	return m.WatchRenditionForPublisher(connectionID, userID, serverID, channelID, "", selectedRenditionID)
+}
+
+// WatchRenditionForPublisher routes only the selected publisher's media. An
+// explicit missing/foreign publisher is never replaced with another stream.
+func (m *Manager) WatchRenditionForPublisher(
+	connectionID string, userID, serverID, channelID int64,
+	publisherConnectionID, selectedRenditionID string,
+) error {
 	if connectionID == "" || userID <= 0 ||
 		serverID <= 0 || channelID <= 0 || selectedRenditionID == "" {
 
@@ -662,7 +681,7 @@ func (m *Manager) WatchRendition(
 
 	m.Leave(connectionID)
 	m.mu.RLock()
-	streamRoom := m.rooms[channelID]
+	streamRoom := m.findRoomLocked(serverID, channelID, publisherConnectionID)
 	closed := m.closed
 	m.mu.RUnlock()
 	if closed {
@@ -701,7 +720,7 @@ func (m *Manager) WatchRendition(
 	value.selectedRenditionID = selectedRenditionID
 
 	m.mu.Lock()
-	if m.closed || m.rooms[channelID] != streamRoom {
+	if m.closed || m.rooms[streamRoom.publisherConnectionID] != streamRoom {
 		m.mu.Unlock()
 		_ = peer.Close()
 		return ErrStreamNotFound
@@ -717,6 +736,25 @@ func (m *Manager) WatchRendition(
 		return err
 	}
 	return nil
+}
+
+// Caller holds m.mu. Legacy callers pick a deterministic primary stream;
+// production signaling always passes the selected publisher connection ID.
+func (m *Manager) findRoomLocked(serverID, channelID int64, publisherID string) *room {
+	if publisherID != "" {
+		value := m.rooms[publisherID]
+		if value != nil && value.serverID == serverID && value.id == channelID {
+			return value
+		}
+		return nil
+	}
+	var selected *room
+	for _, value := range m.rooms {
+		if value.serverID == serverID && value.id == channelID && (selected == nil || value.publisherConnectionID < selected.publisherConnectionID) {
+			selected = value
+		}
+	}
+	return selected
 }
 
 func (m *Manager) AcceptAnswer(
@@ -788,7 +826,7 @@ func (m *Manager) leave(connectionID string, expected *session) bool {
 	}
 
 	if value.role == sessionPublisher {
-		delete(m.rooms, value.channelID)
+		delete(m.rooms, value.room.publisherConnectionID)
 		values := value.room.closeSnapshot()
 		for _, current := range values {
 			delete(m.sessions, current.connectionID)
@@ -837,10 +875,10 @@ func (m *Manager) session(connectionID string) *session {
 	return m.sessions[connectionID]
 }
 
-func (m *Manager) removeRoom(channelID int64, value *room) {
+func (m *Manager) removeRoom(publisherConnectionID string, value *room) {
 	m.mu.Lock()
-	if m.rooms[channelID] == value {
-		delete(m.rooms, channelID)
+	if m.rooms[publisherConnectionID] == value {
+		delete(m.rooms, publisherConnectionID)
 	}
 	m.mu.Unlock()
 }
