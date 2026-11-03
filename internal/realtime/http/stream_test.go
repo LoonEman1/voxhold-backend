@@ -83,6 +83,25 @@ type renditionMediaStub struct {
 	selectedRenditionID string
 }
 
+type multiplePublisherMediaStub struct {
+	renditionMediaStub
+	publisherID string
+}
+
+func (m *multiplePublisherMediaStub) WatchRenditionForPublisher(_ string, _, _, _ int64, publisherID, renditionID string) error {
+	m.publisherID, m.selectedRenditionID = publisherID, renditionID
+	return nil
+}
+func TestMediaWatchKeepsExplicitPublisherSelection(t *testing.T) {
+	media := &multiplePublisherMediaStub{}
+	if err := watchStreamMedia(media, "viewer", 2, 10, 20, "sdr", "second-publisher"); err != nil {
+		t.Fatal(err)
+	}
+	if media.publisherID != "second-publisher" || media.selectedRenditionID != "sdr" {
+		t.Fatal("explicit publisher identity was lost before SFU routing")
+	}
+}
+
 func (*renditionMediaStub) Start(string, int64, int64, int64, stream.Codec, bool) error {
 	return nil
 }

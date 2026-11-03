@@ -224,6 +224,7 @@ published versions. See the [release workflow](docs/release-workflow.md).
 - [Operational security](docs/security.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 - [Voice protocol](docs/voice.md)
+- [Webcams in channels and calls](docs/webcam.md)
 - [Screen streaming](docs/streaming.md)
 - [Client diagnostics](docs/client-diagnostics.md)
 - [Reliability and v0.10.0 upgrade notes](docs/reliability.md)

@@ -34,6 +34,8 @@ type Client struct {
 	queueResyncs    uint64
 	queueHighWater  int
 	messageSync     atomic.Bool
+	multipleStreams atomic.Bool
+	legacyStreams   map[int64]string // guarded by queueMu
 	done            chan struct{}
 	closeOnce       sync.Once
 	stateMu         sync.RWMutex
@@ -90,7 +92,9 @@ func (c *Client) UserID() int64 {
 	return c.userID
 }
 
-func (c *Client) EnableMessageSync() { c.messageSync.Store(true) }
+func (c *Client) EnableMessageSync()            { c.messageSync.Store(true) }
+func (c *Client) EnableMultipleStreams()        { c.multipleStreams.Store(true) }
+func (c *Client) SupportsMultipleStreams() bool { return c.multipleStreams.Load() }
 
 func (c *Client) ConnectionID() string {
 	return c.connectionID
@@ -144,6 +148,9 @@ func (c *Client) enqueue(
 	defer c.queueMu.Unlock()
 	var allowed bool
 	event, allowed = c.filterChannelEvent(event)
+	if allowed {
+		event, allowed = c.filterLegacyStreamEvent(event)
+	}
 	if !allowed {
 		return true
 	}

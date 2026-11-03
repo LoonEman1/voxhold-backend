@@ -67,6 +67,7 @@ func (s *voiceState) join(
 		result.updated =
 			previous.SelfMute != selfMute ||
 				previous.SelfDeaf != selfDeaf
+		result.participant.SelfVideo = previous.SelfVideo
 
 		s.byClient[client] = result.participant
 		s.byChannel[channelID][client] = result.participant
@@ -113,6 +114,7 @@ func (s *voiceState) update(
 	client *Client,
 	selfMute bool,
 	selfDeaf bool,
+	selfVideo ...bool,
 ) (VoiceParticipantData, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,6 +129,10 @@ func (s *voiceState) update(
 
 	participant.SelfMute = selfMute
 	participant.SelfDeaf = selfDeaf
+	if len(selfVideo) > 0 {
+		changed = changed || participant.SelfVideo != selfVideo[0]
+		participant.SelfVideo = selfVideo[0]
+	}
 
 	s.byClient[client] = participant
 	s.byChannel[participant.ChannelID][client] = participant

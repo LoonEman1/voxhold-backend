@@ -16,6 +16,7 @@ const (
 var (
 	ErrSessionNotFound      = errors.New("stream WebRTC session not found")
 	ErrStreamExists         = errors.New("channel already has an active stream")
+	ErrPublisherLimit       = errors.New("channel stream publisher limit reached")
 	ErrStreamNotFound       = errors.New("channel has no active stream")
 	ErrViewerLimit          = errors.New("stream viewer limit reached")
 	ErrTooManyICECandidates = errors.New("too many pending stream ICE candidates")

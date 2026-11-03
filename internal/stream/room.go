@@ -19,9 +19,11 @@ type roomTrackKey struct {
 }
 
 type room struct {
-	id         int64
-	renditions map[string]Rendition
-	order      []string
+	serverID              int64
+	publisherConnectionID string
+	id                    int64
+	renditions            map[string]Rendition
+	order                 []string
 
 	mu           sync.RWMutex
 	publisher    *session

@@ -115,6 +115,7 @@ func (h *Handler) watchStream(
 		data.ChannelID,
 		data.SupportedDynamicRanges,
 		data.CodecProfiles,
+		data.PublisherConnectionID,
 	)
 	if err != nil {
 		return queueStreamStateError(client, event.RequestID, err)
@@ -123,7 +124,7 @@ func (h *Handler) watchStream(
 	if watching.Stream.Mode == realtime.StreamModeServer {
 		err = watchStreamMedia(
 			h.streamMedia, client.ConnectionID(), client.UserID(),
-			data.ServerID, data.ChannelID, watching.SelectedRenditionID,
+			data.ServerID, data.ChannelID, watching.SelectedRenditionID, watching.Stream.PublisherConnectionID,
 		)
 		if err != nil {
 			h.hub.LeaveStream(
@@ -222,7 +223,13 @@ func watchStreamMedia(
 	serverID int64,
 	channelID int64,
 	selectedRenditionID string,
+	publisherConnectionIDs ...string,
 ) error {
+	if enhanced, ok := media.(interface {
+		WatchRenditionForPublisher(string, int64, int64, int64, string, string) error
+	}); ok && len(publisherConnectionIDs) == 1 {
+		return enhanced.WatchRenditionForPublisher(connectionID, userID, serverID, channelID, publisherConnectionIDs[0], selectedRenditionID)
+	}
 	if enhanced, ok := media.(renditionStreamMedia); ok {
 		return enhanced.WatchRendition(
 			connectionID, userID, serverID, channelID, selectedRenditionID,
@@ -496,6 +503,8 @@ func queueStreamStateError(
 	switch {
 	case errors.Is(err, realtime.ErrStreamVoiceRequired):
 		message = "join the same voice channel first"
+	case errors.Is(err, realtime.ErrStreamPublisherLimit):
+		return queueError(client, requestID, realtime.ErrorInvalidState, "channel stream publisher limit reached")
 	case errors.Is(err, realtime.ErrStreamAlreadyActive):
 		message = "stream is already active"
 	case errors.Is(err, realtime.ErrStreamViewerLimit):
