@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"voxhold-backend/internal/message"
@@ -34,8 +35,18 @@ func (s *Service) scheduled(r *http.Request, uid int64) (any, error) {
 	if status != "" && status != "pending" && status != "sent" && status != "failed" && status != "cancelled" {
 		return nil, ErrInvalid
 	}
+	kind := r.URL.Query().Get("destination_kind")
+	var destinationID int64
+	if raw := r.URL.Query().Get("destination_id"); kind != "" || raw != "" {
+		var err error
+		destinationID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || destinationID <= 0 || (kind != "channel" && kind != "conversation") {
+			return nil, ErrInvalid
+		}
+	}
 	rows, err := s.db.QueryContext(r.Context(), `SELECT id,destination_kind,destination_id,payload,send_at,status,error,attempts,next_attempt_at FROM scheduled_messages
- WHERE user_id=? AND (?='' OR status=?) AND (?=0 OR send_at<? OR (send_at=? AND id<?)) ORDER BY send_at DESC,id DESC LIMIT ?`, uid, status, status, p.id, p.before, p.before, p.id, p.limit+1)
+ WHERE user_id=? AND (?='' OR status=?) AND (?='' OR (destination_kind=? AND destination_id=?))
+ AND (?=0 OR send_at<? OR (send_at=? AND id<?)) ORDER BY send_at DESC,id DESC LIMIT ?`, uid, status, status, kind, kind, destinationID, p.id, p.before, p.before, p.id, p.limit+1)
 	if err != nil {
 		return nil, err
 	}

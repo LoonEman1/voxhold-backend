@@ -316,5 +316,11 @@ func (s *Service) SetMemberTimeout(ctx context.Context, serverID, requesterUserI
 	if targetUserID <= 0 {
 		return ErrMemberNotFound
 	}
-	return s.repository.SetMemberTimeout(ctx, serverID, requesterUserID, targetUserID, until)
+	if err := s.repository.SetMemberTimeout(ctx, serverID, requesterUserID, targetUserID, until); err != nil {
+		return err
+	}
+	if refresher, ok := s.accessRevoker.(interface{ RefreshRolePermissions(int64) }); ok {
+		refresher.RefreshRolePermissions(serverID)
+	}
+	return nil
 }

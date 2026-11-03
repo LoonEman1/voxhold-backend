@@ -62,15 +62,6 @@ func (s *Service) joinCall(r *http.Request, uid int64) (any, error) {
 	if len(input.SessionID) < 16 || len(input.SessionID) > 64 {
 		return nil, ErrInvalid
 	}
-	if input.E2EEDeviceID != "" {
-		var active bool
-		if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM e2ee_device_keys WHERE user_id=? AND device_id=? AND revoked_at IS NULL)`, uid, input.E2EEDeviceID).Scan(&active); err != nil {
-			return nil, err
-		}
-		if !active {
-			return nil, ErrInvalid
-		}
-	}
 	if err := CanSend(r.Context(), s.db, cid, uid); err != nil {
 		return nil, err
 	}
@@ -88,6 +79,15 @@ func (s *Service) joinCall(r *http.Request, uid int64) (any, error) {
 	defer tx.Rollback()
 	if err = canSendTransaction(r.Context(), tx, cid, uid); err != nil {
 		return nil, err
+	}
+	if input.E2EEDeviceID != "" {
+		var active bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM e2ee_device_keys WHERE user_id=? AND device_id=? AND revoked_at IS NULL)`, uid, input.E2EEDeviceID).Scan(&active); err != nil {
+			return nil, err
+		}
+		if !active {
+			return nil, ErrInvalid
+		}
 	}
 	if _, err = tx.ExecContext(r.Context(), `DELETE FROM conversation_call_members WHERE heartbeat_at<?`, time.Now().Unix()-45); err != nil {
 		return nil, err

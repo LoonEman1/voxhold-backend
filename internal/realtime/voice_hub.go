@@ -34,6 +34,13 @@ func (h *Hub) JoinVoiceWithDevice(
 		return VoiceJoinedData{}, false
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	// Recheck registration inside the same user transition lock used by live
+	// revocation. A join validated before a revoke must not appear afterwards.
+	if e2eeDeviceID != "" && h.voiceDeviceActive != nil {
+		if active, err := h.voiceDeviceActive(client.UserID(), e2eeDeviceID); err != nil || !active {
+			return VoiceJoinedData{}, false
+		}
+	}
 	if !client.canAccessChannel(channelID) {
 		return VoiceJoinedData{}, false
 	}
@@ -293,5 +300,31 @@ func (h *Hub) ResetVoiceChannel(channelID int64, reason string) {
 			Type: EventVoiceWebRTCClosed,
 			Data: VoiceWebRTCClosedData{Reason: reason},
 		})
+	}
+}
+
+// SetVoiceDeviceValidator is configured before accepting connections.
+func (h *Hub) SetVoiceDeviceValidator(check func(int64, string) (bool, error)) {
+	h.voiceDeviceActive = check
+}
+
+// RevalidateVoiceE2EE applies explicit revocation and LRU device eviction to
+// the current call as well as future joins. Media packet forwarding stays free
+// of database lookups.
+func (h *Hub) RevalidateVoiceE2EE(userID int64) {
+	defer h.mediaTransitions.Lock(userID)()
+	client := h.voice.userClient(userID)
+	if client == nil || h.voiceDeviceActive == nil {
+		return
+	}
+	current, ok := h.voice.current(client)
+	if !ok || current.E2EEDeviceID == "" {
+		return
+	}
+	if active, err := h.voiceDeviceActive(userID, current.E2EEDeviceID); err == nil && active {
+		return
+	}
+	if _, left := h.leaveVoice(client); left {
+		h.SendToConnection(client.ConnectionID(), OutgoingEvent{Type: EventVoiceWebRTCClosed, Data: VoiceWebRTCClosedData{Reason: VoiceWebRTCClosedReasonE2EEDevice}})
 	}
 }

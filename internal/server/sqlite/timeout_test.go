@@ -8,10 +8,45 @@ import (
 
 	messagesqlite "voxhold-backend/internal/message/sqlite"
 	"voxhold-backend/internal/permissions"
+	"voxhold-backend/internal/realtime"
 	"voxhold-backend/internal/server"
 	serversqlite "voxhold-backend/internal/server/sqlite"
 	"voxhold-backend/internal/testdb"
 )
+
+func TestTimeoutImmediatelyDisconnectsActiveVoice(t *testing.T) {
+	db := testdb.Open(t)
+	hub := realtime.NewHub()
+	defer hub.Close()
+	hub.SetRolePermissionLoader(func(serverID, userID int64) (bits int, err error) {
+		err = db.QueryRow(`SELECT permissions FROM member_permissions WHERE server_id=? AND user_id=?`, serverID, userID).Scan(&bits)
+		return
+	})
+	client := realtime.NewClient(2, "member", []int64{1})
+	hub.Register(client)
+	if _, joined := hub.JoinVoice(client, 1, 1, false, false); !joined {
+		t.Fatal("join voice")
+	}
+	service := server.NewService(serversqlite.NewRepository(db), hub, nil)
+	until := time.Now().Add(time.Hour).Unix()
+	if err := service.SetMemberTimeout(context.Background(), 1, 1, 2, &until); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := hub.UpdateVoiceState(client, false, false); exists {
+		t.Fatal("timed-out participant retained the active voice session")
+	}
+	var closed bool
+	for {
+		event, ok := client.PopOutgoing()
+		if !ok {
+			break
+		}
+		closed = closed || event.Type == realtime.EventVoiceWebRTCClosed
+	}
+	if !closed {
+		t.Fatal("client was not notified that voice permission was revoked")
+	}
+}
 
 func TestMemberTimeoutRemovesPublishUntilItEnds(t *testing.T) {
 	db := testdb.Open(t)
