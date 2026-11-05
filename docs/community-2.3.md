@@ -61,6 +61,8 @@ messages section. A group contains at most 16 people including its creator.
 The direct pair is unique regardless of which participant starts it.
 
 - `GET/POST /api/v1/me/conversations`; POST `{user_ids,name}`.
+  POST returns the complete conversation, including `members`, `direct`,
+  `unread_count` and `last_message_id`, for both new and existing direct chats.
 - `GET/POST /api/v1/conversations/{ID}/messages`; GET supports `before` pagination.
 - POST `{content,client_message_id,attachment_ids?}`. Reusing a key with different
   content/attachments returns 409; a retry returns the original message.
