@@ -168,7 +168,14 @@ func (s *Service) createConversation(r *http.Request, userID int64) (any, error)
 	for _, uid := range ids {
 		s.emit(uid, "conversation.changed", map[string]any{"conversation_id": id})
 	}
-	return map[string]int64{"id": id}, nil
+	values, _, err := s.listConversations(r.Context(), userID, id, pageRequest{limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, ErrForbidden
+	}
+	return values[0], nil
 }
 func conversationAccess(ctx context.Context, q queryer, id, uid int64) error {
 	var member bool

@@ -312,6 +312,7 @@ func (s *Service) ProcessDue(ctx context.Context, now int64) (resultErr error) {
 			if _, err = s.db.ExecContext(ctx, `UPDATE scheduled_messages SET status='sent',error='' WHERE id=?`, v.id); err != nil {
 				return err
 			}
+			s.emit(v.uid, "conversation.scheduled", map[string]any{"id": v.id, "status": "sent"})
 			continue
 		}
 		sid, sendErr := s.destination(ctx, v.uid, Destination{Kind: v.kind, ID: v.destination})

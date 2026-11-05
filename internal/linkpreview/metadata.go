@@ -20,6 +20,7 @@ type Preview struct {
 	Description string `json:"description,omitempty"`
 	Site        string `json:"site_name"`
 	ImagePath   string `json:"image_path,omitempty"`
+	Unavailable bool   `json:"unavailable,omitempty"`
 }
 
 func plain(value string, limit int) string {

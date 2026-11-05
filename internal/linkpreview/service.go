@@ -198,13 +198,10 @@ func (s *Service) preview(w http.ResponseWriter, r *http.Request) {
 			value.preview.ImagePath = "/api/v1/link-preview/images/" + key
 		}
 		if err != nil {
+			value.preview = Preview{URL: u.String(), Title: u.Hostname(), Site: u.Hostname(), Unavailable: true}
 			value.expires = time.Now().Add(time.Minute)
 		}
 		s.put(key, value)
-	}
-	if value.failed {
-		httpapi.WriteJSON(w, 200, nil)
-		return
 	}
 	httpapi.WriteJSON(w, 200, value.preview)
 }
