@@ -1,3 +1,26 @@
+# Voxhold Backend 2.6.5
+
+Патч от 5 ноября 2026 года. Порядок обновления: backend 2.6.5 → frontend 2.6.5.
+Новых миграций поверх **000040**, изменений зависимостей и контейнерного runtime нет.
+
+- Создание нового или открытие существующего личного диалога возвращает полный
+  объект беседы с участниками, типом, счётчиком непрочитанных и последним сообщением.
+  Это устраняет причину падения клиента на `members.find` после «Написать сообщение».
+- При недоступности метаданных внешнего сайта API предпросмотра возвращает карточку
+  URL с `unavailable: true` вместо `200 null`. Неуспешный результат кратковременно
+  кэшируется; проверки публичного HTTPS-адреса, лимиты загрузки и защита SSRF сохранены.
+- Восстановление уже отправленного отложенного задания публикует событие
+  `conversation.scheduled` со статусом `sent`, чтобы клиент сразу убрал запись из списка.
+- Добавлены регрессионные тесты контракта нового/существующего диалога и карточки
+  недоступного сайта; уточнены API-документация и поведение истории отложенных сообщений.
+
+Список составлен по [diff выпущенного main и dev](https://github.com/LoonEman1/voxhold-backend/compare/ee822184d38549651e728e9918d26c65deec46bd...d9fdde46fcd40a776b75cbac79f6e22cab286f56).
+
+English: return complete conversations on creation, retain a bounded URL-only
+card when remote preview metadata is unavailable, and emit scheduled completion
+events when recovering an already-delivered job. Adds contract/fallback
+regressions. No new migration or dependency changes; update the backend first.
+
 # Voxhold Backend 2.6.4
 
 Релиз от 3 ноября 2026 года. Порядок обновления: backend 2.6.4 → frontend 2.6.4 → deploy 2.6.4.
