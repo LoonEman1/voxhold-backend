@@ -12,6 +12,13 @@ const (
 	Voice          = 4
 	Stream         = 8
 	ManageMessages = 16
+	MuteVoice      = 32
+	MoveVoice      = 64
+	KickVoice      = 128
+
+	LegacyRoleMask      = Read | Publish | Voice | Stream | ManageMessages
+	VoiceModerationMask = MuteVoice | MoveVoice | KickVoice
+	RoleMask            = LegacyRoleMask | VoiceModerationMask
 )
 
 type Queryer interface {

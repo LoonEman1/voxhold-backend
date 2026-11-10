@@ -27,6 +27,7 @@ import (
 	"voxhold-backend/internal/instancebootstrap"
 	"voxhold-backend/internal/linkpreview"
 	"voxhold-backend/internal/notifications"
+	"voxhold-backend/internal/permissions"
 	"voxhold-backend/internal/recordings"
 	"voxhold-backend/internal/safego"
 	"voxhold-backend/internal/telemetry"
@@ -470,6 +471,7 @@ func main() {
 		antiAbuseGuard,
 	)
 	webSocketHandler.SetOriginPatterns(corsManager.OriginPatterns)
+	webSocketHandler.SetVoiceModeration(permissions.NewVoiceModeration(db))
 	// FEAT-13: end-to-end encrypted voice. A policy change reconnects the
 	// channel so nobody mixes encrypted and plain audio.
 	e2eeRepository := e2ee.NewRepository(db)

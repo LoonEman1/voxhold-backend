@@ -202,6 +202,20 @@ func newWebRTCConfiguration(config Config) webrtc.Configuration {
 	}
 }
 
+// RoomFull checks current occupancy before a moderation move. Join checks
+// again when it reserves a slot for the destination media session.
+func (m *Manager) RoomFull(channelID int64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	room := m.rooms[channelID]
+	if room == nil {
+		return false
+	}
+	room.mu.RLock()
+	defer room.mu.RUnlock()
+	return room.fullLocked(m.maxParticipants)
+}
+
 func (m *Manager) Join(
 	connectionID string,
 	userID int64,
