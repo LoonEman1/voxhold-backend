@@ -30,10 +30,17 @@ func (h *Hub) JoinVoiceWithDevice(
 	selfDeaf bool,
 	e2eeDeviceID string,
 ) (VoiceJoinedData, bool) {
+	return h.JoinVoiceWithOptions(client, VoiceJoinData{
+		ServerID: serverID, ChannelID: channelID, SelfMute: selfMute, SelfDeaf: selfDeaf, E2EEDeviceID: e2eeDeviceID,
+	}, false)
+}
+
+func (h *Hub) JoinVoiceWithOptions(client *Client, data VoiceJoinData, serverMute bool) (VoiceJoinedData, bool) {
 	if client == nil {
 		return VoiceJoinedData{}, false
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	serverID, channelID, e2eeDeviceID := data.ServerID, data.ChannelID, data.E2EEDeviceID
 	// Recheck registration inside the same user transition lock used by live
 	// revocation. A join validated before a revoke must not appear afterwards.
 	if e2eeDeviceID != "" && h.voiceDeviceActive != nil {
@@ -63,14 +70,7 @@ func (h *Hub) JoinVoiceWithDevice(
 		h.leaveStream(client, "voice channel changed")
 	}
 
-	result := h.voice.join(
-		client,
-		serverID,
-		channelID,
-		selfMute,
-		selfDeaf,
-		e2eeDeviceID,
-	)
+	result := h.voice.join(client, data, serverMute)
 
 	if result.previous != nil {
 		h.publishVoiceLeft(
@@ -120,6 +120,42 @@ func (h *Hub) JoinVoiceWithDevice(
 		Participant:  result.participant,
 		Participants: result.participants,
 	}, true
+}
+
+func (h *Hub) VoiceTarget(data VoiceModerationData) (*Client, VoiceParticipantData, bool) {
+	client := h.voice.userClient(data.UserID)
+	if client == nil {
+		return nil, VoiceParticipantData{}, false
+	}
+	participant, ok := h.voice.current(client)
+	return client, participant, ok && participant.ConnectionID == data.ConnectionID &&
+		participant.ServerID == data.ServerID && participant.ChannelID == data.ChannelID
+}
+
+func (h *Hub) CurrentVoice(client *Client) (VoiceParticipantData, bool) {
+	return h.voice.current(client)
+}
+
+func (h *Hub) SetVoiceServerMute(client *Client, muted bool) {
+	defer h.mediaTransitions.Lock(client.UserID())()
+	if participant, ok := h.voice.setServerMute(client, muted); ok {
+		h.publishToServerExcept(participant.ServerID, nil, OutgoingEvent{Type: EventVoiceStateUpdated, Data: participant})
+	}
+}
+
+func (h *Hub) DisconnectVoiceParticipant(client *Client, expected VoiceParticipantData, reason string, destination int64) bool {
+	defer h.mediaTransitions.Lock(client.UserID())()
+	current, active := h.voice.current(client)
+	if !active || current.generation != expected.generation {
+		return false
+	}
+	left, ok := h.LeaveVoice(client)
+	if !ok {
+		return false
+	}
+	left.Reason = reason
+	left.DestinationChannelID = destination
+	return h.SendToConnection(client.ConnectionID(), OutgoingEvent{Type: EventVoiceLeft, Data: left})
 }
 
 func (h *Hub) UpdateVoiceState(

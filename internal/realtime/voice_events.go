@@ -15,6 +15,8 @@ const (
 	EventVoiceWebRTCAnswered    EventType = "voice.webrtc_answered"
 	EventVoiceICECandidate      EventType = "voice.ice_candidate"
 	EventVoiceWebRTCClosed      EventType = "voice.webrtc_closed"
+	EventVoiceModerate          EventType = "voice.moderate"
+	EventVoiceModerated         EventType = "voice.moderated"
 
 	// FEAT-13: opaque wrapped sender keys relayed between room members.
 	EventE2EEKey        EventType = "e2ee.key"
@@ -30,10 +32,11 @@ const (
 )
 
 type VoiceJoinData struct {
-	ServerID  int64 `json:"server_id"`
-	ChannelID int64 `json:"channel_id"`
-	SelfMute  bool  `json:"self_mute"`
-	SelfDeaf  bool  `json:"self_deaf"`
+	ServerID     int64 `json:"server_id"`
+	ChannelID    int64 `json:"channel_id"`
+	SelfMute     bool  `json:"self_mute"`
+	SelfDeaf     bool  `json:"self_deaf"`
+	SupportsMove bool  `json:"supports_move,omitempty"`
 	// E2EEDeviceID is set only by clients joining an encrypted channel.
 	E2EEDeviceID string `json:"e2ee_device_id,omitempty"`
 }
@@ -42,6 +45,16 @@ type VoiceStateUpdateData struct {
 	SelfMute  bool  `json:"self_mute"`
 	SelfDeaf  bool  `json:"self_deaf"`
 	SelfVideo *bool `json:"self_video,omitempty"`
+}
+
+type VoiceModerationData struct {
+	ServerID             int64  `json:"server_id"`
+	ChannelID            int64  `json:"channel_id"`
+	UserID               int64  `json:"user_id"`
+	ConnectionID         string `json:"connection_id"`
+	Action               string `json:"action"`
+	Muted                *bool  `json:"muted,omitempty"`
+	DestinationChannelID int64  `json:"destination_channel_id,omitempty"`
 }
 
 type VoiceParticipantData struct {
@@ -53,6 +66,8 @@ type VoiceParticipantData struct {
 	SelfMute     bool   `json:"self_mute"`
 	SelfDeaf     bool   `json:"self_deaf"`
 	SelfVideo    bool   `json:"self_video,omitempty"`
+	ServerMute   bool   `json:"server_mute,omitempty"`
+	SupportsMove bool   `json:"supports_move,omitempty"`
 	// E2EEDeviceID tells the other members whose device key wraps this
 	// participant's sender key.
 	E2EEDeviceID string `json:"e2ee_device_id,omitempty"`
@@ -80,10 +95,12 @@ type E2EERelayData struct {
 func (d E2EERelayData) EventChannelID() int64 { return d.ChannelID }
 
 type VoiceLeftData struct {
-	ConnectionID string `json:"connection_id"`
-	UserID       int64  `json:"user_id"`
-	ServerID     int64  `json:"server_id"`
-	ChannelID    int64  `json:"channel_id"`
+	ConnectionID         string `json:"connection_id"`
+	UserID               int64  `json:"user_id"`
+	ServerID             int64  `json:"server_id"`
+	ChannelID            int64  `json:"channel_id"`
+	Reason               string `json:"reason,omitempty"`
+	DestinationChannelID int64  `json:"destination_channel_id,omitempty"`
 }
 
 type VoiceSnapshotData struct {
