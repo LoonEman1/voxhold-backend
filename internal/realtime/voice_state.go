@@ -35,11 +35,8 @@ func newVoiceState() *voiceState {
 
 func (s *voiceState) join(
 	client *Client,
-	serverID int64,
-	channelID int64,
-	selfMute bool,
-	selfDeaf bool,
-	e2eeDeviceID string,
+	data VoiceJoinData,
+	serverMute bool,
 ) voiceJoinResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -50,23 +47,26 @@ func (s *voiceState) join(
 			generation:   s.nextGeneration,
 			ConnectionID: client.ConnectionID(),
 			UserID:       client.UserID(),
-			ServerID:     serverID,
-			ChannelID:    channelID,
-			SelfMute:     selfMute,
-			SelfDeaf:     selfDeaf,
-			E2EEDeviceID: e2eeDeviceID,
+			ServerID:     data.ServerID,
+			ChannelID:    data.ChannelID,
+			SelfMute:     data.SelfMute,
+			SelfDeaf:     data.SelfDeaf,
+			ServerMute:   serverMute,
+			SupportsMove: data.SupportsMove,
+			E2EEDeviceID: data.E2EEDeviceID,
 		},
 	}
 
 	previous, exists := s.byClient[client]
+	channelID := data.ChannelID
 	if exists &&
-		previous.ServerID == serverID &&
+		previous.ServerID == data.ServerID &&
 		previous.ChannelID == channelID &&
-		previous.E2EEDeviceID == e2eeDeviceID {
+		previous.E2EEDeviceID == data.E2EEDeviceID {
 
 		result.updated =
-			previous.SelfMute != selfMute ||
-				previous.SelfDeaf != selfDeaf
+			previous.SelfMute != data.SelfMute || previous.SelfDeaf != data.SelfDeaf ||
+				previous.ServerMute != serverMute || previous.SupportsMove != data.SupportsMove
 		result.participant.SelfVideo = previous.SelfVideo
 
 		s.byClient[client] = result.participant
@@ -108,6 +108,18 @@ func (s *voiceState) join(
 	result.participants = participantMapSnapshot(room)
 
 	return result
+}
+
+func (s *voiceState) setServerMute(client *Client, muted bool) (VoiceParticipantData, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	participant, exists := s.byClient[client]
+	if exists {
+		participant.ServerMute = muted
+		s.byClient[client] = participant
+		s.byChannel[participant.ChannelID][client] = participant
+	}
+	return participant, exists
 }
 
 func (s *voiceState) update(

@@ -43,12 +43,16 @@ func (r *room) reserve(maxParticipants int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if len(r.sessions)+r.reservations >= maxParticipants {
+	if r.fullLocked(maxParticipants) {
 		return false
 	}
 
 	r.reservations++
 	return true
+}
+
+func (r *room) fullLocked(maxParticipants int) bool {
+	return len(r.sessions)+r.reservations >= maxParticipants
 }
 
 func (r *room) cancelReservation() {

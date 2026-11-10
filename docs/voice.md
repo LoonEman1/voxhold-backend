@@ -95,6 +95,30 @@ Leave with `voice.leave`. Disconnecting the WebSocket, leaving or being
 kicked from the server, deleting the channel, and deleting the server also
 close the WebRTC session automatically.
 
+### Voice moderation
+
+Send `voice.moderate` with the participant's `server_id`, `channel_id`,
+`user_id`, and `connection_id`. Set `action` to one of the following.
+
+| Action | Additional field | Role permission |
+| --- | --- | --- |
+| `mute` | `muted` | 32 |
+| `move` | `destination_channel_id` | 64 |
+| `kick` | | 128 |
+
+Owners and admins have these permissions by default. Owners can moderate
+admins. Custom roles can grant the permissions for moderating members.
+The server acknowledges accepted requests with `voice.moderated`.
+A server mute drops the participant's microphone audio until lifted and
+persists across voice joins on that server. Clients receive it separately
+from `self_mute` as `server_mute`.
+
+Kick sends `voice.left` with reason `kicked` to the participant, who can
+join again manually. Move requires destination access for both users and
+a participant that sent `supports_move: true` in `voice.join`. It sends
+`voice.left` with reason `moved` and the `destination_channel_id`, which the
+client uses to join with the destination's media and encryption settings.
+
 ## Deployment
 
 The SFU shares one UDP port across all peer connections:

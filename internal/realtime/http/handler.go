@@ -79,6 +79,8 @@ type ReadStateLister interface {
 }
 
 type VoiceMedia interface {
+	RoomFull(channelID int64) bool
+
 	Join(
 		connectionID string,
 		userID int64,
@@ -136,18 +138,19 @@ type RealtimeProtector interface {
 }
 
 type Handler struct {
-	authenticator  Authenticator
-	channelAccess  ChannelAccess
-	memberships    MembershipLister
-	readStates     ReadStateLister
-	voiceMedia     VoiceMedia
-	streamMedia    StreamMedia
-	hub            *realtime.Hub
-	voiceJoins     userLockSet
-	protector      RealtimeProtector
-	originPatterns func() []string
-	typing         typingLimiter
-	encryption     VoiceEncryption
+	authenticator   Authenticator
+	channelAccess   ChannelAccess
+	memberships     MembershipLister
+	readStates      ReadStateLister
+	voiceMedia      VoiceMedia
+	streamMedia     StreamMedia
+	hub             *realtime.Hub
+	voiceJoins      userLockSet
+	protector       RealtimeProtector
+	originPatterns  func() []string
+	typing          typingLimiter
+	encryption      VoiceEncryption
+	voiceModeration VoiceModerationStore
 }
 
 // VoiceEncryption reports the end-to-end encryption policy of voice channels
@@ -782,6 +785,9 @@ func (h *Handler) handleIncomingEvent(
 	case realtime.EventVoiceLeave:
 		return h.leaveVoice(client, event)
 
+	case realtime.EventVoiceModerate:
+		return h.moderateVoice(ctx, client, event)
+
 	case realtime.EventVoiceWebRTCAnswer:
 		return h.acceptVoiceWebRTCAnswer(
 			client,
@@ -891,14 +897,15 @@ func (h *Handler) joinVoice(
 		return err
 	}
 
-	joined, ok := h.hub.JoinVoiceWithDevice(
-		client,
-		data.ServerID,
-		data.ChannelID,
-		data.SelfMute,
-		data.SelfDeaf,
-		data.E2EEDeviceID,
-	)
+	var serverMute bool
+	if h.voiceModeration != nil {
+		serverMute, err = h.voiceModeration.Muted(ctx, data.ServerID, client.UserID())
+		if err != nil {
+			return voiceModerationError(client, event.RequestID, err)
+		}
+	}
+
+	joined, ok := h.hub.JoinVoiceWithOptions(client, data, serverMute)
 	joined.E2EERequired = required
 	if !ok {
 		return queueError(
@@ -925,7 +932,7 @@ func (h *Handler) joinVoice(
 		client.UserID(),
 		data.ServerID,
 		data.ChannelID,
-		data.SelfMute,
+		data.SelfMute || serverMute,
 		data.SelfDeaf,
 	); err != nil {
 		h.hub.LeaveVoice(client)
@@ -956,6 +963,7 @@ func (h *Handler) updateVoiceState(
 	client *realtime.Client,
 	event realtime.IncomingEvent,
 ) error {
+	defer h.voiceJoins.lock(client.UserID())()
 	var data realtime.VoiceStateUpdateData
 
 	if err := json.Unmarshal(event.Data, &data); err != nil {
@@ -967,9 +975,13 @@ func (h *Handler) updateVoiceState(
 		)
 	}
 
+	current, active := h.hub.CurrentVoice(client)
+	if !active {
+		return queueError(client, event.RequestID, realtime.ErrorInvalidState, "voice channel is not joined")
+	}
 	if err := h.voiceMedia.SetState(
 		client.ConnectionID(),
-		data.SelfMute,
+		data.SelfMute || current.ServerMute,
 		data.SelfDeaf,
 	); err != nil {
 		if errors.Is(err, voice.ErrSessionNotFound) {
@@ -1136,6 +1148,7 @@ func (h *Handler) leaveVoice(
 	client *realtime.Client,
 	event realtime.IncomingEvent,
 ) error {
+	defer h.voiceJoins.lock(client.UserID())()
 	left, ok := h.hub.LeaveVoice(client)
 	if !ok {
 		return queueError(

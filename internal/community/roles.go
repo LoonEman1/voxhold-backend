@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 	"voxhold-backend/internal/audit"
+	"voxhold-backend/internal/permissions"
 	"voxhold-backend/internal/storage"
 )
 
@@ -30,7 +31,7 @@ func (s *Service) roles(r *http.Request, userID int64) (any, error) {
 	if !member {
 		return nil, ErrForbidden
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT r.id,r.name,r.color,r.permissions,COALESCE((SELECT json_group_array(user_id) FROM member_roles a WHERE a.role_id=r.id),'[]') FROM server_roles r WHERE server_id=? ORDER BY id`, serverID)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT r.id,r.name,r.color,r.permissions | r.voice_permissions,COALESCE((SELECT json_group_array(user_id) FROM member_roles a WHERE a.role_id=r.id),'[]') FROM server_roles r WHERE server_id=? ORDER BY id`, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +60,7 @@ func (s *Service) saveRole(r *http.Request, userID int64) (any, error) {
 		return nil, err
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || utf8.RuneCountInString(input.Name) > 64 || input.Permissions < 0 || input.Permissions > 31 || !colorPattern.MatchString(input.Color) {
+	if input.Name == "" || utf8.RuneCountInString(input.Name) > 64 || input.Permissions & ^permissions.RoleMask != 0 || !colorPattern.MatchString(input.Color) {
 		return nil, ErrInvalid
 	}
 	serverID, id := path(r, "serverID"), path(r, "roleID")
@@ -85,10 +86,12 @@ func (s *Service) saveRole(r *http.Request, userID int64) (any, error) {
 	if duplicate {
 		return nil, ErrConflict
 	}
+	legacyBits := input.Permissions & permissions.LegacyRoleMask
+	voiceBits := input.Permissions & permissions.VoiceModerationMask
 	if id == 0 {
-		err = tx.QueryRowContext(r.Context(), `INSERT INTO server_roles(server_id,name,color,permissions) VALUES(?,?,?,?) RETURNING id`, serverID, input.Name, input.Color, input.Permissions).Scan(&id)
+		err = tx.QueryRowContext(r.Context(), `INSERT INTO server_roles(server_id,name,color,permissions,voice_permissions) VALUES(?,?,?,?,?) RETURNING id`, serverID, input.Name, input.Color, legacyBits, voiceBits).Scan(&id)
 	} else {
-		err = tx.QueryRowContext(r.Context(), `UPDATE server_roles SET name=?,color=?,permissions=? WHERE id=? AND server_id=? RETURNING id`, input.Name, input.Color, input.Permissions, id, serverID).Scan(&id)
+		err = tx.QueryRowContext(r.Context(), `UPDATE server_roles SET name=?,color=?,permissions=?,voice_permissions=? WHERE id=? AND server_id=? RETURNING id`, input.Name, input.Color, legacyBits, voiceBits, id, serverID).Scan(&id)
 	}
 	if err != nil {
 		return nil, err
@@ -198,7 +201,7 @@ func (s *Service) previewRole(r *http.Request, userID int64) (any, error) {
 		return nil, err
 	}
 	var bits int
-	if err = tx.QueryRowContext(r.Context(), `SELECT permissions FROM server_roles WHERE id=? AND server_id=?`, id, serverID).Scan(&bits); err != nil {
+	if err = tx.QueryRowContext(r.Context(), `SELECT permissions | voice_permissions FROM server_roles WHERE id=? AND server_id=?`, id, serverID).Scan(&bits); err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(r.Context(), `SELECT c.id,c.name,CASE WHEN c.is_news=1 THEN 'news' ELSE c.kind END FROM channels c WHERE c.server_id=? AND (? & 1)<>0 AND (c.access_restricted=0 OR EXISTS(SELECT 1 FROM channel_role_grants g WHERE g.channel_id=c.id AND g.role='member') OR EXISTS(SELECT 1 FROM channel_custom_role_grants g WHERE g.channel_id=c.id AND g.role_id=?)) ORDER BY c.position,c.id`, serverID, bits, id)
