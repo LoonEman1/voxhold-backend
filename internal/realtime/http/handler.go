@@ -566,10 +566,20 @@ func (h *Handler) serveConnection(
 	select {
 	case connectionError = <-readErrors:
 	case connectionError = <-writeErrors:
+		// The writer can see a closed socket before the reader returns the
+		// peer's close frame. Give the reader a chance to report its status.
+		if connectionError != nil && websocket.CloseStatus(connectionError) == -1 {
+			select {
+			case readError := <-readErrors:
+				if websocket.CloseStatus(readError) != -1 {
+					connectionError = readError
+				}
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
 	}
 
 	cancel()
-	client.Close()
 
 	if connectionError == nil {
 		return
@@ -578,6 +588,9 @@ func (h *Handler) serveConnection(
 	closeStatus := websocket.CloseStatus(
 		connectionError,
 	)
+	if !errors.Is(connectionError, context.Canceled) && (closeStatus == -1 || closeStatus == websocket.StatusAbnormalClosure || closeStatus == 4000) {
+		h.hub.Disconnect(client)
+	}
 
 	if errors.Is(connectionError, context.Canceled) ||
 		closeStatus == websocket.StatusNormalClosure ||
@@ -618,6 +631,7 @@ func (h *Handler) readLoop(
 		}
 
 		if !allowEvent() {
+			client.CloseWithReason("event rate limit exceeded")
 			_ = connection.Close(
 				websocket.StatusPolicyViolation,
 				"event rate limit exceeded",
@@ -634,6 +648,7 @@ func (h *Handler) readLoop(
 			}
 		}
 		if relayCount > 0 && !relayBudget.AllowN(time.Now(), relayCount) {
+			client.CloseWithReason("e2ee relay rate limit exceeded")
 			_ = connection.Close(websocket.StatusPolicyViolation, "e2ee relay rate limit exceeded")
 			return errors.New("E2EE recipient rate limit exceeded")
 		}
@@ -714,6 +729,7 @@ func (h *Handler) writeLoopWithPings(ctx context.Context, connection *websocket.
 			authenticatedUserID, err := h.authenticator.Authenticate(authContext, sessionToken)
 			cancel()
 			if errors.Is(err, account.ErrUnauthorized) || (err == nil && authenticatedUserID != client.UserID()) {
+				client.CloseWithReason("session expired or revoked")
 				_ = connection.Close(websocket.StatusPolicyViolation, "session expired or revoked")
 				return nil
 			}

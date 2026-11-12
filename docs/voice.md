@@ -74,6 +74,14 @@ members receive these events when voice state changes:
 - `voice.state_updated`
 - `voice.participant_left`
 
+Participants in snapshots and state events may have `reconnecting: true`
+while WebRTC is recovering. After an unexpected WebSocket disconnect, the
+server retains the participant in the roster for up to one minute. A client
+rejoining the same channel can send its previous `connection_id` as
+`resume_connection_id` in `voice.join`. Observers receive
+`voice.participant_left` with reason `reconnected` for the old connection,
+followed by `voice.state_updated` for the replacement connection.
+
 Mute or deafen the current connection with:
 
 ```json

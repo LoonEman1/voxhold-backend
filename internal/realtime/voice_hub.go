@@ -73,10 +73,11 @@ func (h *Hub) JoinVoiceWithOptions(client *Client, data VoiceJoinData, serverMut
 	result := h.voice.join(client, data, serverMute)
 
 	if result.previous != nil {
-		h.publishVoiceLeft(
-			*result.previous,
-			client,
-		)
+		left := newVoiceLeftData(*result.previous)
+		if result.resumed {
+			left.Reason = "reconnected"
+		}
+		h.publishToServerExcept(left.ServerID, client, OutgoingEvent{Type: EventVoiceParticipantLeft, Data: left})
 	}
 
 	if result.replaced != nil {
@@ -149,13 +150,15 @@ func (h *Hub) DisconnectVoiceParticipant(client *Client, expected VoiceParticipa
 	if !active || current.generation != expected.generation {
 		return false
 	}
-	left, ok := h.LeaveVoice(client)
+	participant, ok := h.leaveVoice(client)
 	if !ok {
 		return false
 	}
+	left := newVoiceLeftData(participant)
 	left.Reason = reason
 	left.DestinationChannelID = destination
-	return h.SendToConnection(client.ConnectionID(), OutgoingEvent{Type: EventVoiceLeft, Data: left})
+	h.SendToConnection(client.ConnectionID(), OutgoingEvent{Type: EventVoiceLeft, Data: left})
+	return true
 }
 
 func (h *Hub) UpdateVoiceState(
@@ -167,6 +170,7 @@ func (h *Hub) UpdateVoiceState(
 	if client == nil {
 		return VoiceParticipantData{}, false
 	}
+	defer h.mediaTransitions.Lock(client.UserID())()
 
 	participant, changed, exists := h.voice.update(
 		client,
@@ -195,6 +199,10 @@ func (h *Hub) UpdateVoiceState(
 func (h *Hub) LeaveVoice(
 	client *Client,
 ) (VoiceLeftData, bool) {
+	if client == nil {
+		return VoiceLeftData{}, false
+	}
+	defer h.mediaTransitions.Lock(client.UserID())()
 	participant, exists := h.leaveVoice(client)
 	if !exists {
 		return VoiceLeftData{}, false

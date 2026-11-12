@@ -12,6 +12,24 @@ func NewVoiceSignalSink(hub *Hub) *VoiceSignalSink {
 	return &VoiceSignalSink{hub: hub}
 }
 
+func (s *VoiceSignalSink) SessionRecoveryHandler(connectionID string) func(bool) {
+	client := s.hub.clientByConnectionID(connectionID)
+	if client == nil {
+		return func(bool) {}
+	}
+	participant, exists := s.hub.voice.current(client)
+	return func(reconnecting bool) {
+		if !exists {
+			return
+		}
+		defer s.hub.mediaTransitions.Lock(client.UserID())()
+		current, changed := s.hub.voice.setReconnecting(client, participant.generation, reconnecting)
+		if changed {
+			s.hub.publishToServerExcept(current.ServerID, client, OutgoingEvent{Type: EventVoiceStateUpdated, Data: current})
+		}
+	}
+}
+
 // SessionFailureHandler snapshots the logical join, not just its WebSocket ID.
 // A delayed failure of an old PeerConnection must not remove a replacement.
 func (s *VoiceSignalSink) SessionFailureHandler(connectionID string) func(string) {
@@ -26,7 +44,7 @@ func (s *VoiceSignalSink) SessionFailureHandler(connectionID string) func(string
 		if !exists || !active || current.generation != participant.generation {
 			return
 		}
-		s.CloseVoice(connectionID, reason)
+		s.closeVoice(client, reason)
 	}
 }
 
@@ -69,10 +87,14 @@ func (s *VoiceSignalSink) CloseVoice(
 	if client == nil {
 		return
 	}
+	defer s.hub.mediaTransitions.Lock(client.UserID())()
+	s.closeVoice(client, reason)
+}
 
-	s.hub.LeaveVoice(client)
+func (s *VoiceSignalSink) closeVoice(client *Client, reason string) {
+	s.hub.leaveVoice(client)
 	s.hub.SendToConnection(
-		connectionID,
+		client.ConnectionID(),
 		OutgoingEvent{
 			Type: EventVoiceWebRTCClosed,
 			Data: VoiceWebRTCClosedData{

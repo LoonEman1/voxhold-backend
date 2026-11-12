@@ -8,7 +8,7 @@ func (h *Hub) SetRolePermissionLoader(loader func(int64, int64) (int, error)) {
 // Permission revocation also applies to media already running.
 func (h *Hub) RefreshRolePermissions(serverID int64) {
 	h.channelAccessMu.Lock()
-	clients := h.clientsForServer(serverID)
+	clients := append(h.clientsForServer(serverID), h.voice.retainedClients(serverID)...)
 	for _, client := range clients {
 		unlock := h.mediaTransitions.Lock(client.UserID())
 		if h.rolePermissions != nil {

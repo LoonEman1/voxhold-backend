@@ -80,6 +80,11 @@ func (h *Hub) StartStreamWithRenditions(
 		return StreamData{}, ErrStreamUnavailable
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	select {
+	case <-client.Done():
+		return StreamData{}, ErrStreamVoiceRequired
+	default:
+	}
 	if !client.canAccessChannel(channelID) {
 		return StreamData{}, ErrStreamVoiceRequired
 	}
@@ -170,6 +175,11 @@ func (h *Hub) WatchStreamWithCapabilities(
 		return StreamWatchingData{}, ErrStreamUnavailable
 	}
 	defer h.mediaTransitions.Lock(client.UserID())()
+	select {
+	case <-client.Done():
+		return StreamWatchingData{}, ErrStreamVoiceRequired
+	default:
+	}
 	if !client.canAccessChannel(channelID) {
 		return StreamWatchingData{}, ErrStreamVoiceRequired
 	}

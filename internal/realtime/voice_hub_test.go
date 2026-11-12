@@ -1,6 +1,75 @@
 package realtime
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestVoiceRemainsVisibleDuringTransportReconnect(t *testing.T) {
+	hub := NewHub()
+	t.Cleanup(hub.Close)
+	participant := NewClient(1, "participant", []int64{10})
+	observer := NewClient(2, "observer", []int64{10})
+	hub.Register(participant)
+	hub.Register(observer)
+	hub.JoinVoice(participant, 10, 100, false, false)
+	drainOutgoingEvents(observer)
+
+	hub.Disconnect(participant)
+	hub.Unregister(participant) // WebSocket handler's deferred cleanup.
+	if event := nextOutgoingEvent(t, observer); event.Type != EventVoiceStateUpdated || !event.Data.(VoiceParticipantData).Reconnecting {
+		t.Fatalf("expected reconnecting participant, got %+v", event)
+	}
+	if roster := hub.voice.snapshotForServers([]int64{10}); len(roster) != 1 || !roster[0].Reconnecting {
+		t.Fatalf("unexpected roster while disconnected: %+v", roster)
+	}
+	drainOutgoingEvents(observer)
+
+	replacement := NewClient(1, "participant", []int64{10})
+	hub.Register(replacement)
+	hub.JoinVoice(replacement, 10, 100, false, false)
+	if event := nextOutgoingEvent(t, observer); event.Type != EventVoiceParticipantLeft || event.Data.(VoiceLeftData).Reason != "reconnected" {
+		t.Fatalf("expected old connection to be replaced, got %+v", event)
+	}
+	if event := nextOutgoingEvent(t, observer); event.Type != EventVoiceStateUpdated || event.Data.(VoiceParticipantData).ConnectionID != replacement.ConnectionID() {
+		t.Fatalf("expected replacement voice state, got %+v", event)
+	}
+	NewVoiceSignalSink(hub).SessionRecoveryHandler(replacement.ConnectionID())(false)
+	if event := nextOutgoingEvent(t, observer); event.Type != EventVoiceStateUpdated || event.Data.(VoiceParticipantData).Reconnecting {
+		t.Fatalf("expected healthy participant, got %+v", event)
+	}
+	if clients := hub.voice.retainedClients(10); len(clients) != 0 {
+		t.Fatalf("retained clients after rejoin: %d", len(clients))
+	}
+}
+
+func TestVoiceReconnectGraceExpires(t *testing.T) {
+	hub := NewHub()
+	t.Cleanup(hub.Close)
+	participant := NewClient(1, "participant", []int64{10})
+	observer := NewClient(2, "observer", []int64{10})
+	hub.Register(participant)
+	hub.Register(observer)
+	hub.JoinVoice(participant, 10, 100, false, false)
+	drainOutgoingEvents(observer)
+
+	unlock := hub.mediaTransitions.Lock(participant.UserID())
+	hub.unregister(participant, time.Millisecond)
+	drainOutgoingEvents(observer)
+	unlock()
+	deadline := time.After(time.Second)
+	for observer.QueueStats().MediaPending == 0 {
+		select {
+		case <-observer.OutgoingReady():
+		case <-deadline:
+			t.Fatal("reconnect grace did not expire")
+		}
+	}
+	assertVoiceLeftEvent(t, observer, 1, 10, 100)
+	if roster := hub.voice.snapshotForServers([]int64{10}); len(roster) != 0 {
+		t.Fatalf("voice roster after grace period: %+v", roster)
+	}
+}
 
 func TestHubVoiceLifecycle(t *testing.T) {
 	hub := NewHub()
