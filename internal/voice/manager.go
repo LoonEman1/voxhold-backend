@@ -94,9 +94,9 @@ func NewManager(
 	settingEngine := webrtc.SettingEngine{}
 	settingEngine.SetICEUDPMux(udpMux)
 	settingEngine.SetICETimeouts(
-		10*time.Second,
+		3*time.Second,
 		30*time.Second,
-		2*time.Second,
+		time.Second,
 	)
 
 	if config.PublicIP != "" {

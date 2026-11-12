@@ -20,10 +20,11 @@ import (
 )
 
 type session struct {
-	onFailure func(string)
-	manager   *Manager
-	room      *room
-	peer      *webrtc.PeerConnection
+	onFailure  func(string)
+	onRecovery func(bool)
+	manager    *Manager
+	room       *room
+	peer       *webrtc.PeerConnection
 
 	connectionID string
 	userID       int64
@@ -45,6 +46,7 @@ type session struct {
 	closeOnce          sync.Once
 	handshake          *mediahandshake.Deadline
 	recovery           *webrtcrecovery.Controller
+	connectionStateMu  sync.Mutex
 }
 
 func newSession(
@@ -72,9 +74,9 @@ func newSession(
 		videoBitrate: newAudioBitrateLimiter(4000),
 		recovery: webrtcrecovery.New(
 			webrtcrecovery.Policy{
-				InitialDelay: 2 * time.Second,
-				RetryDelay:   8 * time.Second,
-				MaxAttempts:  4,
+				InitialDelay: 750 * time.Millisecond,
+				RetryDelay:   4 * time.Second,
+				MaxAttempts:  7,
 			},
 		),
 	}
@@ -84,6 +86,9 @@ func newSession(
 	value.onFailure = func(reason string) { manager.sink.CloseVoice(connectionID, reason) }
 	if sink, ok := manager.sink.(interface{ SessionFailureHandler(string) func(string) }); ok {
 		value.onFailure = sink.SessionFailureHandler(connectionID)
+	}
+	if sink, ok := manager.sink.(interface{ SessionRecoveryHandler(string) func(bool) }); ok {
+		value.onRecovery = sink.SessionRecoveryHandler(connectionID)
 	}
 	value.selfMute.Store(selfMute)
 	value.selfDeaf.Store(selfDeaf)
@@ -488,16 +493,30 @@ func (s *session) close() {
 func (s *session) handleConnectionState(
 	state webrtc.PeerConnectionState,
 ) {
+	s.connectionStateMu.Lock()
+	defer s.connectionStateMu.Unlock()
+	if s.closed.Load() || s.peer.ConnectionState() != state {
+		return
+	}
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
 		s.handshake.Stop()
 		s.recovery.Stop()
+		if s.onRecovery != nil {
+			s.onRecovery(false)
+		}
 
 	case webrtc.PeerConnectionStateDisconnected:
 		s.startRecovery(false)
+		if s.onRecovery != nil {
+			s.onRecovery(true)
+		}
 
 	case webrtc.PeerConnectionStateFailed:
 		s.startRecovery(true)
+		if s.onRecovery != nil {
+			s.onRecovery(true)
+		}
 
 	case webrtc.PeerConnectionStateClosed:
 		if !s.closed.Load() {

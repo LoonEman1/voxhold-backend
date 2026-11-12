@@ -6,7 +6,7 @@ func (h *Hub) HasVoiceParticipant(userID, serverID, channelID int64) bool {
 	h.voice.mu.RLock()
 	defer h.voice.mu.RUnlock()
 	client := h.voice.byUser[userID]
-	if client == nil {
+	if client == nil || h.voice.retained[client] != nil {
 		return false
 	}
 	participant, ok := h.voice.byClient[client]

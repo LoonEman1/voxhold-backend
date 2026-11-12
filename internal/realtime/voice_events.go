@@ -32,11 +32,12 @@ const (
 )
 
 type VoiceJoinData struct {
-	ServerID     int64 `json:"server_id"`
-	ChannelID    int64 `json:"channel_id"`
-	SelfMute     bool  `json:"self_mute"`
-	SelfDeaf     bool  `json:"self_deaf"`
-	SupportsMove bool  `json:"supports_move,omitempty"`
+	ServerID           int64  `json:"server_id"`
+	ChannelID          int64  `json:"channel_id"`
+	SelfMute           bool   `json:"self_mute"`
+	SelfDeaf           bool   `json:"self_deaf"`
+	SupportsMove       bool   `json:"supports_move,omitempty"`
+	ResumeConnectionID string `json:"resume_connection_id,omitempty"`
 	// E2EEDeviceID is set only by clients joining an encrypted channel.
 	E2EEDeviceID string `json:"e2ee_device_id,omitempty"`
 }
@@ -68,6 +69,7 @@ type VoiceParticipantData struct {
 	SelfVideo    bool   `json:"self_video,omitempty"`
 	ServerMute   bool   `json:"server_mute,omitempty"`
 	SupportsMove bool   `json:"supports_move,omitempty"`
+	Reconnecting bool   `json:"reconnecting,omitempty"`
 	// E2EEDeviceID tells the other members whose device key wraps this
 	// participant's sender key.
 	E2EEDeviceID string `json:"e2ee_device_id,omitempty"`

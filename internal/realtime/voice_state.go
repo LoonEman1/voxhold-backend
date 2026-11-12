@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"sync"
+	"time"
 )
 
 type voiceJoinResult struct {
@@ -11,6 +12,7 @@ type voiceJoinResult struct {
 	participants []VoiceParticipantData
 	previous     *VoiceParticipantData
 	replaced     *Client
+	resumed      bool
 	joined       bool
 	updated      bool
 }
@@ -21,6 +23,7 @@ type voiceState struct {
 	byChannel      map[int64]map[*Client]VoiceParticipantData
 	byClient       map[*Client]VoiceParticipantData
 	byUser         map[int64]*Client
+	retained       map[*Client]*time.Timer
 }
 
 func newVoiceState() *voiceState {
@@ -30,6 +33,7 @@ func newVoiceState() *voiceState {
 		),
 		byClient: make(map[*Client]VoiceParticipantData),
 		byUser:   make(map[int64]*Client),
+		retained: make(map[*Client]*time.Timer),
 	}
 }
 
@@ -66,8 +70,10 @@ func (s *voiceState) join(
 
 		result.updated =
 			previous.SelfMute != data.SelfMute || previous.SelfDeaf != data.SelfDeaf ||
-				previous.ServerMute != serverMute || previous.SupportsMove != data.SupportsMove
+				previous.ServerMute != serverMute || previous.SupportsMove != data.SupportsMove ||
+				previous.Reconnecting
 		result.participant.SelfVideo = previous.SelfVideo
+		result.participant.Reconnecting = previous.Reconnecting
 
 		s.byClient[client] = result.participant
 		s.byChannel[channelID][client] = result.participant
@@ -91,6 +97,10 @@ func (s *voiceState) join(
 			previousCopy := previous
 			result.previous = &previousCopy
 			result.replaced = previousClient
+			result.resumed = previous.ServerID == data.ServerID && previous.ChannelID == channelID &&
+				previousClient.sessionKey == client.sessionKey &&
+				(s.retained[previousClient] != nil || previous.ConnectionID == data.ResumeConnectionID)
+			result.participant.Reconnecting = result.resumed
 			s.removeLocked(previousClient, previous)
 		}
 	}
@@ -104,10 +114,55 @@ func (s *voiceState) join(
 	room[client] = result.participant
 	s.byClient[client] = result.participant
 	s.byUser[client.UserID()] = client
-	result.joined = true
+	result.joined = !result.resumed
+	result.updated = result.resumed
 	result.participants = participantMapSnapshot(room)
 
 	return result
+}
+
+func (s *voiceState) retain(client *Client, grace time.Duration, expire func(uint64)) (VoiceParticipantData, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	participant, exists := s.byClient[client]
+	if exists {
+		participant.Reconnecting = true
+		s.byClient[client] = participant
+		s.byChannel[participant.ChannelID][client] = participant
+		s.retained[client] = time.AfterFunc(grace, func() { expire(participant.generation) })
+	}
+	return participant, exists
+}
+
+func (s *voiceState) retainedClients(serverID int64) []*Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	clients := make([]*Client, 0, len(s.retained))
+	for client := range s.retained {
+		if serverID == 0 || s.byClient[client].ServerID == serverID {
+			clients = append(clients, client)
+		}
+	}
+	return clients
+}
+
+func (s *voiceState) isRetained(client *Client) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.retained[client] != nil
+}
+
+func (s *voiceState) setReconnecting(client *Client, generation uint64, reconnecting bool) (VoiceParticipantData, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	participant, exists := s.byClient[client]
+	if !exists || participant.generation != generation || participant.Reconnecting == reconnecting || s.retained[client] != nil {
+		return VoiceParticipantData{}, false
+	}
+	participant.Reconnecting = reconnecting
+	s.byClient[client] = participant
+	s.byChannel[participant.ChannelID][client] = participant
+	return participant, true
 }
 
 func (s *voiceState) setServerMute(client *Client, muted bool) (VoiceParticipantData, bool) {
@@ -216,10 +271,7 @@ func (s *voiceState) removeChannel(
 
 	for client, participant := range room {
 		participants = append(participants, participant)
-		delete(s.byClient, client)
-		if s.byUser[participant.UserID] == client {
-			delete(s.byUser, participant.UserID)
-		}
+		s.removeLocked(client, participant)
 	}
 
 	delete(s.byChannel, channelID)
@@ -275,6 +327,10 @@ func (s *voiceState) removeLocked(
 	client *Client,
 	participant VoiceParticipantData,
 ) {
+	if timer := s.retained[client]; timer != nil {
+		timer.Stop()
+		delete(s.retained, client)
+	}
 	delete(s.byClient, client)
 	if s.byUser[participant.UserID] == client {
 		delete(s.byUser, participant.UserID)
@@ -341,7 +397,7 @@ func (s *voiceState) e2eeRecipient(sender *Client, channelID, recipientUserID in
 		return VoiceParticipantData{}, nil, false
 	}
 	to, ok := s.byClient[recipient]
-	if !ok || to.ChannelID != channelID || to.E2EEDeviceID == "" || to.E2EEDeviceID != recipientDeviceID {
+	if !ok || s.retained[recipient] != nil || to.ChannelID != channelID || to.E2EEDeviceID == "" || to.E2EEDeviceID != recipientDeviceID {
 		return VoiceParticipantData{}, nil, false
 	}
 	return from, recipient, true
