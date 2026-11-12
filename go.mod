@@ -1,6 +1,6 @@
 module voxhold-backend
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/coder/websocket v1.8.15
@@ -9,7 +9,7 @@ require (
 	github.com/pion/rtcp v1.2.20
 	github.com/pion/rtp v1.10.6
 	github.com/pion/webrtc/v4 v4.2.26
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/image v0.48.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.50.0

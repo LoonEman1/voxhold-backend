@@ -34,7 +34,7 @@ server events, administrative audit and personal calls are described in
 
 ## Technology
 
-- Go 1.27.3;
+- Go 1.27.4;
 - standard-library `net/http` routing;
 - SQLite through `modernc.org/sqlite` (no runtime CGO dependency);
 - `coder/websocket` for realtime transport;
