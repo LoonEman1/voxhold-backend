@@ -81,9 +81,13 @@ func (h *Hub) JoinVoiceWithOptions(client *Client, data VoiceJoinData, serverMut
 	}
 
 	if result.replaced != nil {
+		streamReason := "voice session moved to another connection"
+		if result.resumed {
+			streamReason = streamStopReasonVoiceReconnect
+		}
 		h.leaveStream(
 			result.replaced,
-			"voice session moved to another connection",
+			streamReason,
 		)
 		h.closeVoiceSession(result.replaced.ConnectionID())
 		h.SendToConnection(

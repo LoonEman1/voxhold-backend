@@ -352,7 +352,7 @@ func (h *Hub) unregister(client *Client, voiceGrace time.Duration) {
 	// It can no longer add a subscription after the cleanup snapshot.
 	if retained {
 		h.publishToServerExcept(participant.ServerID, client, OutgoingEvent{Type: EventVoiceStateUpdated, Data: participant})
-		h.leaveStream(client, "voice signaling connection was lost")
+		h.leaveStream(client, streamStopReasonVoiceReconnect)
 		h.closeVoiceSession(participant.ConnectionID)
 	} else {
 		h.leaveVoice(client)
@@ -396,7 +396,11 @@ func (h *Hub) revokeSessionKey(key [sha256.Size]byte) {
 			"session expired or revoked",
 		)
 		h.Unregister(client)
-		h.leaveVoice(client)
+		unlock := h.mediaTransitions.Lock(client.UserID())
+		if h.voice.isRetained(client) {
+			h.leaveVoice(client)
+		}
+		unlock()
 	}
 }
 

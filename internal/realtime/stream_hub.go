@@ -338,6 +338,8 @@ func (h *Hub) LeaveStream(
 	}, publisher
 }
 
+const streamStopReasonVoiceReconnect = "voice signaling connection was lost"
+
 func (h *Hub) leaveStream(
 	client *Client,
 	reason string,

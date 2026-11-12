@@ -13,10 +13,12 @@ func TestVoiceRemainsVisibleDuringTransportReconnect(t *testing.T) {
 	hub.Register(participant)
 	hub.Register(observer)
 	hub.JoinVoice(participant, 10, 100, false, false)
+	delayedFailure := NewVoiceSignalSink(hub).SessionFailureHandler(participant.ConnectionID())
 	drainOutgoingEvents(observer)
 
 	hub.Disconnect(participant)
 	hub.Unregister(participant) // WebSocket handler's deferred cleanup.
+	delayedFailure("WebRTC recovery exhausted")
 	if event := nextOutgoingEvent(t, observer); event.Type != EventVoiceStateUpdated || !event.Data.(VoiceParticipantData).Reconnecting {
 		t.Fatalf("expected reconnecting participant, got %+v", event)
 	}

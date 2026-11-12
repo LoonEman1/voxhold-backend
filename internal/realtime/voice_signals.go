@@ -41,7 +41,7 @@ func (s *VoiceSignalSink) SessionFailureHandler(connectionID string) func(string
 	return func(reason string) {
 		defer s.hub.mediaTransitions.Lock(client.UserID())()
 		current, active := s.hub.voice.current(client)
-		if !exists || !active || current.generation != participant.generation {
+		if !exists || !active || current.generation != participant.generation || s.hub.voice.isRetained(client) {
 			return
 		}
 		s.closeVoice(client, reason)

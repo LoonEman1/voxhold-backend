@@ -79,6 +79,8 @@ type ReadStateLister interface {
 }
 
 type VoiceMedia interface {
+	realtime.VoiceSessionCloser
+
 	RoomFull(channelID int64) bool
 
 	Join(
@@ -972,6 +974,12 @@ func (h *Handler) joinVoice(
 		)
 	}
 
+	// Signalling can close while the SFU is still creating the peer.
+	select {
+	case <-client.Done():
+		h.voiceMedia.Leave(client.ConnectionID())
+	default:
+	}
 	return nil
 }
 

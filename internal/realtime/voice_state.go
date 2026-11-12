@@ -98,7 +98,8 @@ func (s *voiceState) join(
 			result.previous = &previousCopy
 			result.replaced = previousClient
 			result.resumed = previous.ServerID == data.ServerID && previous.ChannelID == channelID &&
-				(previous.Reconnecting || (previous.ConnectionID == data.ResumeConnectionID && previousClient.sessionKey == client.sessionKey))
+				previousClient.sessionKey == client.sessionKey &&
+				(s.retained[previousClient] != nil || previous.ConnectionID == data.ResumeConnectionID)
 			result.participant.Reconnecting = result.resumed
 			s.removeLocked(previousClient, previous)
 		}
@@ -143,6 +144,12 @@ func (s *voiceState) retainedClients(serverID int64) []*Client {
 		}
 	}
 	return clients
+}
+
+func (s *voiceState) isRetained(client *Client) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.retained[client] != nil
 }
 
 func (s *voiceState) setReconnecting(client *Client, generation uint64, reconnecting bool) (VoiceParticipantData, bool) {
