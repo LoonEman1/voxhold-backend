@@ -54,7 +54,13 @@ func (h *Hub) RefreshChannelAccess(serverID int64) {
 	h.channelAccessMu.Lock()
 	defer h.channelAccessMu.Unlock()
 	clients := h.clientsForServer(serverID)
-	failed := h.reloadChannelAccess(clients)
+	retained := h.voice.retainedClients(serverID)
+	failed := h.reloadChannelAccess(append(slices.Clone(clients), retained...))
+	for _, client := range retained {
+		if current, ok := h.voice.current(client); ok && !client.canAccessChannel(current.ChannelID) {
+			h.leaveVoice(client)
+		}
+	}
 	for _, client := range clients {
 		if failed[client.UserID()] {
 			// Reconnect fetches a fresh snapshot after a transient database error.

@@ -331,9 +331,9 @@ func newSession(
 		publisherMIDs:    make(map[string]string),
 		recovery: webrtcrecovery.New(
 			webrtcrecovery.Policy{
-				InitialDelay: 2 * time.Second,
-				RetryDelay:   8 * time.Second,
-				MaxAttempts:  4,
+				InitialDelay: 750 * time.Millisecond,
+				RetryDelay:   4 * time.Second,
+				MaxAttempts:  7,
 			},
 		),
 	}

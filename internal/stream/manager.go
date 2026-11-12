@@ -99,9 +99,9 @@ func NewManager(config Config, sink SignalSink) (*Manager, error) {
 	settings := webrtc.SettingEngine{}
 	settings.SetICEUDPMux(udpMux)
 	settings.SetICETimeouts(
-		10*time.Second,
+		3*time.Second,
 		30*time.Second,
-		2*time.Second,
+		time.Second,
 	)
 	if config.PublicIP != "" {
 		err = settings.SetICEAddressRewriteRules(

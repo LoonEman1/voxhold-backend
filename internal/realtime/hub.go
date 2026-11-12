@@ -177,6 +177,9 @@ func (h *Hub) Close() {
 		client.CloseWithReason(CloseReasonServerShutdown)
 		h.Unregister(client)
 	}
+	for _, client := range h.voice.retainedClients(0) {
+		h.leaveVoice(client)
+	}
 }
 
 func (h *Hub) Register(client *Client) bool {
@@ -292,12 +295,40 @@ func (h *Hub) Unsubscribe(
 }
 
 func (h *Hub) Unregister(client *Client) {
+	h.unregister(client, 0)
+}
+
+// Disconnect retains voice presence while an unexpectedly disconnected client reconnects.
+func (h *Hub) Disconnect(client *Client) {
+	if client == nil {
+		return
+	}
+	defer h.LockChannelOperation()()
+	defer h.mediaTransitions.Lock(client.UserID())()
+	h.unregister(client, time.Minute)
+}
+
+func (h *Hub) unregister(client *Client, voiceGrace time.Duration) {
 	if client == nil {
 		return
 	}
 
 	client.Close()
 	h.clientsMu.Lock()
+	if _, registered := h.clients[client]; !registered {
+		h.clientsMu.Unlock()
+		return
+	}
+	var participant VoiceParticipantData
+	var retained bool
+	if voiceGrace > 0 && !h.closed && client.CloseReason() == "" {
+		participant, retained = h.voice.retain(client, voiceGrace, func(generation uint64) {
+			defer h.mediaTransitions.Lock(client.UserID())()
+			if current, exists := h.voice.current(client); exists && current.generation == generation {
+				h.leaveVoice(client)
+			}
+		})
+	}
 	delete(h.clients, client)
 	for _, serverID := range client.serverIDs() {
 		h.unindexServerLocked(serverID, client)
@@ -319,7 +350,13 @@ func (h *Hub) Unregister(client *Client) {
 
 	// Detach the client first, waiting for any in-flight Subscribe to finish.
 	// It can no longer add a subscription after the cleanup snapshot.
-	h.leaveVoice(client)
+	if retained {
+		h.publishToServerExcept(participant.ServerID, client, OutgoingEvent{Type: EventVoiceStateUpdated, Data: participant})
+		h.leaveStream(client, streamStopReasonVoiceReconnect)
+		h.closeVoiceSession(participant.ConnectionID)
+	} else {
+		h.leaveVoice(client)
+	}
 	for _, channelID := range client.subscriptionIDs() {
 		h.Unsubscribe(client, channelID)
 	}
@@ -347,6 +384,11 @@ func (h *Hub) revokeSessionKey(key [sha256.Size]byte) {
 	clients := clientSetSnapshot(
 		h.clientsBySession[key],
 	)
+	for _, client := range h.voice.retainedClients(0) {
+		if client.sessionKey == key {
+			clients = append(clients, client)
+		}
+	}
 	h.clientsMu.RUnlock()
 
 	for _, client := range clients {
@@ -354,6 +396,11 @@ func (h *Hub) revokeSessionKey(key [sha256.Size]byte) {
 			"session expired or revoked",
 		)
 		h.Unregister(client)
+		unlock := h.mediaTransitions.Lock(client.UserID())
+		if h.voice.isRetained(client) {
+			h.leaveVoice(client)
+		}
+		unlock()
 	}
 }
 
@@ -375,7 +422,6 @@ func (h *Hub) RevokeUserFromServer(
 	)
 	h.clientsMu.RUnlock()
 	failed := h.reloadChannelAccess(userClients)
-
 	h.broadcastToClients(
 		append(serverClients, userClients...),
 		OutgoingEvent{
@@ -387,15 +433,17 @@ func (h *Hub) RevokeUserFromServer(
 		},
 	)
 
+	unlock := h.mediaTransitions.Lock(userID)
+	if client := h.voice.userClient(userID); client != nil {
+		h.leaveVoiceForServer(client, serverID)
+	}
+	unlock()
 	for _, client := range userClients {
 		if failed[client.UserID()] {
 			client.CloseWithReason(CloseReasonServerShutdown)
 			h.Unregister(client)
 			continue
 		}
-		unlock := h.mediaTransitions.Lock(client.UserID())
-		h.leaveVoiceForServer(client, serverID)
-		unlock()
 		h.removeClientServer(client, serverID, false)
 		h.unsubscribeFromServer(
 			client,

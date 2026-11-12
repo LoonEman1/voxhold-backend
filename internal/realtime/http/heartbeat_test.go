@@ -40,6 +40,65 @@ func TestPeriodicAuthRejectsRevokedSessionImmediately(t *testing.T) {
 	testHeartbeatWriter(t, []error{account.ErrUnauthorized}, websocket.StatusPolicyViolation)
 }
 
+func TestVoiceRetentionDependsOnWebSocketClose(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status websocket.StatusCode
+		retain bool
+	}{
+		{"normal close", websocket.StatusNormalClosure, false},
+		{"client detected network loss", 4000, true},
+		{"transport lost", 0, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hub := realtime.NewHub()
+			t.Cleanup(hub.Close)
+			client := realtime.NewClient(2, "test", []int64{1})
+			hub.Register(client)
+			hub.JoinVoice(client, 1, 1, false, false)
+			handler := &Handler{hub: hub}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			finished := make(chan error, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := websocket.Accept(w, r, nil)
+				if err == nil {
+					defer conn.CloseNow()
+					handler.serveConnection(ctx, conn, client, "test")
+					hub.Unregister(client)
+				}
+				finished <- err
+			}))
+			defer server.Close()
+			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			if test.status == 0 {
+				err = conn.CloseNow()
+			} else {
+				err = conn.Close(test.status, "")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-finished:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			participant, exists := hub.CurrentVoice(client)
+			if exists != test.retain || participant.Reconnecting != test.retain {
+				t.Fatalf("voice after close: exists=%t reconnecting=%t, want both %t", exists, participant.Reconnecting, test.retain)
+			}
+		})
+	}
+}
+
 func testHeartbeatWriter(t *testing.T, outcomes []error, want websocket.StatusCode) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

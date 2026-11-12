@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.27.3
+ARG GO_VERSION=1.27.4
 
 # The builder always runs natively and cross-compiles for the target platform:
 # the binaries are pure Go (CGO_ENABLED=0), so ARM64 images no longer compile
