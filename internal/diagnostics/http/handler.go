@@ -114,6 +114,15 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		SessionID: r.URL.Query().Get("session_id"),
 		Category:  r.URL.Query().Get("category"),
 	}
+	if beforeID, beforeCreatedAt := r.URL.Query().Get("before_id"), r.URL.Query().Get("before_created_at"); beforeID != "" || beforeCreatedAt != "" {
+		id, idErr := strconv.ParseInt(beforeID, 10, 64)
+		createdAt, timeErr := strconv.ParseInt(beforeCreatedAt, 10, 64)
+		if idErr != nil || timeErr != nil || id <= 0 || createdAt <= 0 {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid diagnostics cursor")
+			return
+		}
+		filter.Before = diagnostics.Cursor{ID: id, CreatedAt: createdAt}
+	}
 	var err error
 	if value := r.URL.Query().Get("since"); value != "" {
 		filter.Since, err = strconv.ParseInt(value, 10, 64)
@@ -148,10 +157,16 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	for _, event := range events {
 		response = append(response, newEventResponse(event))
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"retention_seconds": int64(diagnostics.Retention.Seconds()),
-		"events":            response,
-	})
+	result := map[string]any{"retention_seconds": int64(diagnostics.Retention.Seconds()), "events": response}
+	limit := filter.Limit
+	if limit == 0 {
+		limit = diagnostics.DefaultListLimit
+	}
+	if len(events) == limit {
+		last := events[len(events)-1]
+		result["next_cursor"] = diagnostics.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
 type eventResponse struct {

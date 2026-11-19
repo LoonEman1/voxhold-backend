@@ -30,39 +30,7 @@ func (r *Repository) InsertBatch(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	cutoff := time.Now().Add(-diagnostics.Retention).Unix()
-	var currentCount int
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*)
-		 FROM client_diagnostic_events
-		 WHERE user_id = ? AND created_at >= ?`,
-		userID,
-		cutoff,
-	).Scan(&currentCount); err != nil {
-		return 0, fmt.Errorf("count user client diagnostics: %w", err)
-	}
-
-	remaining := diagnostics.MaxEventsPerUser - currentCount
-	if remaining < 0 {
-		remaining = 0
-	}
-	accepted := min(len(input.Events), remaining)
-	// An exact trigger-maintained count avoids scanning all retained rows on
-	// every upload. Eviction is bounded by the incoming batch size.
-	var stored int
-	if err := tx.QueryRowContext(ctx, "SELECT event_count FROM client_diagnostic_storage WHERE id = 1").Scan(&stored); err != nil {
-		return 0, fmt.Errorf("read diagnostic storage count: %w", err)
-	}
-	if excess := stored + accepted - diagnostics.MaxStoredEvents; excess > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM client_diagnostic_events WHERE id IN (
-			SELECT id FROM client_diagnostic_events ORDER BY created_at, id LIMIT ?
-		)`, excess); err != nil {
-			return 0, fmt.Errorf("make diagnostic storage space: %w", err)
-		}
-	}
-	if accepted > 0 {
-		statement, err := tx.PrepareContext(ctx, `
+	statement, err := tx.PrepareContext(ctx, `
 		INSERT INTO client_diagnostic_events (
 			client_timestamp_ms,
 			user_id,
@@ -75,34 +43,53 @@ func (r *Repository) InsertBatch(
 			details_json
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`)
-		if err != nil {
-			return 0, fmt.Errorf("prepare client diagnostic insert: %w", err)
-		}
-		defer statement.Close()
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("prepare client diagnostic insert: %w", err)
+	}
+	defer statement.Close()
 
-		for _, event := range input.Events[:accepted] {
-			if _, err := statement.ExecContext(
-				ctx,
-				event.ClientTimestampMS,
-				userID,
-				input.SessionID,
-				input.ClientVersion,
-				input.Platform,
-				event.Category,
-				event.Name,
-				event.Level,
-				event.DetailsJSON,
-			); err != nil {
-				return 0, fmt.Errorf("insert client diagnostic: %w", err)
-			}
+	for _, event := range input.Events {
+		if _, err := statement.ExecContext(
+			ctx,
+			event.ClientTimestampMS,
+			userID,
+			input.SessionID,
+			input.ClientVersion,
+			input.Platform,
+			event.Category,
+			event.Name,
+			event.Level,
+			event.DetailsJSON,
+		); err != nil {
+			return 0, fmt.Errorf("insert client diagnostic: %w", err)
+		}
+	}
+
+	var stored int64
+	if err := tx.QueryRowContext(ctx, "SELECT total_bytes FROM client_diagnostic_storage WHERE id = 1").Scan(&stored); err != nil {
+		return 0, fmt.Errorf("read diagnostic storage size: %w", err)
+	}
+	if excess := stored - diagnostics.MaxStoredBytes; excess > 0 {
+		// Find the smallest oldest-first prefix that frees enough bytes.
+		if _, err := tx.ExecContext(ctx, `
+			WITH oldest AS (
+				SELECT created_at, id, SUM(byte_size) OVER (
+					ORDER BY created_at, id ROWS UNBOUNDED PRECEDING
+				) AS bytes_to_free
+				FROM client_diagnostic_events
+			)
+			DELETE FROM client_diagnostic_events WHERE (created_at, id) <= (
+				SELECT created_at, id FROM oldest WHERE bytes_to_free >= ? LIMIT 1
+			)`, excess); err != nil {
+			return 0, fmt.Errorf("make diagnostic storage space: %w", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit diagnostic batch: %w", err)
 	}
-	return accepted, nil
+	return len(input.Events), nil
 }
 
 // Cleanup keeps each write transaction small and runs outside request handling.
@@ -144,6 +131,10 @@ func (r *Repository) List(
 	if filter.Category != "" {
 		query.WriteString(" AND client_diagnostic_events.category = ?")
 		arguments = append(arguments, filter.Category)
+	}
+	if filter.Before.ID != 0 {
+		query.WriteString(" AND (client_diagnostic_events.created_at, client_diagnostic_events.id) < (?, ?)")
+		arguments = append(arguments, filter.Before.CreatedAt, filter.Before.ID)
 	}
 	query.WriteString(`
 	ORDER BY client_diagnostic_events.created_at DESC,

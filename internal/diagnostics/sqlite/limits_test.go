@@ -8,7 +8,7 @@ import (
 	"voxhold-backend/internal/testdb"
 )
 
-func TestDiagnosticQuotaAndBoundedCleanup(t *testing.T) {
+func TestDiagnosticsAcceptNewEventsAfterOldUserQuotaAndPruneExpiredBatches(t *testing.T) {
 	db := testdb.Open(t)
 	seed := func(count int, at int64) {
 		t.Helper()
@@ -22,8 +22,8 @@ func TestDiagnosticQuotaAndBoundedCleanup(t *testing.T) {
 	seed(2000, time.Now().Unix())
 	repository := NewRepository(db)
 	accepted, err := repository.InsertBatch(context.Background(), 1, diagnostics.BatchInput{SessionID: "fixture", Events: []diagnostics.EventInput{{Category: "http", Name: "request_completed", Level: "info", DetailsJSON: "{}"}}})
-	if err != nil || accepted != 0 {
-		t.Fatalf("quota: %d %v", accepted, err)
+	if err != nil || accepted != 1 {
+		t.Fatalf("accepted: %d %v", accepted, err)
 	}
 	if _, err := db.Exec(`DELETE FROM client_diagnostic_events`); err != nil {
 		t.Fatal(err)
@@ -33,15 +33,15 @@ func TestDiagnosticQuotaAndBoundedCleanup(t *testing.T) {
 	if err := repository.Cleanup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var count, stored int
-	if err := db.QueryRow(`SELECT count(*) FROM client_diagnostic_events`).Scan(&count); err != nil {
+	var count, bytes, stored int
+	if err := db.QueryRow(`SELECT COUNT(*), SUM(byte_size) FROM client_diagnostic_events`).Scan(&count, &bytes); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`SELECT event_count FROM client_diagnostic_storage WHERE id=1`).Scan(&stored); err != nil {
+	if err := db.QueryRow(`SELECT total_bytes FROM client_diagnostic_storage WHERE id=1`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if count != 101 || stored != count {
-		t.Fatalf("cleanup batch: rows=%d counter=%d", count, stored)
+	if count != 101 || stored != bytes {
+		t.Fatalf("cleanup batch: rows=%d bytes=%d counter=%d", count, bytes, stored)
 	}
 	if err := repository.Cleanup(context.Background()); err != nil {
 		t.Fatal(err)
