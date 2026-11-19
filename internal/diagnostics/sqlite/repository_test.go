@@ -2,62 +2,15 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"voxhold-backend/internal/diagnostics"
-
-	_ "modernc.org/sqlite"
+	"voxhold-backend/internal/testdb"
 )
 
 func TestRepositoryStoresListsAndPrunesDiagnostics(t *testing.T) {
-	db, err := sql.Open("sqlite", "file:diagnostics-test?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-
-	const schema = `
-	PRAGMA foreign_keys = ON;
-	CREATE TABLE users (
-		id INTEGER PRIMARY KEY,
-		username TEXT NOT NULL,
-		deleted_at INTEGER
-	);
-	CREATE TABLE server_members (
-		server_id INTEGER NOT NULL,
-		user_id INTEGER NOT NULL,
-		role TEXT NOT NULL
-	);
-	CREATE TABLE client_diagnostic_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-		client_timestamp_ms INTEGER NOT NULL,
-		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-		session_id TEXT NOT NULL,
-		client_version TEXT NOT NULL,
-		platform TEXT NOT NULL,
-		category TEXT NOT NULL,
-		event_name TEXT NOT NULL,
-		level TEXT NOT NULL,
-		details_json TEXT NOT NULL
-	);
-	CREATE TABLE client_diagnostic_storage (id INTEGER PRIMARY KEY, event_count INTEGER NOT NULL);
-	INSERT INTO client_diagnostic_storage VALUES (1, 0);
-	CREATE TRIGGER diagnostic_storage_insert AFTER INSERT ON client_diagnostic_events BEGIN
-	 UPDATE client_diagnostic_storage SET event_count = event_count + 1;
-	END;
-	CREATE TRIGGER diagnostic_storage_delete AFTER DELETE ON client_diagnostic_events BEGIN
-	 UPDATE client_diagnostic_storage SET event_count = event_count - 1;
-	END;
-	INSERT INTO users (id, username) VALUES (1, 'owner');
-	INSERT INTO server_members (server_id, user_id, role) VALUES (10, 1, 'owner');
-	`
-	if _, err := db.Exec(schema); err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 
 	repository := NewRepository(db)
 	oldCreatedAt := time.Now().Add(-diagnostics.Retention - time.Minute).Unix()
@@ -106,13 +59,21 @@ func TestRepositoryStoresListsAndPrunesDiagnostics(t *testing.T) {
 
 	events, err := repository.List(context.Background(), diagnostics.ListFilter{
 		Since: now.Add(-time.Minute).Unix(),
-		Limit: 10,
+		Limit: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 || events[0].Username != "owner" {
+	if len(events) != 1 || events[0].Username != "owner" || events[0].Name != "voice_rtp_stats" {
 		t.Fatalf("unexpected diagnostics: %+v", events)
+	}
+	older, err := repository.List(context.Background(), diagnostics.ListFilter{
+		Since:  now.Add(-time.Minute).Unix(),
+		Limit:  1,
+		Before: diagnostics.Cursor{CreatedAt: events[0].CreatedAt, ID: events[0].ID},
+	})
+	if err != nil || len(older) != 1 || older[0].Name != "request_completed" {
+		t.Fatalf("unexpected second page: %+v, %v", older, err)
 	}
 
 	owner, err := repository.IsOwner(context.Background(), 1)
