@@ -12,8 +12,7 @@ const (
 	Retention          = 24 * time.Hour
 	MaxBatchEvents     = 64
 	MaxDetailsBytes    = 4 * 1024
-	MaxEventsPerUser   = 2_000
-	MaxStoredEvents    = 50_000
+	MaxStoredBytes     = 100_000_000
 	DefaultListLimit   = 1_000
 	MaxListLimit       = 5_000
 	MaxClientClockSkew = 10 * time.Minute
@@ -61,6 +60,12 @@ type ListFilter struct {
 	SessionID string
 	Category  string
 	Limit     int
+	Before    Cursor
+}
+
+type Cursor struct {
+	CreatedAt int64 `json:"created_at"`
+	ID        int64 `json:"id"`
 }
 
 type Repository interface {
@@ -164,6 +169,9 @@ func (s *Service) List(
 		filter.Limit = DefaultListLimit
 	}
 	if filter.Limit < 1 || filter.Limit > MaxListLimit {
+		return nil, ErrInvalidBatch
+	}
+	if filter.Before != (Cursor{}) && (filter.Before.CreatedAt <= 0 || filter.Before.ID <= 0) {
 		return nil, ErrInvalidBatch
 	}
 
